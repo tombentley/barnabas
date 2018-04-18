@@ -1,3 +1,6 @@
+:k8s-docs-version: v1-7
+:resources-link: https://{k8s-docs-version}.docs.kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/
+
 == Cluster Controller
 
 The cluster controller is in charge of deploying a Kafka cluster alongside a Zookeeper ensemble. As part of the Kafka cluster,
@@ -67,6 +70,18 @@ Default is determined by the value of the
 environment variable of the Cluster Controller.
 * `kafka-healthcheck-delay`: the initial delay for the liveness and readiness probes for each Kafka broker node. Default is 15
 * `kafka-healthcheck-timeout`: the timeout on the liveness and readiness probes for each Kafka broker node. Default is 5
+* `kafka-memory-request`: the memory request for Kafka containers, corresponding directly to Kubernetes'
+                          {resources-link}[`spec.containers[\].resources.requests.memory`] setting.
+                          Optional with no default.
+* `kafka-cpu-request`: the cpu request for Kafka containers, corresponding directly to Kubernetes'
+                       {resources-link}[`spec.containers[\].resources.requests.cpu`] setting.
+                        Optional with no default.
+* `kafka-memory-limit`: the memory request for Kafka containers, corresponding directly to Kubernetes'
+                          {resources-link}[`spec.containers[\].resources.limits.memory`] setting.
+                          Optional with no default.
+* `kafka-cpu-limit`: the cpu request for Kafka containers, corresponding directly to Kubernetes'
+                       {resources-link}[`spec.containers[\].resources.limits.cpu`] setting.
+                        Optional with no default.
 * `zookeeper-nodes`: number of Zookeeper nodes
 * `zookeeper-image`: the Docker image to use for the Zookeeper nodes.
 Default is determined by the value of the
@@ -74,6 +89,18 @@ Default is determined by the value of the
 environment variable of the Cluster Controller.
 * `zookeeper-healthcheck-delay`: the initial delay for the liveness and readiness probes for each Zookeeper node. Default is 15
 * `zookeeper-healthcheck-timeout`: the timeout on the liveness and readiness probes for each Zookeeper node. Default is 5
+* `zookeeper-memory-request`: the memory request for Zookeeper containers, corresponding directly to Kubernetes'
+                          {resources-link}[`spec.containers[\].resources.requests.memory`] setting.
+                          Optional with no default.
+* `zookeeper-cpu-request`: the cpu request for Zookeeper containers, corresponding directly to Kubernetes'
+                       {resources-link}[`spec.containers[\].resources.requests.cpu`] setting.
+                        Optional with no default.
+* `zookeeper-memory-limit`: the memory request for Zookeeper containers, corresponding directly to Kubernetes'
+                          {resources-link}[`spec.containers[\].resources.limits.memory`] setting.
+                          Optional with no default.
+* `zookeeper-cpu-limit`: the cpu request for Zookeeper containers, corresponding directly to Kubernetes'
+                       {resources-link}[`spec.containers[\].resources.limits.cpu`] setting.
+                        Optional with no default.
 * `KAFKA_DEFAULT_REPLICATION_FACTOR`: the default replication factors for automatically created topics. It sets the 
 `default.replication.factor` property in the properties configuration file used by Kafka broker nodes on startup. Default is 3
 * `KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR`: the replication factor for the offsets topic. It sets the  
@@ -266,6 +293,18 @@ Default is the namespace where the topic controller is running
 `topicMetadataMaxAttempts`:: The number of attempts for getting topics metadata from Kafka. The time between each attempt
  is defined as an exponential back-off. You might want to increase this value when topic creation could take more time due
  to its larger size (i.e. many partitions/replicas). Default `6`.
+* `memoryRequest`: the memory request for topic controller container, corresponding directly to Kubernetes'
+                          {resources-link}[`spec.containers[\].resources.requests.memory`] setting.
+                          Optional with no default.
+* `cpuRequest`: the cpu request for topic controller container, corresponding directly to Kubernetes'
+                       {resources-link}[`spec.containers[\].resources.requests.cpu`] setting.
+                        Optional with no default.
+* `memoryLimit`: the memory request for topic controller container, corresponding directly to Kubernetes'
+                          {resources-link}[`spec.containers[\].resources.limits.memory`] setting.
+                          Optional with no default.
+* `cpuLimit`: the cpu request for the topic controller container, corresponding directly to Kubernetes'
+                       {resources-link}[`spec.containers[\].resources.limits.cpu`] setting.
+                        Optional with no default.
 
 .Example Topic Controller JSON configuration
 [source,json]
@@ -289,6 +328,18 @@ environment variable of the Cluster Controller.
 If S2I is used (only on OpenShift), then it should be the related S2I image.
 * `healthcheck-delay`: the initial delay for the liveness and readiness probes for each Kafka Connect worker node. Default is 60
 * `healthcheck-timeout`: the timeout on the liveness and readiness probes for each Kafka Connect worker node. Default is 5
+* `memory-request`: the memory request for Kafka Connect containers, corresponding directly to Kubernetes'
+                          {resources-link}[`spec.containers[\].resources.requests.memory`] setting.
+                          Optional with no default.
+* `cpu-request`: the cpu request for Kafka Connect containers, corresponding directly to Kubernetes'
+                       {resources-link}[`spec.containers[\].resources.requests.cpu`] setting.
+                        Optional with no default.
+* `memory-limit`: the memory request for Kafka Connect containers, corresponding directly to Kubernetes'
+                          {resources-link}[`spec.containers[\].resources.limits.memory`] setting.
+                          Optional with no default.
+* `cpu-limit`: the cpu request for Kafka Connect containers, corresponding directly to Kubernetes'
+                       {resources-link}[`spec.containers[\].resources.limits.cpu`] setting.
+                        Optional with no default.
 * `KAFKA_CONNECT_BOOTSTRAP_SERVERS`: a list of host/port pairs to use for establishing the initial connection to the Kafka cluster.
 It sets the `bootstrap.servers` property in the properties configuration file used by Kafka Connect worker nodes on startup.
 Default is `my-cluster-kafka:9092`
