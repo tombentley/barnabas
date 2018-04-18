@@ -56,6 +56,10 @@ public class ZookeeperCluster extends AbstractModel {
     public static final String KEY_HEALTHCHECK_TIMEOUT = "zookeeper-healthcheck-timeout";
     public static final String KEY_METRICS_CONFIG = "zookeeper-metrics-config";
     public static final String KEY_STORAGE = "zookeeper-storage";
+    public static final String KEY_CPU_LIMIT = "zookeeper-cpu-limit";
+    public static final String KEY_CPU_REQUEST = "zookeeper-cpu-request";
+    public static final String KEY_MEMORY_LIMIT = "zookeeper-memory-limit";
+    public static final String KEY_MEMORY_REQUEST = "zookeeper-memory-request";
 
     // Zookeeper configuration keys
     private static final String KEY_ZOOKEEPER_NODE_COUNT = "ZOOKEEPER_NODE_COUNT";
@@ -127,6 +131,11 @@ public class ZookeeperCluster extends AbstractModel {
         String storageConfig = data.get(KEY_STORAGE);
         zk.setStorage(Storage.fromJson(new JsonObject(storageConfig)));
 
+        zk.setCpuLimit(data.get(KEY_CPU_LIMIT));
+        zk.setCpuRequest(data.get(KEY_CPU_REQUEST));
+        zk.setMemoryLimit(data.get(KEY_MEMORY_LIMIT));
+        zk.setMemoryRequest(data.get(KEY_MEMORY_REQUEST));
+
         return zk;
     }
 
@@ -190,6 +199,7 @@ public class ZookeeperCluster extends AbstractModel {
                 getVolumeMounts(),
                 createExecProbe(healthCheckPath, healthCheckInitialDelay, healthCheckTimeout),
                 createExecProbe(healthCheckPath, healthCheckInitialDelay, healthCheckTimeout),
+                resources(),
                 isOpenShift);
     }
 

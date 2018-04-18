@@ -22,6 +22,8 @@ import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
 import io.fabric8.kubernetes.api.model.Probe;
 import io.fabric8.kubernetes.api.model.ProbeBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.ResourceRequirements;
+import io.fabric8.kubernetes.api.model.ResourceRequirementsBuilder;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceBuilder;
 import io.fabric8.kubernetes.api.model.ServicePort;
@@ -88,6 +90,11 @@ public abstract class AbstractModel {
     public static final String VOLUME_NAME = "data";
     protected String metricsConfigVolumeName;
     protected String metricsConfigMountPath;
+
+    private String cpuLimit;
+    private String memoryLimit;
+    private String cpuRequest;
+    private String memoryRequest;
 
     /**
      * Constructor
@@ -397,6 +404,7 @@ public abstract class AbstractModel {
             List<VolumeMount> volumeMounts,
             Probe livenessProbe,
             Probe readinessProbe,
+            ResourceRequirements resources,
             boolean isOpenShift) {
 
         Map<String, String> annotations = new HashMap<>();
@@ -411,6 +419,7 @@ public abstract class AbstractModel {
                 .withPorts(ports)
                 .withLivenessProbe(livenessProbe)
                 .withReadinessProbe(readinessProbe)
+                .withResources(resources)
                 .build();
 
         List<Container> initContainers = new ArrayList<>();
@@ -477,7 +486,8 @@ public abstract class AbstractModel {
             Probe readinessProbe,
             DeploymentStrategy updateStrategy,
             Map<String, String> deploymentAnnotations,
-            Map<String, String> podAnnotations) {
+            Map<String, String> podAnnotations,
+            ResourceRequirements resources) {
 
         Container container = new ContainerBuilder()
                 .withName(name)
@@ -486,6 +496,7 @@ public abstract class AbstractModel {
                 .withPorts(ports)
                 .withLivenessProbe(livenessProbe)
                 .withReadinessProbe(readinessProbe)
+                .withResources(resources)
                 .build();
 
         Deployment dep = new DeploymentBuilder()
@@ -533,5 +544,43 @@ public abstract class AbstractModel {
             Collectors.toMap(EnvVar::getName, EnvVar::getValue,
                 // On duplicates, last in wins
                 (u, v) -> v));
+    }
+
+    protected ResourceRequirements resources() {
+        if (cpuLimit != null || memoryLimit != null
+                || cpuRequest != null || memoryRequest != null) {
+            ResourceRequirementsBuilder builder = new ResourceRequirementsBuilder();
+            if (cpuLimit != null) {
+                builder.addToLimits("cpu", new Quantity(cpuLimit));
+            }
+            if (memoryLimit != null) {
+                builder.addToLimits("memory", new Quantity(memoryLimit));
+            }
+            if (cpuRequest != null) {
+                builder.addToRequests("cpu", new Quantity(cpuRequest));
+            }
+            if (memoryRequest != null) {
+                builder.addToRequests("memory", new Quantity(memoryRequest));
+            }
+            return builder.build();
+        } else {
+            return null;
+        }
+    }
+
+    public void setCpuLimit(String cpuLimit) {
+        this.cpuLimit = cpuLimit;
+    }
+
+    public void setMemoryLimit(String memoryLimit) {
+        this.memoryLimit = memoryLimit;
+    }
+
+    public void setCpuRequest(String cpuRequest) {
+        this.cpuRequest = cpuRequest;
+    }
+
+    public void setMemoryRequest(String memoryRequest) {
+        this.memoryRequest = memoryRequest;
     }
 }

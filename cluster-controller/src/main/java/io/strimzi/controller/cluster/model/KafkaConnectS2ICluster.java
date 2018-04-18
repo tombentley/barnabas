@@ -62,6 +62,10 @@ public class KafkaConnectS2ICluster extends KafkaConnectCluster {
         Map<String, String> data = cm.getData();
         kafkaConnect.setReplicas(Integer.parseInt(data.getOrDefault(KEY_REPLICAS, String.valueOf(DEFAULT_REPLICAS))));
         kafkaConnect.setImage(data.getOrDefault(KEY_IMAGE, DEFAULT_IMAGE));
+        kafkaConnect.setCpuLimit(data.get(KEY_CPU_LIMIT));
+        kafkaConnect.setCpuRequest(data.get(KEY_CPU_REQUEST));
+        kafkaConnect.setMemoryLimit(data.get(KEY_MEMORY_LIMIT));
+        kafkaConnect.setMemoryRequest(data.get(KEY_MEMORY_REQUEST));
         kafkaConnect.setHealthCheckInitialDelay(Integer.parseInt(data.getOrDefault(KEY_HEALTHCHECK_DELAY, String.valueOf(DEFAULT_HEALTHCHECK_DELAY))));
         kafkaConnect.setHealthCheckTimeout(Integer.parseInt(data.getOrDefault(KEY_HEALTHCHECK_TIMEOUT, String.valueOf(DEFAULT_HEALTHCHECK_TIMEOUT))));
 

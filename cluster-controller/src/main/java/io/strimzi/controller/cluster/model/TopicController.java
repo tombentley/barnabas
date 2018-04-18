@@ -35,6 +35,10 @@ public class TopicController extends AbstractModel {
     private static final String RECONCILIATION_INTERVAL_FIELD_MS = "reconciliationIntervalMs";
     private static final String ZOOKEEPER_SESSION_TIMEOUT_FIELD_MS = "zookeeperSessionTimeoutMs";
     private static final String TOPIC_METADATA_MAX_ATTEMPTS_FIELD = "topicMetadataMaxAttempts";
+    private static final String CPU_LIMIT_FIELD = "cpuLimit";
+    private static final String CPU_REQUEST_FIELD = "cpuRequest";
+    private static final String MEMORY_LIMIT_FIELD = "memoryLimit";
+    private static final String MEMORY_REQUEST_FIELD = "memoryRequest";
 
     // Port configuration
     protected static final int HEALTHCHECK_PORT = 8080;
@@ -195,6 +199,11 @@ public class TopicController extends AbstractModel {
             topicController.setReconciliationIntervalMs(json.getString(TopicController.RECONCILIATION_INTERVAL_FIELD_MS, DEFAULT_FULL_RECONCILIATION_INTERVAL_MS));
             topicController.setZookeeperSessionTimeoutMs(json.getString(TopicController.ZOOKEEPER_SESSION_TIMEOUT_FIELD_MS, DEFAULT_ZOOKEEPER_SESSION_TIMEOUT_MS));
             topicController.setTopicMetadataMaxAttempts(json.getInteger(TopicController.TOPIC_METADATA_MAX_ATTEMPTS_FIELD, DEFAULT_TOPIC_METADATA_MAX_ATTEMPTS));
+
+            topicController.setCpuLimit(json.getString(TopicController.CPU_LIMIT_FIELD));
+            topicController.setCpuRequest(json.getString(TopicController.CPU_REQUEST_FIELD));
+            topicController.setMemoryLimit(json.getString(TopicController.MEMORY_LIMIT_FIELD));
+            topicController.setMemoryRequest(json.getString(TopicController.MEMORY_REQUEST_FIELD));
         }
 
         return topicController;
@@ -247,7 +256,8 @@ public class TopicController extends AbstractModel {
                 createHttpProbe(healthCheckPath + "ready", HEALTHCHECK_PORT_NAME, DEFAULT_HEALTHCHECK_DELAY, DEFAULT_HEALTHCHECK_TIMEOUT),
                 updateStrategy,
                 Collections.emptyMap(),
-                Collections.emptyMap());
+                Collections.emptyMap(),
+                resources());
     }
 
     @Override

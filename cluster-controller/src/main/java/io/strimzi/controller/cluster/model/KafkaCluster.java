@@ -63,6 +63,10 @@ public class KafkaCluster extends AbstractModel {
     public static final String KEY_HEALTHCHECK_TIMEOUT = "kafka-healthcheck-timeout";
     public static final String KEY_METRICS_CONFIG = "kafka-metrics-config";
     public static final String KEY_STORAGE = "kafka-storage";
+    public static final String KEY_CPU_LIMIT = "kafka-cpu-limit";
+    public static final String KEY_CPU_REQUEST = "kafka-cpu-request";
+    public static final String KEY_MEMORY_LIMIT = "kafka-memory-limit";
+    public static final String KEY_MEMORY_REQUEST = "kafka-memory-request";
 
     // Kafka configuration keys
     public static final String KEY_KAFKA_ZOOKEEPER_CONNECT = "KAFKA_ZOOKEEPER_CONNECT";
@@ -141,6 +145,11 @@ public class KafkaCluster extends AbstractModel {
 
         String storageConfig = data.get(KEY_STORAGE);
         kafka.setStorage(Storage.fromJson(new JsonObject(storageConfig)));
+
+        kafka.setCpuLimit(data.get(KEY_CPU_LIMIT));
+        kafka.setCpuRequest(data.get(KEY_CPU_REQUEST));
+        kafka.setMemoryLimit(data.get(KEY_MEMORY_LIMIT));
+        kafka.setMemoryRequest(data.get(KEY_MEMORY_REQUEST));
 
         return kafka;
     }
@@ -232,6 +241,7 @@ public class KafkaCluster extends AbstractModel {
                 getVolumeMounts(),
                 createExecProbe(healthCheckPath, healthCheckInitialDelay, healthCheckTimeout),
                 createExecProbe(healthCheckPath, healthCheckInitialDelay, healthCheckTimeout),
+                resources(),
                 isOpenShift);
     }
 
