@@ -8,13 +8,17 @@ import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.ContainerPort;
 import io.fabric8.kubernetes.api.model.EnvVar;
+import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
+import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServicePort;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.extensions.StatefulSet;
 import io.strimzi.controller.cluster.ClusterController;
+import io.strimzi.controller.cluster.model.crd.Kafka;
+import io.strimzi.controller.cluster.model.crd.KafkaAssembly;
 import io.vertx.core.json.JsonObject;
 
 import java.util.ArrayList;
@@ -152,6 +156,25 @@ public class KafkaCluster extends AbstractModel {
         kafka.setMemoryRequest(data.get(KEY_MEMORY_REQUEST));
 
         return kafka;
+    }
+
+    public static KafkaCluster fromCrd(KafkaAssembly crd) {
+        KafkaCluster result = new KafkaCluster(crd.getMetadata().getNamespace(),
+                crd.getMetadata().getName(),
+                Labels.fromResource(crd));
+        Kafka kafka = crd.getKafka();
+        result.setReplicas(kafka.getReplicas());
+        result.setImage(kafka.getImage());
+        result.setHealthCheckInitialDelay(kafka.getReadinessProbe().getInitialDelaySeconds());
+        result.setHealthCheckTimeout(kafka.getReadinessProbe().getTimeoutSeconds());
+        // TODO Fix this ugly mess with the two Storages
+        Storage s = new Storage(Storage.StorageType.from(kafka.getStorage().getType()));
+        s.withClass(kafka.getStorage().getStorageClass());
+        s.withDeleteClaim(kafka.getStorage().isDeleteClaim());
+        s.withSelector(new LabelSelector(null, kafka.getStorage().getSelector())); // TODO
+        s.withSize(new Quantity("" + Memory.parseMemory(kafka.getStorage().getSize())));
+        result.setStorage(s);
+        return result;
     }
 
     /**

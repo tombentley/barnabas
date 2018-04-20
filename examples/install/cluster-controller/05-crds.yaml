@@ -1,0 +1,177 @@
+
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  name: kafkas.cluster-controller.strimzi.io
+spec:
+  group: cluster-controller.strimzi.io
+  version: v1alpha1
+  names:
+    kind: Kafka
+    plural: kafkas
+  scope: Namespaced
+  validation:
+    openAPIV3Schema:
+      properties:
+        topicController:
+          properties:
+            image:
+              description: "The docker image for the topic controller pod"
+              example: "strimzi/topic-controller:latest"
+              type: string
+            watchedNamespace:
+              description: "The namespace the TC should watch"
+              type: string
+            reconciliationIntervalMs:
+              type: integer
+              minimum: 1
+            zookeeperSessionTimeoutMs:
+              type: integer
+              minimum: 1
+            topicMetadataMaxAttempts:
+              type: integer
+              minimum: 1
+        zookeeper:
+          required:
+            - replicas
+          properties:
+              replicas:
+                description: "The number of Zookeeper brokers in the ensemble."
+                type: integer
+                minimum: 1
+              image:
+                description: "The docker image for Zookeeper pods."
+                example: "strimzi/zookeeper:latest"
+                type: string
+              resources:
+                description: "Constraints of container resource usage."
+                properties:
+                  limits:
+                    properties:
+                      memory:
+                        type: string
+                        pattern: "[0-9]+([kKmMgGtTpPeE]i?)?$"
+                      cpu:
+                        type: string
+                        pattern: "[0-9]+m?"
+                  requests:
+                    properties:
+                      memory:
+                        type: string
+                        pattern: "[0-9]+([kKmMgGtTpPeE]i?)?$"
+                      cpu:
+                        type: string
+                        pattern: "[0-9]+m?"
+              livenessProbe:
+                properties:
+                  initialDelaySeconds:
+                    type: integer
+                    minimum: 0
+                  timeoutSeconds:
+                    type: integer
+                    minimum: 0
+              readinessProbe:
+                properties:
+                  initialDelaySeconds:
+                    type: integer
+                    minimum: 0
+                  timeoutSeconds:
+                    type: integer
+                    minimum: 0
+              javaOptions:
+                description: "Options to be passed to the JVM running Zookeeper."
+                properties:
+                  -Xmx:
+                    type: string
+                    pattern: "[0-9]+([kKmMgGtTpPeE]i?)?$"
+                  -Xms:
+                    type: string
+                    pattern: "[0-9]+([kKmMgGtTpPeE]i?)?$"
+        kafka:
+          required:
+          - replicas
+          properties:
+            replicas:
+              description: "The number of Kafka brokers in the cluster."
+              type: integer
+              minimum: 1
+            image:
+              description: "The docker image for Kafka pods."
+              example: "strimzi/kafka:latest"
+              type: string
+            resources:
+              description: "Constraints of container resource usage."
+              properties:
+                limits:
+                  properties:
+                    memory:
+                      type: string
+                      pattern: "[0-9]+([kKmMgGtTpPeE]i?)?$"
+                    cpu:
+                      type: string
+                      pattern: "[0-9]+m?"
+                requests:
+                  properties:
+                    memory:
+                      type: string
+                      pattern: "[0-9]+([kKmMgGtTpPeE]i?)?$"
+                    cpu:
+                      type: string
+                      pattern: "[0-9]+m?"
+            livenessProbe:
+              properties:
+                initialDelaySeconds:
+                  type: integer
+                  minimum: 0
+                timeoutSeconds:
+                  type: integer
+                  minimum: 0
+            readinessProbe:
+              properties:
+                initialDelaySeconds:
+                  type: integer
+                  minimum: 0
+                timeoutSeconds:
+                  type: integer
+                  minimum: 0
+            javaOptions:
+              description: "Options to be passed to the JVM running Kafka."
+              properties:
+                -Xmx:
+                  type: string
+                  pattern: "[0-9]+([kKmMgGtTpPeE]i?)?$"
+                -Xms:
+                  type: string
+                  pattern: "[0-9]+([kKmMgGtTpPeE]i?)?$"
+            kafkaConfig:
+              description: "The Kafka configuration."
+              type: object
+              #properties: {}
+              #additionalProperties:
+              #  type: string
+            storage:
+              description: "Configuration of how the Kafka logs are stored."
+              properties:
+                type:
+                  type: string
+                  enum: ["ephemeral", "persistent-claim"]
+                size:
+                  description: "When type=persistent-claim, the size of the claim"
+                  type: string
+                  pattern: "[0-9]+([kKmMgGtTpPeE]i?)?$"
+                class:
+                  description: "When type=persistent-claim, the storage class"
+                  type: string
+                selector:
+                  description: "When type=persistent-claim, the selector for the specific volume."
+                  properties:
+                    matchLabels:
+                      type: object
+                      #additionalProperties:
+                      #  type: string
+                deleteClaim:
+                  description: "When type=persistent-claim, whether the claim should be deleted when the pod is deleted."
+                  type: boolean
+            metrics:
+              description: "The metrics config map"
+              type: object

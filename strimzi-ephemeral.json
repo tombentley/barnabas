@@ -1,0 +1,85 @@
+{
+    "apiVersion": "cluster-controller.strimzi.io/v1alpha1",
+    "kafka": {
+        "config": {
+            "min.insync.replicas": 3
+        },
+        "image": "strimzi/kafka:latest",
+        "javaOptions": {
+            "-Xmx": "4G"
+        },
+        "livenessProbe": {
+            "initialDelaySeconds": 5,
+            "timeoutSeconds": 1
+        },
+        "metrics": {
+            "lowercaseOutputName": true,
+            "rules": [
+                {
+                    "name": "kafka_server_$1_$2_total",
+                    "pattern": "kafka.server\u003ctype=(.+), name=(.+)PerSec\\w*\u003e\u003c\u003eCount"
+                },
+                {
+                    "labels": {
+                        "topic": "$3"
+                    },
+                    "name": "kafka_server_$1_$2_total",
+                    "pattern": "kafka.server\u003ctype=(.+), name=(.+)PerSec\\w*, topic=(.+)\u003e\u003c\u003eCount"
+                }
+            ]
+        },
+        "readinessProbe": {
+            "initialDelaySeconds": 10,
+            "timeoutSeconds": 4
+        },
+        "replicas": 3,
+        "resources": {
+            "limits": {
+                "memory": "5Gi"
+            }
+        },
+        "storage": {
+            "size": "500Gi",
+            "type": "persistent-claim"
+        }
+    },
+    "kind": "Kafka",
+    "metadata": {
+        "clusterName": "",
+        "creationTimestamp": "2018-04-19T16:58:44Z",
+        "generation": 0,
+        "name": "strimzi-ephemeral",
+        "namespace": "myproject",
+        "resourceVersion": "6746",
+        "selfLink": "/apis/cluster-controller.strimzi.io/v1alpha1/namespaces/myproject/kafkas/strimzi-ephemeral",
+        "uid": "eb595c55-43f2-11e8-8ef7-54e1ad3e4662"
+    },
+    "topicController": {
+        "watchedNamespace": "my-ns"
+    },
+    "zookeeper": {
+        "image": "strimzi/zookeeper:latest",
+        "javaOptions": {
+            "-Xms": "512Mi",
+            "-Xmx": "512Mi"
+        },
+        "livenessProbe": {
+            "initialDelaySeconds": 5,
+            "timeoutSeconds": 1
+        },
+        "metrics": {},
+        "readinessProbe": {
+            "initialDelaySeconds": 10,
+            "timeoutSeconds": 4
+        },
+        "replicas": 3,
+        "resources": {
+            "limits": {
+                "memory": "512Mi"
+            }
+        },
+        "storage": {
+            "type": "ephemeral"
+        }
+    }
+}
