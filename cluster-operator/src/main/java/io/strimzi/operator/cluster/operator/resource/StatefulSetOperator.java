@@ -120,15 +120,17 @@ public class StatefulSetOperator<P> extends AbstractScalableResourceOperator<Kub
     private Future<Void> restartPod(String namespace, String name, Predicate<String> isReady, String podName) {
         Future<Void> result = Future.future();
         log.info("Rolling update of {}/{}: Rolling pod {}", namespace, name, podName);
-        Future<Void> deleted = Future.future();
-        Future<CompositeFuture> deleteFinished = Future.future();
-        Watcher<Pod> watcher = new RollingUpdateWatcher(deleted);
-        Watch watch = podOperations.watch(namespace, podName, watcher);
+
+        String uid = podOperations.get(namespace, podName).getMetadata().getUid();
+        Future<Void> deleted = podOperations.waitFor(namespace, podName, (podNamespace, podName1) -> {
+            Pod pod = podOperations.get(namespace, podName);
+            return pod != null && !uid.equals(pod.getMetadata().getUid());
+        }, 1_000, 120_000);
         // Delete the pod
         log.debug("Rolling update of {}/{}: Waiting for pod {} to be deleted", namespace, name, podName);
         Future podReconcileFuture = podOperations.reconcile(namespace, podName, null);
+        Future<CompositeFuture> deleteFinished = Future.future();
         CompositeFuture.join(podReconcileFuture, deleted).setHandler(deleteResult -> {
-            watch.close();
             if (deleteResult.succeeded()) {
                 log.debug("Rolling update of {}/{}: Pod {} was deleted", namespace, name, podName);
             }

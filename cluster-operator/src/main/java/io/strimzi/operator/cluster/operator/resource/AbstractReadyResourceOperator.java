@@ -14,6 +14,8 @@ import io.vertx.core.Vertx;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.function.BiPredicate;
+
 /**
  * Specializes {@link AbstractResourceOperator} for resources which also have a notion
  * of being "ready".
@@ -50,6 +52,10 @@ public abstract class AbstractReadyResourceOperator<C, T extends HasMetadata, L 
      * @param timeoutMs The timeout, in milliseconds.
      */
     public Future<Void> readiness(String namespace, String name, long pollIntervalMs, long timeoutMs) {
+        return waitFor(namespace, name, this::isReady, pollIntervalMs, timeoutMs);
+    }
+
+    public Future<Void> waitFor(String namespace, String name, BiPredicate<String, String> pred, long pollIntervalMs, long timeoutMs) {
         Future<Void> fut = Future.future();
         log.debug("Waiting for {} resource {} in namespace {} to get ready", resourceKind, name, namespace);
         long deadline = System.currentTimeMillis() + timeoutMs;
@@ -59,7 +65,7 @@ public abstract class AbstractReadyResourceOperator<C, T extends HasMetadata, L 
                 vertx.createSharedWorkerExecutor("kubernetes-ops-pool").executeBlocking(
                     future -> {
                         try {
-                            if (isReady(namespace, name))   {
+                            if (pred.test(namespace, name))   {
                                 future.complete();
                             } else {
                                 log.trace("{} {} in namespace {} is not ready", resourceKind, name, namespace);
