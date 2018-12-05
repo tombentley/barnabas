@@ -183,9 +183,8 @@ class SecurityST extends AbstractST {
 
         LOGGER.info("Triggering CA cert renewal by adding the annotation");
         Map<String, String> initialCaCerts = new HashMap<>();
-        List<String> secrets = asList(clusterCaCertificateSecretName(CLUSTER_NAME)/*,
-                // TODO why doesn't the clients CA cert get renewed?
-                clientsCaCertificateSecretName(CLUSTER_NAME)*/);
+        List<String> secrets = asList(clusterCaCertificateSecretName(CLUSTER_NAME),
+                clientsCaCertificateSecretName(CLUSTER_NAME));
         for (String secretName : secrets) {
             Secret secret = client.secrets().inNamespace(NAMESPACE).withName(secretName).get();
             String value = secret.getData().get("ca.crt");
@@ -206,6 +205,8 @@ class SecurityST extends AbstractST {
         StUtils.waitTillSsHasRolled(client, NAMESPACE, zookeeperStatefulSetName(CLUSTER_NAME), zkPods);
         LOGGER.info("Wait for kafka to rolling restart (2)...");
         StUtils.waitTillSsHasRolled(client, NAMESPACE, kafkaStatefulSetName(CLUSTER_NAME), kafkaPods);
+        LOGGER.info("Wait for EO to rolling restart (2)...");
+        eoPod = StUtils.waitTillDepHasRolled(client, NAMESPACE, KafkaResources.entityOperatorDeploymentName(CLUSTER_NAME), eoPod);
 
         LOGGER.info("Checking the certificates have been replaced");
         for (String secretName : secrets) {
@@ -221,22 +222,35 @@ class SecurityST extends AbstractST {
 
         AvailabilityVerifier.Result result = mp.stop(30_000);
         LOGGER.info("Producer/consumer stats during cert renewal {}", result);
+
+        // Finally check a new client (signed by new client key) can consume
+        String bobUserName = "bob";
+        resources().tlsUser(CLUSTER_NAME, bobUserName).done();
+        waitFor("", 1_000, 60_000, () -> {
+            return client.secrets().inNamespace(NAMESPACE).withName(bobUserName).get() != null;
+        },
+            () -> {
+                LOGGER.error("Couldn't find user secret {}", client.secrets().inNamespace(NAMESPACE).list().getItems());
+            });
+
+        mp = waitForInitialAvailability(bobUserName);
+        mp.stop(30_000);
     }
 
     @Test
     @OpenShiftOnly
     public void testAutoReplaceCaKeysTriggeredByAnno() throws InterruptedException {
         createCluster();
-        String userName = "alice";
-        resources().tlsUser(CLUSTER_NAME, userName).done();
+        String aliceUserName = "alice";
+        resources().tlsUser(CLUSTER_NAME, aliceUserName).done();
         waitFor("", 1_000, 60_000, () -> {
-            return client.secrets().inNamespace(NAMESPACE).withName("alice").get() != null;
+            return client.secrets().inNamespace(NAMESPACE).withName(aliceUserName).get() != null;
         },
             () -> {
                 LOGGER.error("Couldn't find user secret {}", client.secrets().inNamespace(NAMESPACE).list().getItems());
             });
 
-        AvailabilityVerifier mp = waitForInitialAvailability(userName);
+        AvailabilityVerifier mp = waitForInitialAvailability(aliceUserName);
 
         // Get all pods, and their resource versions
         Map<String, String> zkPods = StUtils.ssSnapshot(client, NAMESPACE, zookeeperStatefulSetName(CLUSTER_NAME));
@@ -245,9 +259,8 @@ class SecurityST extends AbstractST {
 
         LOGGER.info("Triggering CA cert renewal by adding the annotation");
         Map<String, String> initialCaKeys = new HashMap<>();
-        List<String> secrets = asList(clusterCaKeySecretName(CLUSTER_NAME)/*,
-                // TODO why doesn't the clients CA cert get renewed?
-                clientsCaCertificateSecretName(CLUSTER_NAME)*/);
+        List<String> secrets = asList(clusterCaKeySecretName(CLUSTER_NAME),
+                clientsCaKeySecretName(CLUSTER_NAME));
         for (String secretName : secrets) {
             Secret secret = client.secrets().inNamespace(NAMESPACE).withName(secretName).get();
             String value = secret.getData().get("ca.key");
@@ -267,12 +280,14 @@ class SecurityST extends AbstractST {
         LOGGER.info("Wait for kafka to rolling restart (1)...");
         kafkaPods = StUtils.waitTillSsHasRolled(client, NAMESPACE, kafkaStatefulSetName(CLUSTER_NAME), kafkaPods);
         LOGGER.info("Wait for EO to rolling restart (1)...");
-        eoPod = StUtils.waitTillDepHasRolled(client, NAMESPACE, KafkaResources.entityOperatorDeploymentName(CLUSTER_NAME), kafkaPods);
+        eoPod = StUtils.waitTillDepHasRolled(client, NAMESPACE, KafkaResources.entityOperatorDeploymentName(CLUSTER_NAME), eoPod);
 
         LOGGER.info("Wait for zk to rolling restart (2)..");
         zkPods = StUtils.waitTillSsHasRolled(client, NAMESPACE, zookeeperStatefulSetName(CLUSTER_NAME), zkPods);
         LOGGER.info("Wait for kafka to rolling restart (2)...");
         kafkaPods = StUtils.waitTillSsHasRolled(client, NAMESPACE, kafkaStatefulSetName(CLUSTER_NAME), kafkaPods);
+        LOGGER.info("Wait for EO to rolling restart (2)...");
+        eoPod = StUtils.waitTillDepHasRolled(client, NAMESPACE, KafkaResources.entityOperatorDeploymentName(CLUSTER_NAME), eoPod);
 
         LOGGER.info("Checking the certificates have been replaced");
         for (String secretName : secrets) {
@@ -280,6 +295,7 @@ class SecurityST extends AbstractST {
             assertNotNull(secret, "Secret " + secretName + " should exist");
             assertNotNull(secret.getData(), "CA key in " + secretName + " should have non-null 'data'");
             String value = secret.getData().get("ca.key");
+            assertNotNull("CA key in " + secretName + " should exist", value);
             assertNotEquals("CA key in " + secretName + " should have changed",
                     initialCaKeys.get(secretName), value);
         }
@@ -288,6 +304,19 @@ class SecurityST extends AbstractST {
 
         AvailabilityVerifier.Result result = mp.stop(30_000);
         LOGGER.info("Producer/consumer stats during cert renewal {}", result);
+
+        // Finally check a new client (signed by new client key) can consume
+        String bobUserName = "bob";
+        resources().tlsUser(CLUSTER_NAME, bobUserName).done();
+        waitFor("", 1_000, 60_000, () -> {
+            return client.secrets().inNamespace(NAMESPACE).withName(bobUserName).get() != null;
+        },
+            () -> {
+                LOGGER.error("Couldn't find user secret {}", client.secrets().inNamespace(NAMESPACE).list().getItems());
+            });
+
+        mp = waitForInitialAvailability(bobUserName);
+        mp.stop(30_000);
     }
 
     private AvailabilityVerifier waitForInitialAvailability(String userName) {

@@ -186,15 +186,19 @@ public class StrimziExtension implements AfterAllCallback, BeforeAllCallback, Af
     @Override
     public void handleTestExecutionException(ExtensionContext context, Throwable throwable) throws Throwable {
         if (throwable instanceof AssertionError || throwable instanceof TimeoutException || throwable instanceof KubeClusterException) {
-            // Get current date to create a unique folder
-            String currentDate = new SimpleDateFormat("yyyyMMdd_HHmmss").format(Calendar.getInstance().getTime());
-            String logDir = context.getTestMethod().isPresent() ?
-                    TEST_LOG_DIR + context.getTestMethod().get().getDeclaringClass().getSimpleName() + "." + context.getTestMethod().get().getName() + "_" + currentDate
-                    : TEST_LOG_DIR + currentDate;
+            try {
+                // Get current date to create a unique folder
+                String currentDate = new SimpleDateFormat("yyyyMMdd_HHmmss").format(Calendar.getInstance().getTime());
+                String logDir = context.getTestMethod().isPresent() ?
+                        TEST_LOG_DIR + context.getTestMethod().get().getDeclaringClass().getSimpleName() + "." + context.getTestMethod().get().getName() + "_" + currentDate
+                        : TEST_LOG_DIR + currentDate;
 
-            LogCollector logCollector = new LogCollector(client.inNamespace(kubeClient().namespace()), new File(logDir));
-            logCollector.collectEvents();
-            logCollector.collectLogsForPods();
+                LogCollector logCollector = new LogCollector(client.inNamespace(kubeClient().namespace()), new File(logDir));
+                logCollector.collectEvents();
+                logCollector.collectLogsForPods();
+            } catch (Exception e) {
+                LOGGER.error("Ignoring error in test exception handler", e);
+            }
         }
         throw throwable;
     }
@@ -221,15 +225,18 @@ public class StrimziExtension implements AfterAllCallback, BeforeAllCallback, Af
                     try {
                         String log = client.pods().withName(podName).inContainer(containerStatus.getName()).getLog();
                         // Print container logs to console
-                        LOGGER.info("Logs for container {} from pod {}{}{}", containerStatus.getName(), podName, System.lineSeparator(), log);
+                        //LOGGER.info("Logs for container {} from pod {}{}{}", containerStatus.getName(), podName, System.lineSeparator(), indent(log));
 
                         // Write logs from containers to files
-                        writeFile(logDir + "/" + "logs-pod-" + podName + "-container-" + containerStatus.getName() + ".log", log);
-                    } catch (KubernetesClientException e) {
-                        if (e.getMessage().equals("container \"" + containerStatus.getName() + "\" in pod \"" + podName + "\" is terminated")) {
+                        String filePath = logDir + "/" + "logs-pod-" + podName + "-container-" + containerStatus.getName() + ".log";
+                        writeFile(filePath, log);
+                        LOGGER.info("Logs for container {} from pod {} are in {}", containerStatus.getName(), podName, filePath);
+                    } catch (Exception e) {
+                        if (e instanceof KubernetesClientException
+                                && e.getMessage().equals("container \"" + containerStatus.getName() + "\" in pod \"" + podName + "\" is terminated")) {
                             LOGGER.info("Container {} in pod {} is terminated before teardown", containerStatus.getName(), podName);
                         } else {
-                            throw e;
+                            LOGGER.error("Error while getting logs for {}", podName, e);
                         }
                     }
                 });
@@ -241,10 +248,12 @@ public class StrimziExtension implements AfterAllCallback, BeforeAllCallback, Af
             String events = kubeClient().getEvents();
 
             // Print events to console
-            LOGGER.info("Events for namespace {}{}{}", namespace, System.lineSeparator(), events);
+            //LOGGER.info("Events for namespace {}{}{}", namespace, System.lineSeparator(), events);
 
             // Write events to file
-            writeFile(logDir + "/" + "events-in-namespace" + kubeClient().namespace() + ".log", events);
+            String filePath = logDir + "/" + "events-in-namespace" + kubeClient().namespace() + ".log";
+            writeFile(filePath, events);
+            LOGGER.info("Events for namespace {} are in {}", namespace, filePath);
         }
     }
 

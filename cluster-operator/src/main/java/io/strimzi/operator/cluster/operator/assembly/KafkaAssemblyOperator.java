@@ -17,10 +17,10 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.fabric8.openshift.api.model.Route;
 import io.strimzi.api.kafka.KafkaAssemblyList;
+import io.strimzi.api.kafka.model.CertificateAuthority;
 import io.strimzi.api.kafka.model.DoneableKafka;
 import io.strimzi.api.kafka.model.ExternalLogging;
 import io.strimzi.api.kafka.model.Kafka;
-import io.strimzi.api.kafka.model.CertificateAuthority;
 import io.strimzi.certs.CertManager;
 import io.strimzi.operator.cluster.model.AbstractModel;
 import io.strimzi.operator.cluster.model.Ca;
@@ -62,6 +62,7 @@ import java.util.List;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 
 import static io.strimzi.operator.common.operator.resource.AbstractScalableResourceOperator.STRIMZI_OPERATOR_DOMAIN;
 
@@ -122,6 +123,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
         new ReconciliationState(reconciliation, kafkaAssembly)
                 .reconcileCas()
+                // Roll everything so the new CA is added to the trust store.
+                .compose(state -> state.rollingUpdateForNewCaCert())
 
                 .compose(state -> state.zkManualPodCleaning())
                 .compose(state -> state.zkManualRollingUpdate())
@@ -318,36 +321,48 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          * or expired CA certificates get removed from their truststores .
          */
         Future<ReconciliationState> rollingUpdateForNewCaCert() {
-            String r = "";
+            List<String> reason = new ArrayList<>(4);
             if (this.clusterCa.keyReplaced()) {
-                r = "trust new CA certificate signed by new key, ";
+                reason.add("trust new cluster CA certificate signed by new key");
+            }
+            if (this.clientsCa.keyReplaced()) {
+                reason.add("trust new clients CA certificate signed by new key");
             }
             if (this.clusterCa.certsRemoved()) {
-                r = r + "remove expired CA certificate";
+                reason.add("remove expired cluster CA certificate");
             }
-            String reason = r.trim();
+            if (this.clientsCa.certsRemoved()) {
+                reason.add("remove expired clients CA certificate");
+            }
             if (!reason.isEmpty()) {
+                String reasons = reason.stream().collect(Collectors.joining(", "));
                 return zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
                         .compose(ss -> {
-                            log.debug("{}: Rolling StatefulSet {} to {}", reconciliation, ss.getMetadata().getName(), reason);
-                            return zkSetOperations.maybeRollingUpdate(ss, pod -> true);
+                            return zkSetOperations.maybeRollingUpdate(ss, pod -> {
+                                log.debug("{}: Rolling Pod {} to {}", reconciliation, pod.getMetadata().getName(), reasons);
+                                return true;
+                            });
                         })
                         .compose(i -> kafkaSetOperations.getAsync(namespace, KafkaCluster.kafkaClusterName(name)))
                         .compose(ss -> {
-                            log.debug("{}: Rolling StatefulSet {} to {}", reconciliation, ss.getMetadata().getName(), reason);
-                            return kafkaSetOperations.maybeRollingUpdate(ss, pod -> true);
+                            return kafkaSetOperations.maybeRollingUpdate(ss, pod -> {
+                                log.debug("{}: Rolling Pod {} to {}", reconciliation, pod.getMetadata().getName(), reasons);
+                                return true;
+                            });
                         })
-                        .compose(i -> {
-                            if (topicOperator != null) {
-                                log.debug("{}: Rolling Deployment {} to {}", reconciliation, TopicOperator.topicOperatorName(name), reason);
+                        .compose(i -> deploymentOperations.getAsync(namespace, TopicOperator.topicOperatorName(name)))
+                        .compose(dep -> {
+                            if (dep != null) {
+                                log.debug("{}: Rolling Deployment {} to {}", reconciliation, TopicOperator.topicOperatorName(name), reasons);
                                 return deploymentOperations.rollingUpdate(namespace, TopicOperator.topicOperatorName(name), operationTimeoutMs);
                             } else {
                                 return Future.succeededFuture();
                             }
                         })
-                        .compose(i -> {
-                            if (entityOperator != null) {
-                                log.debug("{}: Rolling Deployment {} to {}", reconciliation, EntityOperator.entityOperatorName(name), reason);
+                        .compose(i -> deploymentOperations.getAsync(namespace, EntityOperator.entityOperatorName(name)))
+                        .compose(dep -> {
+                            if (dep != null) {
+                                log.debug("{}: Rolling Deployment {} to {}", reconciliation, EntityOperator.entityOperatorName(name), reasons);
                                 return deploymentOperations.rollingUpdate(namespace, EntityOperator.entityOperatorName(name), operationTimeoutMs);
                             } else {
                                 return Future.succeededFuture();
@@ -1151,6 +1166,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             if (this.entityOperator != null) {
                 eoDeployment.getSpec().getTemplate().getMetadata().getAnnotations()
                         .put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, String.valueOf(getCaCertGeneration(this.clusterCa)));
+                eoDeployment.getSpec().getTemplate().getMetadata().getAnnotations()
+                        .put(Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION, String.valueOf(getCaCertGeneration(this.clientsCa)));
             }
             return withVoid(deploymentOperations.reconcile(namespace, EntityOperator.entityOperatorName(name), eoDeployment));
         }

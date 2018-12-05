@@ -521,7 +521,7 @@ public abstract class Ca {
      * resulted in a renewed CA certificate.
      */
     public boolean certRenewed() {
-        return renewalType == RenewalType.RENEW_CERT;
+        return renewalType == RenewalType.RENEW_CERT || renewalType == RenewalType.REPLACE_KEY;
     }
 
     /**
