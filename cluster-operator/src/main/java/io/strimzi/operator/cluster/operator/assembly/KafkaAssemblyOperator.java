@@ -247,6 +247,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             vertx.createSharedWorkerExecutor("kubernetes-ops-pool").<ReconciliationState>executeBlocking(
                 future -> {
                     try {
+                        log.info("!!!!!!!!!!!!!! reconciling CAs");
                         String clusterCaCertName = AbstractModel.clusterCaCertSecretName(name);
                         String clusterCaKeyName = AbstractModel.clusterCaKeySecretName(name);
                         String clientsCaCertName = KafkaCluster.clientsCaCertSecretName(name);

@@ -201,11 +201,11 @@ class SecurityST extends AbstractST {
 
         Map<String, String> eoPod = StUtils.depSnapshot(client, NAMESPACE, KafkaResources.entityOperatorDeploymentName(CLUSTER_NAME));
 
-        LOGGER.info("Wait for zk to rolling restart (2)..");
+        LOGGER.info("Wait for zk to rolling restart ...");
         StUtils.waitTillSsHasRolled(client, NAMESPACE, zookeeperStatefulSetName(CLUSTER_NAME), zkPods);
-        LOGGER.info("Wait for kafka to rolling restart (2)...");
+        LOGGER.info("Wait for kafka to rolling restart ...");
         StUtils.waitTillSsHasRolled(client, NAMESPACE, kafkaStatefulSetName(CLUSTER_NAME), kafkaPods);
-        LOGGER.info("Wait for EO to rolling restart (2)...");
+        LOGGER.info("Wait for EO to rolling restart ...");
         eoPod = StUtils.waitTillDepHasRolled(client, NAMESPACE, KafkaResources.entityOperatorDeploymentName(CLUSTER_NAME), eoPod);
 
         LOGGER.info("Checking the certificates have been replaced");
@@ -243,12 +243,9 @@ class SecurityST extends AbstractST {
         createCluster();
         String aliceUserName = "alice";
         resources().tlsUser(CLUSTER_NAME, aliceUserName).done();
-        waitFor("", 1_000, 60_000, () -> {
-            return client.secrets().inNamespace(NAMESPACE).withName(aliceUserName).get() != null;
-        },
-            () -> {
-                LOGGER.error("Couldn't find user secret {}", client.secrets().inNamespace(NAMESPACE).list().getItems());
-            });
+        waitFor("Alic's secret to exist", 1_000, 60_000,
+            () -> client.secrets().inNamespace(NAMESPACE).withName(aliceUserName).get() != null,
+            () -> LOGGER.error("Couldn't find user secret {}", client.secrets().inNamespace(NAMESPACE).list().getItems()));
 
         AvailabilityVerifier mp = waitForInitialAvailability(aliceUserName);
 
@@ -275,14 +272,14 @@ class SecurityST extends AbstractST {
             client.secrets().inNamespace(NAMESPACE).withName(secretName).patch(annotated);
         }
 
-        LOGGER.info("Wait for zk to rolling restart (1)..");
+        LOGGER.info("Wait for zk to rolling restart (1)...");
         zkPods = StUtils.waitTillSsHasRolled(client, NAMESPACE, zookeeperStatefulSetName(CLUSTER_NAME), zkPods);
         LOGGER.info("Wait for kafka to rolling restart (1)...");
         kafkaPods = StUtils.waitTillSsHasRolled(client, NAMESPACE, kafkaStatefulSetName(CLUSTER_NAME), kafkaPods);
         LOGGER.info("Wait for EO to rolling restart (1)...");
         eoPod = StUtils.waitTillDepHasRolled(client, NAMESPACE, KafkaResources.entityOperatorDeploymentName(CLUSTER_NAME), eoPod);
 
-        LOGGER.info("Wait for zk to rolling restart (2)..");
+        LOGGER.info("Wait for zk to rolling restart (2)...");
         zkPods = StUtils.waitTillSsHasRolled(client, NAMESPACE, zookeeperStatefulSetName(CLUSTER_NAME), zkPods);
         LOGGER.info("Wait for kafka to rolling restart (2)...");
         kafkaPods = StUtils.waitTillSsHasRolled(client, NAMESPACE, kafkaStatefulSetName(CLUSTER_NAME), kafkaPods);
@@ -299,8 +296,8 @@ class SecurityST extends AbstractST {
             assertNotEquals("CA key in " + secretName + " should have changed",
                     initialCaKeys.get(secretName), value);
         }
-
-        waitForAvailability(mp);
+        mp.stop(30_000);
+        mp = waitForInitialAvailability(aliceUserName);
 
         AvailabilityVerifier.Result result = mp.stop(30_000);
         LOGGER.info("Producer/consumer stats during cert renewal {}", result);
@@ -308,12 +305,9 @@ class SecurityST extends AbstractST {
         // Finally check a new client (signed by new client key) can consume
         String bobUserName = "bob";
         resources().tlsUser(CLUSTER_NAME, bobUserName).done();
-        waitFor("", 1_000, 60_000, () -> {
-            return client.secrets().inNamespace(NAMESPACE).withName(bobUserName).get() != null;
-        },
-            () -> {
-                LOGGER.error("Couldn't find user secret {}", client.secrets().inNamespace(NAMESPACE).list().getItems());
-            });
+        waitFor("Bob's secret to exist", 1_000, 60_000,
+            () -> client.secrets().inNamespace(NAMESPACE).withName(bobUserName).get() != null,
+            () -> LOGGER.error("Couldn't find user secret {}", client.secrets().inNamespace(NAMESPACE).list().getItems()));
 
         mp = waitForInitialAvailability(bobUserName);
         mp.stop(30_000);

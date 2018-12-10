@@ -133,11 +133,6 @@ public class AvailabilityVerifier {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-
-
-
-
-
     }
 
     private File createKeystore(byte[] ca, byte[] cert, byte[] key, String password) throws IOException, InterruptedException {

@@ -348,13 +348,17 @@ public abstract class Ca {
         X509Certificate currentCert = cert(caCertSecret, CA_CRT);
         Map<String, String> certData;
         Map<String, String> keyData;
+        log.info("!!!!!!!!!!!!!! createRenewOrReplace");
         if (!generateCa) {
+            log.info("!!!!!!!!!!! Not generating CA");
             certData = caCertSecret != null ? caCertSecret.getData() : emptyMap();
             keyData = caKeySecret != null ? singletonMap(CA_KEY, caKeySecret.getData().get(CA_KEY)) : emptyMap();
             caCertsRemoved = false;
         } else {
+            log.info("!!!!!!!!!!!!!! WTF");
+            log.info("!!!!!!!!!!!!!! WTF");
             this.renewalType = shouldCreateOrRenew(currentCert, namespace, clusterName);
-            log.debug("Generating new certificate {} to be stored in {}", CA_CRT, caCertSecretName);
+            log.debug("{} renewalType {}", this, renewalType);
             switch (renewalType) {
                 case CREATE:
                     keyData = new HashMap<>();
@@ -467,8 +471,11 @@ public abstract class Ca {
                                 "and it is not configured to automatically renew. This needs to be manually updated before that date. " +
                                 "Alternatively, configure Kafka.spec.tlsCertificates.generateCertificateAuthority=true in the Kafka resource with name {} in namespace {}.",
                         CA_CRT, this.caCertSecretName, namespace, currentCert.getNotAfter());
-            } else if (renewalType == RenewalType.RENEW_CERT) {
-                // TODO Logging like above
+            } else if (renewalType == RenewalType.REPLACE_KEY) {
+                log.warn("The {} key in Secret {} in namespace {} needs to be renewed " +
+                                "and it is not configured to automatically renew. This needs to be manually updated before that date. " +
+                                "Alternatively, configure Kafka.spec.tlsCertificates.generateCertificateAuthority=true in the Kafka resource with name {} in namespace {}.",
+                        CA_KEY, this.caKeySecretName, namespace, currentCert.getNotAfter());
             } else if (caCertSecret == null) {
                 log.warn("The certificate (data.{}) in Secret {} and the private key (data.{}) in Secret {} in namespace {} " +
                                 "needs to be configured with a Base64 encoded PEM-format certificate. " +

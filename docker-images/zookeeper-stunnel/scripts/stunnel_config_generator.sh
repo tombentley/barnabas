@@ -1,4 +1,4 @@
-    #!/bin/bash
+#!/bin/bash
 
 # path were the Secret with ZK nodes certificates is mounted
 NODE_CERTS_KEYS=/etc/tls-sidecar/zookeeper-nodes
@@ -8,7 +8,7 @@ cat /etc/tls-sidecar/cluster-ca-certs/*.crt > "$CA_CERTS"
 
 echo "pid = /usr/local/var/run/stunnel.pid"
 echo "foreground = yes"
-echo "debug = $TLS_SIDECAR_LOG_LEVEL"
+echo "debug = 7"
 
 declare -a PORTS=("2888" "3888")
 

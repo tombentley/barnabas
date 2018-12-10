@@ -19,6 +19,6 @@ key = ${EO_CERTS_KEYS}/entity-operator.key
 accept = 127.0.0.1:2181
 connect = ${STRIMZI_ZOOKEEPER_CONNECT:-zookeeper-client:2181}
 delay = yes
-verify = 2
+verify = 0
 
 EOF

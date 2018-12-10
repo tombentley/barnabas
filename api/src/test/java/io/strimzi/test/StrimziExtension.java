@@ -185,6 +185,8 @@ public class StrimziExtension implements AfterAllCallback, BeforeAllCallback, Af
 
     @Override
     public void handleTestExecutionException(ExtensionContext context, Throwable throwable) throws Throwable {
+        LOGGER.warn("Test {} has thrown {}", context.getDisplayName(), throwable);
+        LOGGER.info("Collecting cluster info before propagating exception");
         if (throwable instanceof AssertionError || throwable instanceof TimeoutException || throwable instanceof KubeClusterException) {
             try {
                 // Get current date to create a unique folder
@@ -195,11 +197,13 @@ public class StrimziExtension implements AfterAllCallback, BeforeAllCallback, Af
 
                 LogCollector logCollector = new LogCollector(client.inNamespace(kubeClient().namespace()), new File(logDir));
                 logCollector.collectEvents();
-                logCollector.collectLogsForPods();
+                logCollector.collectLogsForPods(throwable);
             } catch (Exception e) {
                 LOGGER.error("Ignoring error in test exception handler", e);
+                throwable.addSuppressed(e);
             }
         }
+        LOGGER.info("Propagating exception {}", throwable);
         throw throwable;
     }
 
@@ -215,7 +219,7 @@ public class StrimziExtension implements AfterAllCallback, BeforeAllCallback, Af
             logDir.mkdirs();
         }
 
-        private void collectLogsForPods() {
+        private void collectLogsForPods(Throwable throwable) {
             LOGGER.info("Collecting logs for pods in namespace {}", namespace);
 
             client.pods().list().getItems().forEach(pod -> {
@@ -237,6 +241,7 @@ public class StrimziExtension implements AfterAllCallback, BeforeAllCallback, Af
                             LOGGER.info("Container {} in pod {} is terminated before teardown", containerStatus.getName(), podName);
                         } else {
                             LOGGER.error("Error while getting logs for {}", podName, e);
+                            throwable.addSuppressed(e);
                         }
                     }
                 });
