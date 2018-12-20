@@ -18,6 +18,7 @@ import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +43,8 @@ public class OpenSslCertManager implements CertManager {
     public void generateSelfSignedCert(File keyFile, File certFile, Subject sbj, int days) throws IOException {
 
         List<String> cmd = new ArrayList<>(asList("openssl", "req", "-x509", "-new", "-days", String.valueOf(days), "-batch", "-nodes",
-                "-out", certFile.getAbsolutePath(), "-keyout", keyFile.getAbsolutePath()));
+                "-out", certFile.getAbsolutePath(), "-keyout", keyFile.getAbsolutePath(),
+                "-set_serial", Long.toUnsignedString(new SecureRandom().nextLong())));
 
         File sna = null;
         File openSslConf = null;
@@ -170,7 +172,8 @@ public class OpenSslCertManager implements CertManager {
     public void generateCsr(File keyFile, File csrFile, Subject sbj) throws IOException {
 
         List<String> cmd = new ArrayList<>(asList("openssl", "req", "-new", "-batch", "-nodes",
-                "-keyout", keyFile.getAbsolutePath(), "-out", csrFile.getAbsolutePath()));
+                "-keyout", keyFile.getAbsolutePath(), "-out", csrFile.getAbsolutePath(),
+                "-set_serial", Long.toUnsignedString(new SecureRandom().nextLong())));
 
         File sna = null;
         File openSslConf = null;
