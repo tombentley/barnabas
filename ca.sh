@@ -19,7 +19,7 @@ set -x
 #ca1
 openssl req -x509 -new -days 1 \
   -batch -nodes -out target/ca1.crt -keyout target/ca1.key \
-  -subj /CN=ca
+  -subj /CN=ca/DN=ca1
 
 # up1
 openssl req -new -batch -nodes \
@@ -27,7 +27,7 @@ openssl req -new -batch -nodes \
   -subj /CN=up
 
 openssl x509 -req -days 1 \
-  -in target/up1.csr -CA target/ca1.crt -CAkey target/ca1.key -CAcreateserial \
+  -in target/up1.csr -CA target/ca1.crt -CAkey target/ca1.key \
   -out target/up1.crt
 
 # down1
@@ -36,14 +36,14 @@ openssl req -new -batch -nodes \
   -subj /CN=down
 
 openssl x509 -req -days 1 \
-  -in target/down1.csr -CA target/ca1.crt -CAkey target/ca1.key -CAcreateserial \
+  -in target/down1.csr -CA target/ca1.crt -CAkey target/ca1.key \
   -out target/down1.crt
 
 
 # ca2
 openssl req -x509 -new -days 10 \
   -batch -nodes -out target/ca2.crt -keyout target/ca2.key \
-  -subj /CN=ca
+  -subj /CN=ca/DN=ca2
 
 # up2
 openssl req -new -batch -nodes \
@@ -51,7 +51,7 @@ openssl req -new -batch -nodes \
   -subj /CN=up
 
 openssl x509 -req -days 1 \
-  -in target/up2.csr -CA target/ca2.crt -CAkey target/ca2.key -CAcreateserial \
+  -in target/up2.csr -CA target/ca2.crt -CAkey target/ca2.key \
   -out target/up2.crt
 
 
@@ -61,8 +61,8 @@ openssl req -new -batch -nodes \
   -subj /CN=down
 
 
-openssl x509 -req -days 1 \
-  -in target/down2.csr -CA target/ca2.crt -CAkey target/ca2.key -CAcreateserial \
+openssl x509 -req -days 10 \
+  -in target/down2.csr -CA target/ca2.crt -CAkey target/ca2.key \
   -out target/down2.crt
 
 #cat target/up.crt target/ca.crt > target/stunnel-up.crt
