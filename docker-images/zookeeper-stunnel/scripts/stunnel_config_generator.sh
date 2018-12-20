@@ -33,7 +33,7 @@ do
 			accept = 127.0.0.1:$(expr $port \* 10 + $NODE - 1)
 			connect = ${PEER}.${BASE_FQDN}:$port
 			delay = yes
-			verify = 0
+			verify = 2
 
 			EOF
 		fi
@@ -52,7 +52,7 @@ do
 	key = ${NODE_CERTS_KEYS}/${CURRENT}.key
 	accept = $port
 	connect = 127.0.0.1:$CONNECTOR_PORT
-	verify = 0
+	verify = 2
 
 	EOF
 done
@@ -68,5 +68,5 @@ cert = ${NODE_CERTS_KEYS}/${CURRENT}.crt
 key = ${NODE_CERTS_KEYS}/${CURRENT}.key
 accept = 2181
 connect = 127.0.0.1:$CLIENT_PORT
-verify = 0
+verify = 2
 EOF
