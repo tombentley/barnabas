@@ -65,8 +65,11 @@ function label_node {
 }
 
 if [ "$TEST_CLUSTER" = "minikube" ]; then
+    date +%F_%T
     install_kubectl
+    date +%F_%T
     install_helm
+    date +%F_%T
     if [ "${TEST_MINIKUBE_VERSION:-latest}" = "latest" ]; then
         TEST_MINIKUBE_URL=https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
     else
@@ -74,7 +77,7 @@ if [ "$TEST_CLUSTER" = "minikube" ]; then
     fi
     curl -Lo minikube ${TEST_MINIKUBE_URL} && chmod +x minikube
     sudo cp minikube /usr/bin
-
+    date +%F_%T
     export MINIKUBE_WANTUPDATENOTIFICATION=false
     export MINIKUBE_WANTREPORTERRORPROMPT=false
     export MINIKUBE_HOME=$HOME
@@ -82,8 +85,6 @@ if [ "$TEST_CLUSTER" = "minikube" ]; then
     
     mkdir $HOME/.kube || true
     touch $HOME/.kube/config
-
-    docker run -d -p 5000:5000 registry
 
     export KUBECONFIG=$HOME/.kube/config
     sudo -E minikube start --vm-driver=none --kubernetes-version=v1.15.0 \
@@ -98,6 +99,7 @@ if [ "$TEST_CLUSTER" = "minikube" ]; then
         echo "Minikube failed to start or RBAC could not be properly set up"
         exit 1
     fi
+    date +%F_%T
 elif [ "$TEST_CLUSTER" = "minishift" ]; then
     #install_kubectl
     MS_VERSION=1.13.1
@@ -110,8 +112,6 @@ elif [ "$TEST_CLUSTER" = "minishift" ]; then
     #export CHANGE_MINIKUBE_NONE_USER=true
     mkdir $HOME/.kube || true
     touch $HOME/.kube/config
-
-    docker run -d -p 5000:5000 registry
 
     export KUBECONFIG=$HOME/.kube/config
     sudo -E minishift start

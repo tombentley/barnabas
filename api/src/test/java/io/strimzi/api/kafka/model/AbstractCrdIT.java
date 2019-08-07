@@ -9,12 +9,28 @@ import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.VersionInfo;
 import io.strimzi.test.BaseITST;
 import io.strimzi.test.TestUtils;
+import org.junit.AfterClass;
 import org.junit.Assume;
 import org.junit.Before;
+import org.junit.BeforeClass;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.junit.Assert.assertNotNull;
 
 public abstract class AbstractCrdIT extends BaseITST {
+
+    public static final Logger LOGGER = LoggerFactory.getLogger(AbstractCrdIT.class);
+
+    @BeforeClass
+    public static void logStart() {
+        LOGGER.info("Starting test class");
+    }
+
+    @AfterClass
+    public static void logEnd() {
+        LOGGER.info("Finishing test class");
+    }
 
     protected void assumeKube1_11Plus() {
         VersionInfo version = new DefaultKubernetesClient().getVersion();
@@ -64,6 +80,8 @@ public abstract class AbstractCrdIT extends BaseITST {
 
     @Before
     public void setupTests() {
+        LOGGER.info("Setting up cluster");
         kubeCluster().before();
+        LOGGER.info("Done setting up cluster");
     }
 }
