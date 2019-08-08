@@ -3,8 +3,10 @@
 # (E.g. cluster-operator etc.).
 
 java_build:
+	date +%F_%T
 	echo "Building JAR file ..."
 	mvn $(MVN_ARGS) verify
+	date +%F_%T
 
 java_install_root:
 	echo "Installing root pom ..."

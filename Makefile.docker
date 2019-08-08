@@ -16,18 +16,25 @@ RELEASE_VERSION    ?= $(shell cat $(TOPDIR)/release.version)
 all: docker_build docker_push
 
 docker_build:
+	date +%F_%T
 	# Build Docker image ...
 	docker build $(DOCKER_BUILD_ARGS) --build-arg strimzi_version=$(RELEASE_VERSION) -t strimzi/$(PROJECT_NAME):latest $(DOCKERFILE_DIR)
 #   The Dockerfiles all use FROM ...:latest, so it is necessary to tag images with latest (-t above)
 #   But because we generate Kafka images for different versions we also need to tag with something
 #   including the kafka version number. This BUILD_TAG is used by the docker_tag target.
 	# Also tag with $(BUILD_TAG)
+	date +%F_%T
 	docker tag strimzi/$(PROJECT_NAME):latest strimzi/$(PROJECT_NAME):$(BUILD_TAG)
+	date +%F_%T
 
 docker_tag:
 	# Tag the $(BUILD_TAG) image we built with the given $(DOCKER_TAG) tag
+	date +%F_%T
 	docker tag strimzi/$(PROJECT_NAME):$(BUILD_TAG) $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(PROJECT_NAME):$(DOCKER_TAG)
+	date +%F_%T
 
 docker_push: docker_tag
 	# Push the $(DOCKER_TAG)-tagged image to the registry
+	date +%F_%T
 	docker push $(DOCKER_REGISTRY)/$(DOCKER_ORG)/$(PROJECT_NAME):$(DOCKER_TAG)
+	date +%F_%T

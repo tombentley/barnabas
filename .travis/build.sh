@@ -19,12 +19,17 @@ export DOCKER_ORG=${DOCKER_ORG:-strimzici}
 export DOCKER_REGISTRY=${DOCKER_REGISTRY:-docker.io}
 export DOCKER_TAG=$COMMIT
 
+date +%F_%T
 make docu_check
+date +%F_%T
 make spotbugs
-
+date +%F_%T
 make crd_install
+date +%F_%T
 make helm_install
+date +%F_%T
 make docker_build
+date +%F_%T
 
 if [ ! -e  documentation/book/appendix_crds.adoc ] ; then
   exit 1
