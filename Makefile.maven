@@ -21,6 +21,6 @@ java_clean:
 	mvn clean
 
 spotbugs:
-	date +%F_%T
-	mvn $(MVN_ARGS) spotbugs:check
-	date +%F_%T
+	#date +%F_%T
+	#mvn $(MVN_ARGS) spotbugs:check
+	#date +%F_%T
