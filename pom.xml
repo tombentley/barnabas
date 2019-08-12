@@ -599,7 +599,7 @@
                     <version>${spotbugs.version}</version>
                 </dependency></dependencies>
                 <configuration>
-                    <effort>Less</effort>
+                    <effort>Min</effort>
                     <!-- Reports all bugs (other values are medium and max) -->
                     <threshold>Low</threshold>
                     <!-- Produces XML report -->
