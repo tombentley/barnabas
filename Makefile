@@ -89,6 +89,7 @@ docu_html: docu_htmlclean docu_versions docu_check
 	$(CP) -vrL documentation/book/images documentation/html/images
 	asciidoctor -v --failure-level WARN -t -dbook -a ProductVersion=$(RELEASE_VERSION) -a GithubVersion=$(GITHUB_VERSION) documentation/book/master.adoc -o documentation/html/index.html
 	asciidoctor -v --failure-level WARN -t -dbook -a ProductVersion=$(RELEASE_VERSION) -a GithubVersion=$(GITHUB_VERSION) documentation/contributing/master.adoc -o documentation/html/contributing.html
+	asciidoctor -v --failure-level WARN -t -dbook -a ProductVersion=$(RELEASE_VERSION) -a GithubVersion=$(GITHUB_VERSION) documentation/books/evaluating/master.adoc -o documentation/html/evaluating.html
 
 
 docu_htmlnoheader: docu_htmlnoheaderclean docu_versions docu_check
@@ -96,6 +97,7 @@ docu_htmlnoheader: docu_htmlnoheaderclean docu_versions docu_check
 	$(CP) -vrL documentation/book/images documentation/htmlnoheader/images
 	asciidoctor -v --failure-level WARN -t -dbook -a ProductVersion=$(RELEASE_VERSION) -a GithubVersion=$(GITHUB_VERSION) -s documentation/book/master.adoc -o documentation/htmlnoheader/master.html
 	asciidoctor -v --failure-level WARN -t -dbook -a ProductVersion=$(RELEASE_VERSION) -a GithubVersion=$(GITHUB_VERSION) -s documentation/contributing/master.adoc -o documentation/htmlnoheader/contributing.html
+	asciidoctor -v --failure-level WARN -t -dbook -a ProductVersion=$(RELEASE_VERSION) -a GithubVersion=$(GITHUB_VERSION) -s documentation/books/evaluating/master.adoc -o documentation/htmlnoheader/evaluating.html
 
 docu_check:
 	./.travis/check_docs.sh

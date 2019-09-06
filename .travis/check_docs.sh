@@ -10,9 +10,9 @@ fi
 function grep_check {
   local pattern=$1
   local description=$2
-  local opts=${3:--i -E -r -n}
+  local opts=${3:--i -E -r -n --include='*.adoc'}
   local fatalness=${4:-1}
-  x=$($GREP $opts "$pattern" documentation/book/)
+  x=$($GREP $opts "$pattern" documentation/book/ documentation/books/evaluating)
   if [ -n "$x" ]; then
     echo "$description:"
     echo "$x"
