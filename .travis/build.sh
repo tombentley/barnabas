@@ -42,10 +42,10 @@ if [ -n "$CHANGED_DERIVED" ] ; then
 fi
 
 # Push to the real docker org
-if [ "$PULL_REQUEST" != "false" ] ; then
+if [ "$PULL_REQUEST" != "false" ] || [[ "$TRAVIS_REPO_SLUG" == strimzi/* ]] ; then
     make docu_html
     make docu_htmlnoheader
-    echo "Building Pull Request - nothing to push"
+    echo "Building pull request or forked repo - nothing to push"
 elif [ "$TAG" = "latest" ] && [ "$BRANCH" != "master" ]; then
     make docu_html
     make docu_htmlnoheader
