@@ -506,6 +506,9 @@ public class KafkaConnectAssemblyOperatorTest {
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", KafkaConnect.RESOURCE_KIND, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
+            if (createResult.failed()) {
+                createResult.cause().printStackTrace();
+            }
             context.assertTrue(createResult.succeeded());
 
             verify(mockDcOps).scaleUp(clusterCmNamespace, connect.getName(), scaleTo);

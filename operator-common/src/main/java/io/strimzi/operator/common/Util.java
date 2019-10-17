@@ -12,10 +12,25 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 public class Util {
 
     private static final Logger LOGGER = LogManager.getLogger(Util.class);
+
+    public static <T> Future<T> async(Vertx vertx, Supplier<T> supplier) {
+        Future<T> result = Future.future();
+        vertx.executeBlocking(
+                future -> {
+                    try {
+                        future.complete(supplier.get());
+                    } catch (Throwable t) {
+                        future.fail(t);
+                    }
+                }, result
+        );
+        return result;
+    }
 
     /**
      * @param vertx The vertx instance.

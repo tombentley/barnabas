@@ -26,6 +26,8 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static io.strimzi.operator.common.Util.async;
+
 /**
  * A base implementation of {@link Operator}.
  *
@@ -169,20 +171,6 @@ public abstract class AbstractOperator<
         return result;
     }
 
-    protected <T> Future<T> async(Supplier<T> supplier) {
-        Future<T> result = Future.future();
-        vertx.executeBlocking(
-            future -> {
-                try {
-                    future.complete(supplier.get());
-                } catch (Throwable t) {
-                    future.fail(t);
-                }
-            }, result
-        );
-        return result;
-    }
-
     /**
      * Validate the Custom Resource.
      * This should log at the WARN level (rather than throwing)
@@ -222,7 +210,7 @@ public abstract class AbstractOperator<
      * @return A future which completes when the watcher has been created.
      */
     public Future<Watch> createWatch(String namespace, Consumer<KubernetesClientException> onClose) {
-        return async(() -> resourceOperator.watch(namespace, selector(), new OperatorWatcher<>(this, namespace, onClose)));
+        return async(vertx, () -> resourceOperator.watch(namespace, selector(), new OperatorWatcher<>(this, namespace, onClose)));
     }
 
     public Consumer<KubernetesClientException> recreateWatch(String namespace) {

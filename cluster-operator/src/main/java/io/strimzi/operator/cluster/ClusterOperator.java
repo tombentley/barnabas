@@ -97,6 +97,11 @@ public class ClusterOperator extends AbstractVerticle {
                 return Future.succeededFuture();
             }));
         }
+        watchFutures.add(KafkaConnectAssemblyOperator.createConnectorWatch(vertx, null, kafkaConnectAssemblyOperator, namespace));
+        if (kafkaConnectS2IAssemblyOperator != null) {
+            watchFutures.add(KafkaConnectAssemblyOperator.createConnectorWatch(vertx, null, kafkaConnectS2IAssemblyOperator, namespace));
+        }
+
         CompositeFuture.join(watchFutures)
                 .compose(f -> startHealthServer().map((Void) null))
                 .compose(start::complete, start);
