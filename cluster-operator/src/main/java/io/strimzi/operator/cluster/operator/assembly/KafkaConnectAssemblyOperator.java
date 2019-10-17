@@ -6,6 +6,7 @@ package io.strimzi.operator.cluster.operator.assembly;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.LabelSelector;
+import io.fabric8.kubernetes.api.model.LabelSelectorBuilder;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
@@ -19,6 +20,8 @@ import io.strimzi.api.kafka.model.KafkaConnect;
 import io.strimzi.api.kafka.model.KafkaConnectBuilder;
 import io.strimzi.api.kafka.model.KafkaConnectResources;
 import io.strimzi.api.kafka.model.KafkaConnector;
+import io.strimzi.api.kafka.model.KafkaConnectorConfig;
+import io.strimzi.api.kafka.model.KafkaConnectorSpec;
 import io.strimzi.api.kafka.model.status.KafkaConnectStatus;
 import io.strimzi.certs.CertManager;
 import io.strimzi.operator.PlatformFeaturesAvailability;
@@ -37,16 +40,20 @@ import io.strimzi.operator.common.operator.resource.StatusUtils;
 import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
+import io.vertx.core.json.JsonObject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * <p>Assembly operator for a "Kafka Connect" assembly, which manages:</p>
@@ -62,7 +69,7 @@ public class KafkaConnectAssemblyOperator extends AbstractAssemblyOperator<Kuber
     private final KafkaVersion.Lookup versions;
     private final CrdOperator<KubernetesClient, KafkaConnector, KafkaConnectorList, DoneableKafkaConnector> connectorOperator;
     private final Function<KafkaConnect, KafkaConnectApi> connectClientProvider;
-    private final Map<String, WatchValue> connectorWatches = new ConcurrentHashMap<>();
+    //private final Map<String, WatchValue> connectorWatches = new ConcurrentHashMap<>();
 
     /**
      * @param vertx The Vertx instance
@@ -126,7 +133,8 @@ public class KafkaConnectAssemblyOperator extends AbstractAssemblyOperator<Kuber
                 .compose(i -> deploymentOperations.scaleUp(namespace, connect.getName(), connect.getReplicas()))
                 .compose(i -> deploymentOperations.waitForObserved(namespace, connect.getName(), 1_000, operationTimeoutMs))
                 .compose(i -> deploymentOperations.readiness(namespace, connect.getName(), 1_000, operationTimeoutMs))
-                .compose(i -> maybeWatchConnectors(reconciliation, kafkaConnect))
+                //.compose(i -> maybeWatchConnectors(reconciliation, kafkaConnect))
+                .compose(i -> reconcileConnectors(namespace, connect.getName()))
                 .compose(i -> chainFuture.complete(), chainFuture)
                 .setHandler(reconciliationResult -> {
                     StatusUtils.setStatusConditionAndObservedGeneration(kafkaConnect, kafkaConnectStatus, reconciliationResult);
@@ -147,107 +155,161 @@ public class KafkaConnectAssemblyOperator extends AbstractAssemblyOperator<Kuber
         return createOrUpdateFuture;
     }
 
-    /**
-     * Creates a watch using the {@code KafkaConnect.spec.connectorSelector} to watch connectors in
-     * this connect instance.
-     * @param reconciliation The KafkaConnect reconciliation
-     * @param kafkaConnect The resource being reconciled
-     * @return Future which completes once the connectors are being watched
-     */
-    private Future<Void> maybeWatchConnectors(Reconciliation reconciliation, KafkaConnect kafkaConnect) {
-        LabelSelector connectorSelector = kafkaConnect.getSpec().getConnectorSelector();
-        if (connectorSelector != null) {
-            log.debug("{}: resource uses selector {}}", reconciliation, connectorSelector);
-            return connectorWatches.compute(watchKey(reconciliation), (k, currentValue) -> {
-                if (currentValue != null) {
-                    if (connectorSelector.equals(currentValue.selector)) {
-                        log.debug("{}: There's an existing watch for selector {}}",
-                                reconciliation, connectorSelector);
-                        return currentValue;
-                    } else {
-                        log.debug("{}: selector has changed from {} to {}, replacing watch",
-                                reconciliation, currentValue.selector, connectorSelector);
-                    }
-                } else {
-                    log.debug("{}: Creating new watch for selector {}}", reconciliation, connectorSelector);
-                }
-                return setupWatch(reconciliation, kafkaConnect, currentValue);
-            }).watch.map((Void) null);
-        } else {
-            log.debug("{}: resource doesn't use a selector => not watching for KafkaConnectors", reconciliation);
-            return Future.succeededFuture();
-        }
+
+    private Future<Void> reconcileConnectors(String namespace, String connectorName) {
+        KafkaConnectApi apiClient = new KafkaConnectApiImpl(vertx, null, 0);
+        return CompositeFuture.join(apiClient.list(),
+                connectorOperator.listAsync(namespace,
+                    Optional.of(new LabelSelectorBuilder().addToMatchLabels("strimzi.io/cluster", connectorName).build()))
+            ).compose(cf -> {
+                List<String> runningConnectors = cf.resultAt(0);
+            List<KafkaConnector> desired = (List<KafkaConnector>) cf.resultAt(1);
+
+                Set<String> delete = new HashSet<>(runningConnectors);
+                delete.removeAll(desired.stream().map(c -> c.getMetadata().getName()).collect(Collectors.toSet()));
+            Stream<Future<Void>> deletionFutures = delete.stream().map(connector -> apiClient.delete(connector));
+            Stream<Future<Void>> createUpdateFutures = desired.stream()
+                    .map(connector -> apiClient.createOrUpdatePutRequest(connector.getMetadata().getName(), asJson(connector))
+                            // TODO have to update the status of the connector CRs
+                            .compose(i -> Future.<Void>succeededFuture(null))
+                            // TODO have to update the status of the connector CRs
+                            .recover(e -> Future.failedFuture(e)));
+            return CompositeFuture.join(Stream.concat(deletionFutures, createUpdateFutures).collect(Collectors.toList())).map((Void) null);
+        });
     }
 
-    @SuppressWarnings("unchecked")
-    private WatchValue setupWatch(Reconciliation reconciliation, KafkaConnect kafkaConnect, WatchValue currentWatchValue) {
-        if (currentWatchValue != null) {
-            currentWatchValue.asyncClose();
+    private JsonObject asJson(KafkaConnector assemblyResource) {
+        KafkaConnectorSpec spec = assemblyResource.getSpec();
+        JsonObject connectorConfigJson = new JsonObject();
+        for (KafkaConnectorConfig cf : spec.getConfig()) {
+            String name = cf.getName();
+            if ("connector.class".equals(name)
+                    || "tasks.max".equals(name)) {
+                // TODO include resource namespace and name in this message
+                log.warn("Configuration parameter {} in KafkaConnector.spec.config will be ignored and the value from KafkaConnector.spec will be used instead",
+                        name);
+            }
+            connectorConfigJson.put(name, cf.getValue());
         }
-        LabelSelector connectorSelector = kafkaConnect.getSpec().getConnectorSelector();
-        KafkaConnectorAssemblyOperator operator = new KafkaConnectorAssemblyOperator(vertx, connectorSelector, connectorOperator,
-                connectClientProvider.apply(kafkaConnect));
-        WatchValue watchValue = new WatchValue(reconciliation, operator);
-        if (currentWatchValue != null) {
-            // It's not enough to reconcile the _new_ connector operator because that's using the new selector
-            // it won't find the connectors which matched the old selector but which don't match the new one.
-            CompositeFuture.join(
-                    connectorOperator.listAsync(reconciliation.namespace(), currentWatchValue.operator.selector()),
-                    connectorOperator.listAsync(reconciliation.namespace(), operator.selector()))
-                .compose(joinedFuture -> {
-                    Set<NamespaceAndName> oldConnectors = ((List<KafkaConnector>) joinedFuture.resultAt(0)).stream()
-                        .map(connector -> new NamespaceAndName(reconciliation.namespace(), connector.getMetadata().getName()))
-                        .collect(Collectors.toSet());
-                    Set<NamespaceAndName> newConnectors = ((List<KafkaConnector>) joinedFuture.resultAt(1)).stream()
-                        .map(connector -> new NamespaceAndName(reconciliation.namespace(), connector.getMetadata().getName()))
-                        .collect(Collectors.toSet());
-                    oldConnectors.removeAll(newConnectors);
-                    // We have to call delete() directly, because reconcile() doesn't test resources against
-                    // the operators selector.
-                    for (NamespaceAndName ref : oldConnectors) {
-                        operator.delete(new Reconciliation("", operator.kind(), ref.getNamespace(), ref.getName()));
-                    }
-                    Future<Void> f = Future.future();
-                    operator.reconcileThese("selector-change",
-                        newConnectors,
-                        f);
-                    return f;
-                });
-        }
-        return watchValue;
+        return connectorConfigJson
+                .put("connector.class", spec.getClassName())
+                .put("tasks.max", spec.getTasksMax());
     }
 
-    class WatchValue {
-        final LabelSelector selector;
-        final Future<Watch> watch;
-        final KafkaConnectorAssemblyOperator operator;
 
-        public WatchValue(Reconciliation reconciliation, KafkaConnectorAssemblyOperator operator) {
-            this.selector = operator.selector().get();
-            this.operator = operator;
-            this.watch = operator.createWatch(reconciliation.namespace(), operator.recreateWatch(reconciliation.namespace()));
-        }
+//    @Override
+//    public Future<Set<NamespaceAndName>> allResourceNames(String namespace) {
+//        return CompositeFuture.join(super.allResourceNames(namespace),
+//                apiClient.list()).map(cf -> {
+//            Set<NamespaceAndName> combined = cf.resultAt(0);
+//            List<String> runningConnectors = cf.resultAt(1);
+//            combined.addAll(runningConnectors.stream().map(n -> new NamespaceAndName(namespace, n)).collect(Collectors.toList()));
+//            return combined;
+//        });
+//    }
 
-        Future<Void> asyncClose() {
-            return watch.compose(watch -> async(() -> {
-                log.trace("Closing {} on selector {}", watch, selector);
-                watch.close();
-                log.trace("Closed {} on selector {}", watch, selector);
-                return null;
-            }));
-        }
-    }
 
-    private String watchKey(Reconciliation reconciliation) {
-        return reconciliation.namespace() + "/" + reconciliation.name();
-    }
-
-    @Override
-    protected Future<Boolean> delete(Reconciliation reconciliation) {
-        WatchValue watchValue = connectorWatches.remove(watchKey(reconciliation));
-        Future<Void> compose = watchValue != null ? watchValue.asyncClose() : Future.succeededFuture();
-        return compose.compose(ignored -> super.delete(reconciliation));
-    }
+//    /**
+//     * Creates a watch using the {@code KafkaConnect.spec.connectorSelector} to watch connectors in
+//     * this connect instance.
+//     * @param reconciliation The KafkaConnect reconciliation
+//     * @param kafkaConnect The resource being reconciled
+//     * @return Future which completes once the connectors are being watched
+//     */
+//    private Future<Void> maybeWatchConnectors(Reconciliation reconciliation, KafkaConnect kafkaConnect) {
+//        LabelSelector connectorSelector = kafkaConnect.getSpec().getConnectorSelector();
+//        if (connectorSelector != null) {
+//            log.debug("{}: resource uses selector {}}", reconciliation, connectorSelector);
+//            return connectorWatches.compute(watchKey(reconciliation), (k, currentValue) -> {
+//                if (currentValue != null) {
+//                    if (connectorSelector.equals(currentValue.selector)) {
+//                        log.debug("{}: There's an existing watch for selector {}}",
+//                                reconciliation, connectorSelector);
+//                        return currentValue;
+//                    } else {
+//                        log.debug("{}: selector has changed from {} to {}, replacing watch",
+//                                reconciliation, currentValue.selector, connectorSelector);
+//                    }
+//                } else {
+//                    log.debug("{}: Creating new watch for selector {}}", reconciliation, connectorSelector);
+//                }
+//                return setupWatch(reconciliation, kafkaConnect, currentValue);
+//            }).watch.map((Void) null);
+//        } else {
+//            log.debug("{}: resource doesn't use a selector => not watching for KafkaConnectors", reconciliation);
+//            return Future.succeededFuture();
+//        }
+//    }
+//
+//    @SuppressWarnings("unchecked")
+//    private WatchValue setupWatch(Reconciliation reconciliation, KafkaConnect kafkaConnect, WatchValue currentWatchValue) {
+//        if (currentWatchValue != null) {
+//            currentWatchValue.asyncClose();
+//        }
+//        LabelSelector connectorSelector = kafkaConnect.getSpec().getConnectorSelector();
+//        KafkaConnectorAssemblyOperator operator = new KafkaConnectorAssemblyOperator(vertx, connectorSelector, connectorOperator,
+//                connectClientProvider.apply(kafkaConnect));
+//        WatchValue watchValue = new WatchValue(reconciliation, operator);
+//        if (currentWatchValue != null) {
+//            // It's not enough to reconcile the _new_ connector operator because that's using the new selector
+//            // it won't find the connectors which matched the old selector but which don't match the new one.
+//            CompositeFuture.join(
+//                    connectorOperator.listAsync(reconciliation.namespace(), currentWatchValue.operator.selector()),
+//                    connectorOperator.listAsync(reconciliation.namespace(), operator.selector()))
+//                .compose(joinedFuture -> {
+//                    Set<NamespaceAndName> oldConnectors = ((List<KafkaConnector>) joinedFuture.resultAt(0)).stream()
+//                        .map(connector -> new NamespaceAndName(reconciliation.namespace(), connector.getMetadata().getName()))
+//                        .collect(Collectors.toSet());
+//                    Set<NamespaceAndName> newConnectors = ((List<KafkaConnector>) joinedFuture.resultAt(1)).stream()
+//                        .map(connector -> new NamespaceAndName(reconciliation.namespace(), connector.getMetadata().getName()))
+//                        .collect(Collectors.toSet());
+//                    oldConnectors.removeAll(newConnectors);
+//                    // We have to call delete() directly, because reconcile() doesn't test resources against
+//                    // the operators selector.
+//                    for (NamespaceAndName ref : oldConnectors) {
+//                        operator.delete(new Reconciliation("", operator.kind(), ref.getNamespace(), ref.getName()));
+//                    }
+//                    Future<Void> f = Future.future();
+//                    operator.reconcileThese("selector-change",
+//                        newConnectors,
+//                        f);
+//                    return f;
+//                });
+//        }
+//        return watchValue;
+//    }
+//
+//    class WatchValue {
+//        final LabelSelector selector;
+//        final Future<Watch> watch;
+//        final KafkaConnectorAssemblyOperator operator;
+//
+//        public WatchValue(Reconciliation reconciliation, KafkaConnectorAssemblyOperator operator) {
+//            this.selector = operator.selector().get();
+//            this.operator = operator;
+//            this.watch = operator.createWatch(reconciliation.namespace(), operator.recreateWatch(reconciliation.namespace()));
+//        }
+//
+//        Future<Void> asyncClose() {
+//            return watch.compose(watch -> async(() -> {
+//                log.trace("Closing {} on selector {}", watch, selector);
+//                watch.close();
+//                log.trace("Closed {} on selector {}", watch, selector);
+//                return null;
+//            }));
+//        }
+//    }
+//
+//    private String watchKey(Reconciliation reconciliation) {
+//        return reconciliation.namespace() + "/" + reconciliation.name();
+//    }
+//
+//    @Override
+//    protected Future<Boolean> delete(Reconciliation reconciliation) {
+//        WatchValue watchValue = connectorWatches.remove(watchKey(reconciliation));
+//        Future<Void> compose = watchValue != null ? watchValue.asyncClose() : Future.succeededFuture();
+//        return compose.compose(ignored -> super.delete(reconciliation));
+//    }
 
     /**
      * Updates the Status field of the Kafka Connect CR. It diffs the desired status against the current status and calls
