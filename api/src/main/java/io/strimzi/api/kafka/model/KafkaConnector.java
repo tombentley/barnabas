@@ -10,6 +10,7 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import io.fabric8.kubernetes.api.model.Doneable;
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.CustomResource;
+import io.strimzi.api.kafka.model.status.KafkaConnectorStatus;
 import io.strimzi.crdgenerator.annotations.Crd;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.sundr.builder.annotations.Buildable;
@@ -66,6 +67,7 @@ public class KafkaConnector extends CustomResource implements UnknownPropertyPre
     public static final String SHORT_NAME = "kctr";
 
     private KafkaConnectorSpec spec;
+    private KafkaConnectorStatus status;
     private Map<String, Object> additionalProperties;
     private ObjectMeta metadata;
     private String apiVersion;
@@ -104,6 +106,15 @@ public class KafkaConnector extends CustomResource implements UnknownPropertyPre
 
     public void setSpec(KafkaConnectorSpec spec) {
         this.spec = spec;
+    }
+
+    @Description("The status of the Kafka Connector.")
+    public KafkaConnectorStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(KafkaConnectorStatus status) {
+        this.status = status;
     }
 
     @Override

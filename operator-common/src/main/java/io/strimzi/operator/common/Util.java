@@ -21,13 +21,13 @@ public class Util {
     public static <T> Future<T> async(Vertx vertx, Supplier<T> supplier) {
         Future<T> result = Future.future();
         vertx.executeBlocking(
-                future -> {
-                    try {
-                        future.complete(supplier.get());
-                    } catch (Throwable t) {
-                        future.fail(t);
-                    }
-                }, result
+            future -> {
+                try {
+                    future.complete(supplier.get());
+                } catch (Throwable t) {
+                    future.fail(t);
+                }
+            }, result
         );
         return result;
     }

@@ -111,7 +111,8 @@ public class Main {
                     kafkaConnectClusterOperations,
                     kafkaConnectS2IClusterOperations,
                     kafkaMirrorMakerAssemblyOperator,
-                    kafkaBridgeAssemblyOperator);
+                    kafkaBridgeAssemblyOperator,
+                    resourceOperatorSupplier.kafkaConnectorOperator);
             vertx.deployVerticle(operator,
                 res -> {
                     if (res.succeeded()) {

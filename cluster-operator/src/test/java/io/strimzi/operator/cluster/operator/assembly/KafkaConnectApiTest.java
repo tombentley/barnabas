@@ -88,9 +88,9 @@ public class KafkaConnectApiTest {
 
     @Test
     public void test(TestContext context) throws InterruptedException {
-        KafkaConnectApi client = new KafkaConnectApiImpl(vertx, "localhost", PORT);
+        KafkaConnectApi client = new KafkaConnectApiImpl(vertx);
         Async async = context.async();
-        client.list()
+        client.list("localhost", PORT)
             .compose(connectorNames -> {
                 assertEquals(emptyList(), connectorNames);
                 JsonObject o = new JsonObject()
@@ -98,7 +98,7 @@ public class KafkaConnectApiTest {
                     .put("tasks.max", "1")
                     .put("file", "/dev/null")
                     .put("topic", "my-topic");
-                return client.createOrUpdatePutRequest("test", o);
+                return client.createOrUpdatePutRequest("localhost", PORT, "test", o);
             })
             .compose(created -> {
                 JsonObject o = new JsonObject()
@@ -106,7 +106,7 @@ public class KafkaConnectApiTest {
                     .put("tasks.max", "1")
                     .put("file", "/dev/null")
                     .put("topic", "my-topic");
-                return client.createOrUpdatePutRequest("broken", o)
+                return client.createOrUpdatePutRequest("localhost", PORT, "broken", o)
                     .compose(ignored -> Future.failedFuture(new AssertionError("Should fail")))
                     .recover(e -> {
                         if (e instanceof ConnectRestException) {
@@ -125,7 +125,7 @@ public class KafkaConnectApiTest {
                     .put("tasks.max", "dog")
                     .put("file", "/dev/null")
                     .put("topic", "my-topic");
-                return client.createOrUpdatePutRequest("broken2", o)
+                return client.createOrUpdatePutRequest("localhost", PORT, "broken2", o)
                     .compose(ignored -> Future.failedFuture(new AssertionError("Should fail")))
                     .recover(e -> {
                         if (e instanceof ConnectRestException) {
@@ -139,15 +139,15 @@ public class KafkaConnectApiTest {
                         }
                     });
             }).compose(createResponse -> {
-                return client.list();
+                return client.list("localhost", PORT);
             }).compose(connectorNames -> {
                 assertEquals(singletonList("test"), connectorNames);
-                return client.delete("test");
+                return client.delete("localhost", PORT, "test");
             }).compose(deleteResponse -> {
-                return client.list();
+                return client.list("localhost", PORT);
             }).compose(connectorNames -> {
                 assertEquals(emptyList(), connectorNames);
-                return client.delete("never-existed")
+                return client.delete("localhost", PORT, "never-existed")
                     .compose(ignored -> Future.failedFuture(new AssertionError("Should fail")))
                     .recover(e -> {
                         if (e instanceof ConnectRestException) {

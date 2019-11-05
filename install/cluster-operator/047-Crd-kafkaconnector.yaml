@@ -32,3 +32,23 @@ spec:
               minimum: 1
             config:
               type: object
+        status:
+          type: object
+          properties:
+            conditions:
+              type: array
+              items:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  status:
+                    type: string
+                  lastTransitionTime:
+                    type: string
+                  reason:
+                    type: string
+                  message:
+                    type: string
+            observedGeneration:
+              type: integer

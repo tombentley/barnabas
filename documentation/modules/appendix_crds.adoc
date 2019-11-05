@@ -1227,7 +1227,7 @@ Used in: xref:type-Kafka-{context}[`Kafka`]
 [id='type-Condition-{context}']
 ### `Condition` schema reference
 
-Used in: xref:type-KafkaBridgeStatus-{context}[`KafkaBridgeStatus`], xref:type-KafkaConnectS2Istatus-{context}[`KafkaConnectS2Istatus`], xref:type-KafkaConnectStatus-{context}[`KafkaConnectStatus`], xref:type-KafkaMirrorMakerStatus-{context}[`KafkaMirrorMakerStatus`], xref:type-KafkaStatus-{context}[`KafkaStatus`], xref:type-KafkaTopicStatus-{context}[`KafkaTopicStatus`], xref:type-KafkaUserStatus-{context}[`KafkaUserStatus`]
+Used in: xref:type-KafkaBridgeStatus-{context}[`KafkaBridgeStatus`], xref:type-KafkaConnectorStatus-{context}[`KafkaConnectorStatus`], xref:type-KafkaConnectS2Istatus-{context}[`KafkaConnectS2Istatus`], xref:type-KafkaConnectStatus-{context}[`KafkaConnectStatus`], xref:type-KafkaMirrorMakerStatus-{context}[`KafkaMirrorMakerStatus`], xref:type-KafkaStatus-{context}[`KafkaStatus`], xref:type-KafkaTopicStatus-{context}[`KafkaTopicStatus`], xref:type-KafkaUserStatus-{context}[`KafkaUserStatus`]
 
 
 [options="header"]
@@ -2256,9 +2256,11 @@ Used in: xref:type-KafkaBridge-{context}[`KafkaBridge`]
 
 [options="header"]
 |====
-|Property     |Description
-|spec  1.2+<.<|The specification of the Kafka Connector.
+|Property       |Description
+|spec    1.2+<.<|The specification of the Kafka Connector.
 |xref:type-KafkaConnectorSpec-{context}[`KafkaConnectorSpec`]
+|status  1.2+<.<|The status of the Kafka Connector.
+|xref:type-KafkaConnectorStatus-{context}[`KafkaConnectorStatus`]
 |====
 
 [id='type-KafkaConnectorSpec-{context}']
@@ -2274,24 +2276,22 @@ Used in: xref:type-KafkaConnector-{context}[`KafkaConnector`]
 |string
 |tasksMax  1.2+<.<|The maximum number of tasks for the Kafka Connector.
 |integer
-|topics    1.2+<.<|A list of topics to use as input for the Kafka Connector.
-|string array
-|config    1.2+<.<|The Config for the Kafka Connector Spec.
-|xref:type-KafkaConnectorConfig-{context}[`KafkaConnectorConfig`] array
+|config    1.2+<.<|The Kafka Connector configuration. The following properties cannot be set: connector.class, tasks.max.
+|map
 |====
 
-[id='type-KafkaConnectorConfig-{context}']
-### `KafkaConnectorConfig` schema reference
+[id='type-KafkaConnectorStatus-{context}']
+### `KafkaConnectorStatus` schema reference
 
-Used in: xref:type-KafkaConnectorSpec-{context}[`KafkaConnectorSpec`]
+Used in: xref:type-KafkaConnector-{context}[`KafkaConnector`]
 
 
 [options="header"]
 |====
-|Property      |Description
-|name   1.2+<.<|The name of the connector configuration parameter.
-|string
-|value  1.2+<.<|The value of the connector configuration parameter.
-|string
+|Property                   |Description
+|conditions          1.2+<.<|List of status conditions.
+|xref:type-Condition-{context}[`Condition`] array
+|observedGeneration  1.2+<.<|The generation of the CRD that was last reconciled by the operator.
+|integer
 |====
 

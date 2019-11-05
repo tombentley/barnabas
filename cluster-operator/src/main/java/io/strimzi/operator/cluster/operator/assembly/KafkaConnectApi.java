@@ -17,9 +17,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public interface KafkaConnectApi {
-    Future<JsonObject> createOrUpdatePutRequest(String connectorName, JsonObject configJson);
-    Future<Void> delete(String connectorName);
-    Future<List<String>> list();
+    Future<JsonObject> createOrUpdatePutRequest(String host, int port, String connectorName, JsonObject configJson);
+    Future<Void> delete(String host, int port, String connectorName);
+    Future<List<String>> list(String host, int port);
 }
 
 class ConnectRestException extends RuntimeException {
@@ -32,17 +32,15 @@ class ConnectRestException extends RuntimeException {
 class KafkaConnectApiImpl implements KafkaConnectApi {
     private static final Logger log = LogManager.getLogger(KafkaConnectApiImpl.class);
     private final Vertx vertx;
-    private final String host;
-    private final int port;
 
-    public KafkaConnectApiImpl(Vertx vertx, String host, int port) {
+    public KafkaConnectApiImpl(Vertx vertx) {
         this.vertx = vertx;
-        this.host = host;
-        this.port = port;
     }
 
     @Override
-    public Future<JsonObject> createOrUpdatePutRequest(String connectorName,
+    public Future<JsonObject> createOrUpdatePutRequest(
+            String host, int port,
+            String connectorName,
                                                        JsonObject configJson) {
         Future<JsonObject> result = Future.future();
         HttpClientOptions options = new HttpClientOptions().setLogActivity(true);
@@ -78,7 +76,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
     }
 
     @Override
-    public Future<Void> delete(String connectorName) {
+    public Future<Void> delete(String host, int port, String connectorName) {
         Future<Void> result = Future.future();
         HttpClientOptions options = new HttpClientOptions().setLogActivity(true);
         String path = "/connectors/" + connectorName;
@@ -103,7 +101,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
     }
 
     @Override
-    public Future<List<String>> list() {
+    public Future<List<String>> list(String host, int port) {
         Future<List<String>> result = Future.future();
         HttpClientOptions options = new HttpClientOptions().setLogActivity(true);
         String path = "/connectors";
