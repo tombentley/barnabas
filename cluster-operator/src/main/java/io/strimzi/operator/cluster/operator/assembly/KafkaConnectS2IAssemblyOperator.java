@@ -38,6 +38,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.HashMap;
+import java.util.function.Function;
 
 /**
  * <p>Assembly operator for a "Kafka Connect S2I" assembly, which manages:</p>
@@ -47,7 +48,7 @@ import java.util.HashMap;
  *     <li>A BuildConfig</li>
  * </ul>
  */
-public class KafkaConnectS2IAssemblyOperator extends AbstractAssemblyOperator<OpenShiftClient, KafkaConnectS2I, KafkaConnectS2IList, DoneableKafkaConnectS2I, Resource<KafkaConnectS2I, DoneableKafkaConnectS2I>> {
+public class KafkaConnectS2IAssemblyOperator extends AbstractConnectOperator<OpenShiftClient, KafkaConnectS2I, KafkaConnectS2IList, DoneableKafkaConnectS2I, Resource<KafkaConnectS2I, DoneableKafkaConnectS2I>> {
 
     private static final Logger log = LogManager.getLogger(KafkaConnectS2IAssemblyOperator.class.getName());
     public static final String ANNO_STRIMZI_IO_LOGGING = Annotations.STRIMZI_DOMAIN + "/logging";
@@ -67,8 +68,9 @@ public class KafkaConnectS2IAssemblyOperator extends AbstractAssemblyOperator<Op
     public KafkaConnectS2IAssemblyOperator(Vertx vertx, PlatformFeaturesAvailability pfa,
                                            CertManager certManager,
                                            ResourceOperatorSupplier supplier,
-                                           ClusterOperatorConfig config) {
-        super(vertx, pfa, KafkaConnectS2I.RESOURCE_KIND, certManager, supplier.connectS2IOperator, supplier, config);
+                                           ClusterOperatorConfig config,
+                                           Function<Vertx, KafkaConnectApi> connectClientProvider) {
+        super(vertx, pfa, KafkaConnectS2I.RESOURCE_KIND, certManager, supplier.connectS2IOperator, supplier, config, connectClientProvider);
         this.deploymentConfigOperations = supplier.deploymentConfigOperations;
         this.imagesStreamOperations = supplier.imagesStreamOperations;
         this.buildConfigOperations = supplier.buildConfigOperations;
@@ -112,6 +114,7 @@ public class KafkaConnectS2IAssemblyOperator extends AbstractAssemblyOperator<Op
                     .compose(i -> deploymentConfigOperations.scaleUp(namespace, connect.getName(), connect.getReplicas()))
                     .compose(i -> deploymentConfigOperations.waitForObserved(namespace, connect.getName(), 1_000, operationTimeoutMs))
                     .compose(i -> deploymentConfigOperations.readiness(namespace, connect.getName(), 1_000, operationTimeoutMs))
+                    .compose(i -> reconcileConnectors(reconciliation, namespace, kafkaConnectS2I))
                     .compose(i -> chainFuture.complete(), chainFuture)
                     .setHandler(reconciliationResult -> {
                         StatusUtils.setStatusConditionAndObservedGeneration(kafkaConnectS2I, kafkaConnectS2Istatus, reconciliationResult);

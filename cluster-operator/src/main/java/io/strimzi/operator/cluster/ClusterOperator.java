@@ -6,8 +6,14 @@ package io.strimzi.operator.cluster;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
+import io.strimzi.api.kafka.KafkaConnectList;
+import io.strimzi.api.kafka.KafkaConnectS2IList;
 import io.strimzi.api.kafka.KafkaConnectorList;
+import io.strimzi.api.kafka.model.DoneableKafkaConnect;
+import io.strimzi.api.kafka.model.DoneableKafkaConnectS2I;
 import io.strimzi.api.kafka.model.DoneableKafkaConnector;
+import io.strimzi.api.kafka.model.KafkaConnect;
+import io.strimzi.api.kafka.model.KafkaConnectS2I;
 import io.strimzi.api.kafka.model.KafkaConnector;
 import io.strimzi.operator.cluster.operator.assembly.KafkaAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaBridgeAssemblyOperator;
@@ -54,6 +60,8 @@ public class ClusterOperator extends AbstractVerticle {
 
     private final Map<String, Watch> watchByKind = new ConcurrentHashMap<>();
     private final CrdOperator<KubernetesClient, KafkaConnector, KafkaConnectorList, DoneableKafkaConnector> connectorOperations;
+    private final CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList, DoneableKafkaConnect> connectOperations;
+    private final CrdOperator<KubernetesClient, KafkaConnectS2I, KafkaConnectS2IList, DoneableKafkaConnectS2I> connectS2iOperations;
 
     private long reconcileTimer;
     private final KafkaAssemblyOperator kafkaAssemblyOperator;
@@ -70,7 +78,9 @@ public class ClusterOperator extends AbstractVerticle {
                            KafkaConnectS2IAssemblyOperator kafkaConnectS2IAssemblyOperator,
                            KafkaMirrorMakerAssemblyOperator kafkaMirrorMakerAssemblyOperator,
                            KafkaBridgeAssemblyOperator kafkaBridgeAssemblyOperator,
-                           CrdOperator<KubernetesClient, KafkaConnector, KafkaConnectorList, DoneableKafkaConnector> connectorOperations) {
+                           CrdOperator<KubernetesClient, KafkaConnector, KafkaConnectorList, DoneableKafkaConnector> connectorOperations,
+                           CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList, DoneableKafkaConnect> connectOperations,
+                           CrdOperator<KubernetesClient, KafkaConnectS2I, KafkaConnectS2IList, DoneableKafkaConnectS2I> connectS2iOperations) {
         log.info("Creating ClusterOperator for namespace {}", namespace);
         this.namespace = namespace;
         this.reconciliationInterval = reconciliationInterval;
@@ -81,6 +91,8 @@ public class ClusterOperator extends AbstractVerticle {
         this.kafkaMirrorMakerAssemblyOperator = kafkaMirrorMakerAssemblyOperator;
         this.kafkaBridgeAssemblyOperator = kafkaBridgeAssemblyOperator;
         this.connectorOperations = connectorOperations;
+        this.connectOperations = connectOperations;
+        this.connectS2iOperations = connectS2iOperations;
     }
 
     @Override
@@ -104,13 +116,20 @@ public class ClusterOperator extends AbstractVerticle {
                 return Future.succeededFuture();
             }));
         }
-        watchFutures.add(KafkaConnectAssemblyOperator.createConnectorWatch(vertx, connectorOperations, kafkaConnectAssemblyOperator, namespace));
+        watchFutures.add(KafkaConnectAssemblyOperator.createConnectorWatch(vertx, connectorOperations, connectOperations, kafkaConnectAssemblyOperator, namespace));
         if (kafkaConnectS2IAssemblyOperator != null) {
-            watchFutures.add(KafkaConnectAssemblyOperator.createConnectorWatch(vertx, connectorOperations, kafkaConnectS2IAssemblyOperator, namespace));
+            watchFutures.add(KafkaConnectAssemblyOperator.createConnectorWatch(vertx, connectorOperations, connectS2iOperations, kafkaConnectS2IAssemblyOperator, namespace));
         }
 
         CompositeFuture.join(watchFutures)
-                .compose(f -> startHealthServer().map((Void) null))
+                .compose(f -> {
+                    log.info("Setting up periodic reconciliation for namespace {}", namespace);
+                    this.reconcileTimer = vertx.setPeriodic(this.reconciliationInterval, res2 -> {
+                        log.info("Triggering periodic reconciliation for namespace {}...", namespace);
+                        reconcileAll("timer");
+                    });
+                    return startHealthServer().map((Void) null);
+                })
                 .compose(start::complete, start);
     }
 
