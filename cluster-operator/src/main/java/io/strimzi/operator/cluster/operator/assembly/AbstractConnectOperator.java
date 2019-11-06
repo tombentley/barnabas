@@ -81,7 +81,7 @@ public abstract class AbstractConnectOperator<C extends KubernetesClient, T exte
      * @param namespace The namespace
      * @param <T> The type of the connect resource (e.g. KafkaConnect or KafkaConnectS2I)
      * @param <S> The type of the connector operator
-     * @return
+     * @return A future
      */
     public static <
             T extends HasMetadata,

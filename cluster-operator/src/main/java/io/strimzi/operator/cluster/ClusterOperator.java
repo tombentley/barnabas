@@ -6,6 +6,7 @@ package io.strimzi.operator.cluster;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.Watch;
+import io.fabric8.openshift.client.OpenShiftClient;
 import io.strimzi.api.kafka.KafkaConnectList;
 import io.strimzi.api.kafka.KafkaConnectS2IList;
 import io.strimzi.api.kafka.KafkaConnectorList;
@@ -61,7 +62,7 @@ public class ClusterOperator extends AbstractVerticle {
     private final Map<String, Watch> watchByKind = new ConcurrentHashMap<>();
     private final CrdOperator<KubernetesClient, KafkaConnector, KafkaConnectorList, DoneableKafkaConnector> connectorOperations;
     private final CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList, DoneableKafkaConnect> connectOperations;
-    private final CrdOperator<KubernetesClient, KafkaConnectS2I, KafkaConnectS2IList, DoneableKafkaConnectS2I> connectS2iOperations;
+    private final CrdOperator<OpenShiftClient, KafkaConnectS2I, KafkaConnectS2IList, DoneableKafkaConnectS2I> connectS2iOperations;
 
     private long reconcileTimer;
     private final KafkaAssemblyOperator kafkaAssemblyOperator;
@@ -80,7 +81,7 @@ public class ClusterOperator extends AbstractVerticle {
                            KafkaBridgeAssemblyOperator kafkaBridgeAssemblyOperator,
                            CrdOperator<KubernetesClient, KafkaConnector, KafkaConnectorList, DoneableKafkaConnector> connectorOperations,
                            CrdOperator<KubernetesClient, KafkaConnect, KafkaConnectList, DoneableKafkaConnect> connectOperations,
-                           CrdOperator<KubernetesClient, KafkaConnectS2I, KafkaConnectS2IList, DoneableKafkaConnectS2I> connectS2iOperations) {
+                           CrdOperator<OpenShiftClient, KafkaConnectS2I, KafkaConnectS2IList, DoneableKafkaConnectS2I> connectS2iOperations) {
         log.info("Creating ClusterOperator for namespace {}", namespace);
         this.namespace = namespace;
         this.reconciliationInterval = reconciliationInterval;

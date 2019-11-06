@@ -8,6 +8,8 @@ import io.fabric8.kubernetes.api.model.Doneable;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.KubernetesResource;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
+import io.fabric8.kubernetes.api.model.LabelSelector;
+import io.fabric8.kubernetes.api.model.LabelSelectorRequirement;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
@@ -77,6 +79,16 @@ class MockBuilder<T extends HasMetadata,
     protected final String resourceType;
     protected final Collection<PredicatedWatcher<T>> watchers = Collections.synchronizedList(new ArrayList<>(2));
     private List<Observer<T>> observers = null;
+
+    public void assertNumWatchers(int expectedNumWatchers) {
+        if (watchers.size() != expectedNumWatchers) {
+            throw new AssertionError("Unclosed watchers " + watchers);
+        }
+    }
+
+    public void assertNoWatchers() {
+        assertNumWatchers(0);
+    }
 
     public MockBuilder(Class<T> resourceTypeClass, Class<L> listClass, Class<D> doneableClass,
                        Class<R> resourceClass, Map<String, T> db) {
@@ -169,6 +181,19 @@ class MockBuilder<T extends HasMetadata,
             String label = i.getArgument(0);
             String value = i.getArgument(1);
             return mockWithLabels(singletonMap(label, value));
+        });
+        when(mixed.withLabelSelector(any())).thenAnswer(i -> {
+            LabelSelector labelSelector = i.getArgument(0);
+            Map<String, String> matchLabels = labelSelector.getMatchLabels();
+            List<LabelSelectorRequirement> matchExpressions = labelSelector.getMatchExpressions();
+            if (matchExpressions != null && !matchExpressions.isEmpty()) {
+                throw new RuntimeException("MockKube doesn't support match expressions yet");
+            }
+            return mockWithLabelPredicate(p -> {
+                Map<String, String> m = new HashMap<>(p.getMetadata().getLabels());
+                m.keySet().retainAll(matchLabels.keySet());
+                return matchLabels.equals(m);
+            });
         });
         when(mixed.withLabels(any())).thenAnswer(i -> {
             Map<String, String> labels = i.getArgument(0);

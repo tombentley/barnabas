@@ -2,9 +2,9 @@
 apiVersion: "kafka.strimzi.io/v1alpha1"
 kind: "KafkaConnector"
 metadata:
-  labels:
-    strimzi.io/cluster: "my-connect-cluster"
   name: "test-source"
+  labels:
+    strimzi.io/cluster: my-connect-cluster
 spec:
   class: "org.apache.kafka.connect.file.FileStreamSourceConnector"
   tasksMax: 2

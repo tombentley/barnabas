@@ -19,8 +19,8 @@ import io.strimzi.api.kafka.model.KafkaConnector;
 import io.strimzi.api.kafka.model.KafkaConnectorBuilder;
 import io.strimzi.operator.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
-import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
+import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
@@ -48,9 +48,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static java.util.Collections.emptyList;
-import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
-import static java.util.Collections.singletonMap;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -82,6 +80,9 @@ public class KafkaConnectAssemblyOperatorMockTest {
     }
 
     private void setConnectResource(KafkaConnect connectResource) {
+        if (mockClient != null) {
+            mockClient.close();
+        }
         mockKube = new MockKube();
         mockClient = mockKube
                 .withCustomResourceDefinition(Crds.kafkaConnect(), KafkaConnect.class, KafkaConnectList.class, DoneableKafkaConnect.class)
@@ -94,6 +95,9 @@ public class KafkaConnectAssemblyOperatorMockTest {
 
     @After
     public void after() {
+        if (mockClient != null) {
+            mockClient.close();
+        }
         this.vertx.close();
     }
 
@@ -219,7 +223,7 @@ public class KafkaConnectAssemblyOperatorMockTest {
         Thread.sleep(3000);
 
         // Verify the REST API call, and that we've got a single watch
-        context.assertEquals(0, mockKube.watchers(KafkaConnect.class).size());
+        mockKube.assertNumWatchers(KafkaConnect.class, 0);
         //context.assertEquals(1, mockKube.watchers(KafkaConnector.class).size());
         verify(mock).createOrUpdatePutRequest(anyString(), anyInt(), eq("my-connector-a"), any(JsonObject.class));
 
@@ -246,8 +250,8 @@ public class KafkaConnectAssemblyOperatorMockTest {
         // Verify we created the connector which does now match
         verify(mock).createOrUpdatePutRequest(anyString(), anyInt(), eq("my-connector-b"), any(JsonObject.class));
         // Verify we still only have one watch
-        context.assertEquals(0, mockKube.watchers(KafkaConnect.class).size());
-        context.assertEquals(1, mockKube.watchers(KafkaConnector.class).size());
+        mockKube.assertNumWatchers(KafkaConnect.class, 0);
+        mockKube.assertNumWatchers(KafkaConnector.class, 1);
 
         // Delete the connector
         when(mock.list(anyString(), anyInt())).thenReturn(Future.succeededFuture(singletonList("my-connector-b")));
@@ -257,8 +261,8 @@ public class KafkaConnectAssemblyOperatorMockTest {
 
         // Verify the connector was deleted
         verify(mock).delete(anyString(), anyInt(), eq("my-connector-b"));
-        context.assertEquals(0, mockKube.watchers(KafkaConnect.class).size());
-        context.assertEquals(1, mockKube.watchers(KafkaConnector.class).size());
+        mockKube.assertNumWatchers(KafkaConnect.class, 0);
+        mockKube.assertNumWatchers(KafkaConnector.class, 1);
 
         Crds.kafkaConnectOperation(mockClient).inNamespace(NAMESPACE).withName(CLUSTER_NAME).delete();
         Async updateAsync3 = context.async();
@@ -269,8 +273,8 @@ public class KafkaConnectAssemblyOperatorMockTest {
         });
         updateAsync3.await();
         Thread.sleep(3000);
-        context.assertEquals(0, mockKube.watchers(KafkaConnect.class).size());
-        context.assertEquals(0, mockKube.watchers(KafkaConnector.class).size());
+        mockKube.assertNumWatchers(KafkaConnect.class, 0);
+        mockKube.assertNumWatchers(KafkaConnector.class, 0);
 
         //context.async();
     }

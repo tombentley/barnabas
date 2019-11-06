@@ -68,6 +68,13 @@ public class KafkaConnectS2IAssemblyOperator extends AbstractConnectOperator<Ope
     public KafkaConnectS2IAssemblyOperator(Vertx vertx, PlatformFeaturesAvailability pfa,
                                            CertManager certManager,
                                            ResourceOperatorSupplier supplier,
+                                           ClusterOperatorConfig config) {
+        this(vertx, pfa, certManager, supplier, config, connect -> new KafkaConnectApiImpl(vertx));
+    }
+
+    public KafkaConnectS2IAssemblyOperator(Vertx vertx, PlatformFeaturesAvailability pfa,
+                                           CertManager certManager,
+                                           ResourceOperatorSupplier supplier,
                                            ClusterOperatorConfig config,
                                            Function<Vertx, KafkaConnectApi> connectClientProvider) {
         super(vertx, pfa, KafkaConnectS2I.RESOURCE_KIND, certManager, supplier.connectS2IOperator, supplier, config, connectClientProvider);

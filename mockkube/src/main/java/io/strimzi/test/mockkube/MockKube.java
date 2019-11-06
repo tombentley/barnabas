@@ -84,6 +84,8 @@ import java.util.stream.Collectors;
 
 import static java.util.Collections.emptySet;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -194,27 +196,46 @@ public class MockKube {
         return mockedCrd;
     }
 
+    interface Assertion {
+        void assert_();
+    }
+
+    private Map<Class<? extends HasMetadata>, MockBuilder<?, ?, ?, ?>> mockBuilders = new HashMap<>();
+
     @SuppressWarnings("unchecked")
     public KubernetesClient build() {
-
-        MockBuilder<ConfigMap, ConfigMapList, DoneableConfigMap, Resource<ConfigMap, DoneableConfigMap>> configMapMockBuilder = new MockBuilder<ConfigMap, ConfigMapList, DoneableConfigMap, Resource<ConfigMap, DoneableConfigMap>>(ConfigMap.class, ConfigMapList.class, DoneableConfigMap.class, MockBuilder.castClass(Resource.class), cmDb);
-        MockBuilder<Endpoints, EndpointsList, DoneableEndpoints, Resource<Endpoints, DoneableEndpoints>> endpointMockBuilder = new MockBuilder<Endpoints, EndpointsList, DoneableEndpoints, Resource<Endpoints, DoneableEndpoints>>(Endpoints.class, EndpointsList.class, DoneableEndpoints.class, MockBuilder.castClass(Resource.class), endpointDb);
+        List<Assertion> closeAssertions = new ArrayList<>();
+        MockBuilder<ConfigMap, ConfigMapList, DoneableConfigMap, Resource<ConfigMap, DoneableConfigMap>> configMapMockBuilder = new MockBuilder<>(ConfigMap.class, ConfigMapList.class, DoneableConfigMap.class, MockBuilder.castClass(Resource.class), cmDb);
+        closeAssertions.add(configMapMockBuilder::assertNoWatchers);
+        MockBuilder<Endpoints, EndpointsList, DoneableEndpoints, Resource<Endpoints, DoneableEndpoints>> endpointMockBuilder = new MockBuilder<>(Endpoints.class, EndpointsList.class, DoneableEndpoints.class, MockBuilder.castClass(Resource.class), endpointDb);
+        closeAssertions.add(endpointMockBuilder::assertNoWatchers);
         ServiceMockBuilder serviceMockBuilder = new ServiceMockBuilder(svcDb, endpointDb);
-        MockBuilder<Secret, SecretList, DoneableSecret, Resource<Secret, DoneableSecret>> secretMockBuilder = new MockBuilder<Secret, SecretList, DoneableSecret, Resource<Secret, DoneableSecret>>(Secret.class, SecretList.class, DoneableSecret.class, MockBuilder.castClass(Resource.class), secretDb);
-        MockBuilder<ServiceAccount, ServiceAccountList, DoneableServiceAccount, Resource<ServiceAccount, DoneableServiceAccount>> serviceAccountMockBuilder = new MockBuilder<ServiceAccount, ServiceAccountList, DoneableServiceAccount, Resource<ServiceAccount, DoneableServiceAccount>>(ServiceAccount.class, ServiceAccountList.class, DoneableServiceAccount.class, MockBuilder.castClass(Resource.class), serviceAccountDb);
-        MockBuilder<Route, RouteList, DoneableRoute, Resource<Route, DoneableRoute>> routeMockBuilder = new MockBuilder<Route, RouteList, DoneableRoute, Resource<Route, DoneableRoute>>(Route.class, RouteList.class, DoneableRoute.class, MockBuilder.castClass(Resource.class), routeDb);
-        MockBuilder<PodDisruptionBudget, PodDisruptionBudgetList, DoneablePodDisruptionBudget, Resource<PodDisruptionBudget, DoneablePodDisruptionBudget>> podDisruptionBudgedMockBuilder = new MockBuilder<PodDisruptionBudget, PodDisruptionBudgetList, DoneablePodDisruptionBudget, Resource<PodDisruptionBudget, DoneablePodDisruptionBudget>>(PodDisruptionBudget.class, PodDisruptionBudgetList.class, DoneablePodDisruptionBudget.class, MockBuilder.castClass(Resource.class), pdbDb);
-        MockBuilder<RoleBinding, RoleBindingList, DoneableRoleBinding, Resource<RoleBinding, DoneableRoleBinding>> roleBindingMockBuilder = new MockBuilder<RoleBinding, RoleBindingList, DoneableRoleBinding, Resource<RoleBinding, DoneableRoleBinding>>(RoleBinding.class, RoleBindingList.class, DoneableRoleBinding.class, MockBuilder.castClass(Resource.class), pdbRb);
-        MockBuilder<ClusterRoleBinding, ClusterRoleBindingList, DoneableClusterRoleBinding, Resource<ClusterRoleBinding, DoneableClusterRoleBinding>> clusterRoleBindingMockBuilder = new MockBuilder<ClusterRoleBinding, ClusterRoleBindingList, DoneableClusterRoleBinding, Resource<ClusterRoleBinding, DoneableClusterRoleBinding>>(ClusterRoleBinding.class, ClusterRoleBindingList.class, DoneableClusterRoleBinding.class, MockBuilder.castClass(Resource.class), pdbCrb);
-        MockBuilder<NetworkPolicy, NetworkPolicyList, DoneableNetworkPolicy, Resource<NetworkPolicy, DoneableNetworkPolicy>> networkPolicyMockBuilder = new MockBuilder<NetworkPolicy, NetworkPolicyList, DoneableNetworkPolicy, Resource<NetworkPolicy, DoneableNetworkPolicy>>(NetworkPolicy.class, NetworkPolicyList.class, DoneableNetworkPolicy.class, MockBuilder.castClass(Resource.class), policyDb);
+        closeAssertions.add(serviceMockBuilder::assertNoWatchers);
+        MockBuilder<Secret, SecretList, DoneableSecret, Resource<Secret, DoneableSecret>> secretMockBuilder = new MockBuilder<>(Secret.class, SecretList.class, DoneableSecret.class, MockBuilder.castClass(Resource.class), secretDb);
+        closeAssertions.add(secretMockBuilder::assertNoWatchers);
+        MockBuilder<ServiceAccount, ServiceAccountList, DoneableServiceAccount, Resource<ServiceAccount, DoneableServiceAccount>> serviceAccountMockBuilder = new MockBuilder<>(ServiceAccount.class, ServiceAccountList.class, DoneableServiceAccount.class, MockBuilder.castClass(Resource.class), serviceAccountDb);
+        closeAssertions.add(serviceAccountMockBuilder::assertNoWatchers);
+        MockBuilder<Route, RouteList, DoneableRoute, Resource<Route, DoneableRoute>> routeMockBuilder = new MockBuilder<>(Route.class, RouteList.class, DoneableRoute.class, MockBuilder.castClass(Resource.class), routeDb);
+        closeAssertions.add(routeMockBuilder::assertNoWatchers);
+        MockBuilder<PodDisruptionBudget, PodDisruptionBudgetList, DoneablePodDisruptionBudget, Resource<PodDisruptionBudget, DoneablePodDisruptionBudget>> podDisruptionBudgedMockBuilder = new MockBuilder<>(PodDisruptionBudget.class, PodDisruptionBudgetList.class, DoneablePodDisruptionBudget.class, MockBuilder.castClass(Resource.class), pdbDb);
+        closeAssertions.add(podDisruptionBudgedMockBuilder::assertNoWatchers);
+        MockBuilder<RoleBinding, RoleBindingList, DoneableRoleBinding, Resource<RoleBinding, DoneableRoleBinding>> roleBindingMockBuilder = new MockBuilder<>(RoleBinding.class, RoleBindingList.class, DoneableRoleBinding.class, MockBuilder.castClass(Resource.class), pdbRb);
+        closeAssertions.add(roleBindingMockBuilder::assertNoWatchers);
+        MockBuilder<ClusterRoleBinding, ClusterRoleBindingList, DoneableClusterRoleBinding, Resource<ClusterRoleBinding, DoneableClusterRoleBinding>> clusterRoleBindingMockBuilder = new MockBuilder<>(ClusterRoleBinding.class, ClusterRoleBindingList.class, DoneableClusterRoleBinding.class, MockBuilder.castClass(Resource.class), pdbCrb);
+        closeAssertions.add(clusterRoleBindingMockBuilder::assertNoWatchers);
+        MockBuilder<NetworkPolicy, NetworkPolicyList, DoneableNetworkPolicy, Resource<NetworkPolicy, DoneableNetworkPolicy>> networkPolicyMockBuilder = new MockBuilder<>(NetworkPolicy.class, NetworkPolicyList.class, DoneableNetworkPolicy.class, MockBuilder.castClass(Resource.class), policyDb);
+        closeAssertions.add(networkPolicyMockBuilder::assertNoWatchers);
 
         Map<String, Pod> podDb1 = podDb;
-        MockBuilder<Pod, PodList, DoneablePod, PodResource<Pod, DoneablePod>> podMockBuilder = new MockBuilder<Pod, PodList, DoneablePod, PodResource<Pod, DoneablePod>>(Pod.class, PodList.class, DoneablePod.class, MockBuilder.castClass(PodResource.class), podDb1);
+        MockBuilder<Pod, PodList, DoneablePod, PodResource<Pod, DoneablePod>> podMockBuilder = new MockBuilder<>(Pod.class, PodList.class, DoneablePod.class, MockBuilder.castClass(PodResource.class), podDb1);
+        closeAssertions.add(podMockBuilder::assertNoWatchers);
         MixedOperation<Pod, PodList, DoneablePod, PodResource<Pod, DoneablePod>> mockPods = podMockBuilder.build();
 
-        MockBuilder<PersistentVolumeClaim, PersistentVolumeClaimList, DoneablePersistentVolumeClaim, Resource<PersistentVolumeClaim, DoneablePersistentVolumeClaim>> persistentVolumeClaimMockBuilder = new MockBuilder<PersistentVolumeClaim, PersistentVolumeClaimList, DoneablePersistentVolumeClaim, Resource<PersistentVolumeClaim, DoneablePersistentVolumeClaim>>(PersistentVolumeClaim.class, PersistentVolumeClaimList.class, DoneablePersistentVolumeClaim.class, MockBuilder.castClass(Resource.class), pvcDb);
+        MockBuilder<PersistentVolumeClaim, PersistentVolumeClaimList, DoneablePersistentVolumeClaim, Resource<PersistentVolumeClaim, DoneablePersistentVolumeClaim>> persistentVolumeClaimMockBuilder = new MockBuilder<>(PersistentVolumeClaim.class, PersistentVolumeClaimList.class, DoneablePersistentVolumeClaim.class, MockBuilder.castClass(Resource.class), pvcDb);
+        closeAssertions.add(persistentVolumeClaimMockBuilder::assertNoWatchers);
         MixedOperation<PersistentVolumeClaim, PersistentVolumeClaimList, DoneablePersistentVolumeClaim, Resource<PersistentVolumeClaim, DoneablePersistentVolumeClaim>> mockPersistentVolumeClaims = persistentVolumeClaimMockBuilder.build();
         DeploymentMockBuilder mockDep = new DeploymentMockBuilder(depDb, mockPods);
+        closeAssertions.add(mockDep::assertNoWatchers);
         MixedOperation<StatefulSet, StatefulSetList, DoneableStatefulSet,
                 RollableScalableResource<StatefulSet, DoneableStatefulSet>> mockSs = buildStatefulSets(podMockBuilder, mockPods, mockPersistentVolumeClaims);
 
@@ -244,20 +265,22 @@ public class MockKube {
                 Resource crdResource = mock(Resource.class);
                 when(crdResource.get()).thenReturn(crd);
                 when(crds.withName(crd.getMetadata().getName())).thenReturn(crdResource);
-                when(mockClient.customResources(any(CustomResourceDefinition.class), any(Class.class), any(Class.class),
-                        any(Class.class))).thenAnswer(invocation -> {
+                when(mockClient.customResources(any(CustomResourceDefinition.class), (Class) eq(mockedCrd.crClass), (Class) eq(mockedCrd.crListClass),
+                        (Class) eq(mockedCrd.crDoneableClass))).thenAnswer(invocation -> {
                             CustomResourceDefinition crdArg = invocation.getArgument(0);
                             if (crd.getSpec().getGroup().equals(crdArg.getSpec().getGroup())
                                     && crd.getSpec().getVersion().equals(crdArg.getSpec().getVersion())) {
                                 String key = crdArg.getSpec().getGroup() + "##" + crdArg.getSpec().getVersion();
                                 CreateOrReplaceable crdMixedOp = crdMixedOps.get(key);
                                 if (crdMixedOp == null) {
-                                    crdMixedOp = (MixedOperation<CustomResource, ? extends KubernetesResource, Doneable<CustomResource>, Resource<CustomResource, Doneable<CustomResource>>>) new CustomResourceMockBuilder<>((MockedCrd) mockedCrd).build();
+                                    CustomResourceMockBuilder customResourceMockBuilder = new CustomResourceMockBuilder<>((MockedCrd) mockedCrd);
+                                    closeAssertions.add(customResourceMockBuilder::assertNoWatchers);
+                                    crdMixedOp = (MixedOperation<CustomResource, ? extends KubernetesResource, Doneable<CustomResource>, Resource<CustomResource, Doneable<CustomResource>>>) customResourceMockBuilder.build();
                                     crdMixedOps.put(key, crdMixedOp);
                                 }
                                 return crdMixedOp;
                             } else {
-                                throw new RuntimeException();
+                                throw new RuntimeException("Unknown CRD " + invocation.getArgument(0));
                             }
                         });
             }
@@ -286,7 +309,22 @@ public class MockKube {
         routeMockBuilder.build2(mockOpenShiftClient::routes);
 
         mockHttpClient(mockClient);
+
+        doAnswer(i -> {
+            for (Assertion a : closeAssertions) {
+                a.assert_();
+            }
+            return null;
+        }).when(mockClient).close();
         return mockClient;
+    }
+
+    public <T extends HasMetadata> void assertNumWatchers(Class<T> c, int expectedNumWatchers) {
+        MockBuilder<?, ?, ?, ?> mockBuilder = mockBuilders.get(c);
+        if (mockBuilder == null) {
+            throw new AssertionError("Unknown resource " + c);
+        }
+        mockBuilder.assertNumWatchers(expectedNumWatchers);
     }
 
     private void mockHttpClient(KubernetesClient mockClient)   {
