@@ -48,6 +48,6 @@ jobs:
       - TEST_MINIKUBE_VERSION=v1.2.0
     - jdk: openjdk11
       env:
-      - KUBE_VERSION=v1.16.4
+      - KUBE_VERSION=v1.16.2
       - TEST_KUBECTL_VERSION=v1.16.3
       - TEST_MINIKUBE_VERSION=v1.5.2
