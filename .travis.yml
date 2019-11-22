@@ -45,7 +45,7 @@ jobs:
       env:
       - KUBE_VERSION=v1.11.10
       - TEST_KUBECTL_VERSION=v1.10.0
-      - TEST_MINIKUBE_VERSION=v1.2.0
+      - TEST_MINIKUBE_VERSION=v1.5.2
     - jdk: openjdk11
       env:
       - KUBE_VERSION=v1.16.2
