@@ -111,13 +111,18 @@ public abstract class AbstractModel {
     @Deprecated
     public static final String ANNO_CO_STRIMZI_IO_DELETE_CLAIM = ClusterOperator.STRIMZI_CLUSTER_OPERATOR_DOMAIN + "/delete-claim";
 
-    private static final String ENV_VAR_HTTP_PROXY = "HTTP_PROXY";
-    private static final String ENV_VAR_HTTPS_PROXY = "HTTPS_PROXY";
-    private static final String ENV_VAR_NO_PROXY = "NO_PROXY";
     /**
      * Configure HTTP/HTTPS Proxy env vars
      * These are set in the Cluster Operator and then passed to all created containers
      */
+    private static final String ENV_VAR_HTTP_PROXY = "HTTP_PROXY";
+    private static final String ENV_VAR_HTTPS_PROXY = "HTTPS_PROXY";
+    private static final String ENV_VAR_NO_PROXY = "NO_PROXY";
+
+    public static final String ANNO_STRIMZI_CM_GENERATION = Annotations.STRIMZI_DOMAIN + "cm-generation";
+    public static final String ANNO_STRIMZI_LOGGING_HASH = Annotations.STRIMZI_DOMAIN + "logging-hash";
+    public static final String ANNO_STRIMZI_OLD_LOGGING_HASH = Annotations.STRIMZI_DOMAIN + "old-logging-hash";
+
     protected static final List<EnvVar> PROXY_ENV_VARS;
     static {
         List<EnvVar> envVars = new ArrayList<>(3);
