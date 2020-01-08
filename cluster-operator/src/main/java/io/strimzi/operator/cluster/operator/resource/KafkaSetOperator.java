@@ -73,4 +73,7 @@ public class KafkaSetOperator extends StatefulSetOperator {
                 .rollingRestart(podNeedsRestart);
     }
 
+    public AdminClientProvider getAdminClientProvider() {
+        return adminClientProvider;
+    }
 }

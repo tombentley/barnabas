@@ -6,6 +6,7 @@ package io.strimzi.operator.cluster.model;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.OwnerReference;
@@ -550,5 +551,59 @@ public class ModelUtils {
             javaSystemPropertiesList.add("-D" + property.getName() + "=" + property.getValue());
         }
         return String.join(" ", javaSystemPropertiesList);
+    }
+
+    /**
+     * This method transforms ConfigMap data entry form String into the List of Strings, where entry = line from input.
+     * The comments are ignored.
+     * @param config ConfigMap data as a String
+     * @return List of String key=value
+     */
+    public static List<String> getLinesWithoutCommentsAndEmptyLines(String config) {
+        List<String> validLines = new ArrayList<>();
+        if (config != null) {
+            List<String> allLines = Arrays.asList(config.split("\\r?\\n"));
+
+            for (String line : allLines) {
+                if (!line.startsWith("#") && !line.isEmpty()) {
+                    validLines.add(line);
+                }
+            }
+        }
+
+        return validLines;
+    }
+
+    /**
+     * Gets data from ConfigMap as a String
+     * @param configMap ConfigMap to get data from
+     * @param key key to get data from ConfigMap
+     * @return String value of ConfigMap data entry. If the key does not exist in the ConfigMap, return null
+     */
+    public static String getDataFromConfigMap(ConfigMap configMap, String key) {
+        if (configMap == null || configMap.getData() == null || configMap.getData().get(key) == null) {
+            return null;
+        }
+        return configMap.getData().get(key);
+    }
+
+    /**
+     * Transforms data from ConfigMap into Map
+     * @param configMap ConfigMap to get data from
+     * @param key key to get data from ConfigMap
+     * @return Map of (key, value)
+     */
+    public static Map<String, String> configMap2Map(ConfigMap configMap, String key) {
+        Map<String, String> result = new HashMap<>();
+        List<String> list = ModelUtils.getLinesWithoutCommentsAndEmptyLines(getDataFromConfigMap(configMap, key));
+        for (String line: list) {
+            String[] split = line.split("=");
+            if (split.length == 1) {
+                result.put(split[0], "");
+            } else {
+                result.put(split[0], split[1]);
+            }
+        }
+        return result;
     }
 }
