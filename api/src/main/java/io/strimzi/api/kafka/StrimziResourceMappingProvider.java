@@ -9,11 +9,18 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import io.fabric8.kubernetes.api.KubernetesResourceMappingProvider;
+import io.fabric8.kubernetes.api.model.Doneable;
+import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.KubernetesResource;
+import io.fabric8.kubernetes.api.model.KubernetesResourceList;
 import io.fabric8.kubernetes.api.model.apiextensions.CustomResourceDefinition;
 import io.fabric8.kubernetes.api.model.apiextensions.CustomResourceDefinitionBuilder;
 import io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus;
 import io.fabric8.kubernetes.client.CustomResource;
+import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.dsl.MixedOperation;
+import io.fabric8.kubernetes.client.dsl.Resource;
+import io.strimzi.crdgenerator.annotations.Crd;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -114,6 +121,24 @@ public class StrimziResourceMappingProvider implements KubernetesResourceMapping
 
     public Map<String, CustomResourceDefinition> crds() {
         return crds;
+    }
+
+    public <T extends KubernetesResource&HasMetadata,
+            L extends KubernetesResourceList<T>,
+            D extends Doneable<T>> MixedOperation<T, L, D, Resource<T, D>> operation(KubernetesClient client,
+                                                                                     Class<T> cls,
+                                                                                     Class<L> listCls,
+                                                                                     Class<D> doneableCls) {
+        // TODO This doesn't work because the annotations jar is not on the runtime classpath.
+        Crd annotation = cls.getAnnotation(Crd.class);
+        String key = annotation.spec().group() + "/" +
+                annotation.spec().version() + "#" +
+                annotation.spec().names().kind();
+        return client.customResources(
+                crds.get(key),
+                cls,
+                listCls,
+                doneableCls);
     }
 
     public static void main(String[] args) {
