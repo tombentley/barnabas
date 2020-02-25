@@ -1,0 +1,167 @@
+# apiVersion # kind = CRD class
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1alpha1
+  kind: Kafka
+  modelClass: io.strimzi.api.kafka.model.Kafka
+  plural: kafka
+  singular: kafkas
+  listKind: KafkaList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1beta1
+  kind: Kafka
+  modelClass: io.strimzi.api.kafka.model.Kafka
+  plural: kafka
+  singular: kafkas
+  listKind: KafkaList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+
+# KafkaConnect
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1alpha1
+  kind: KafkaConnect
+  modelClass: io.strimzi.api.kafka.model.KafkaConnect
+  plural: kafkaconnects
+  singular: kafkaconnect
+  listKind: KafkaConnectList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1beta1
+  kind: KafkaConnect
+  modelClass: io.strimzi.api.kafka.model.KafkaConnect
+  plural: kafkaconnects
+  singular: kafkaconnect
+  listKind: KafkaConnectList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+
+# KafkaConnectS2I
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1alpha1
+  kind: KafkaConnectS2I
+  modelClass: io.strimzi.api.kafka.model.KafkaConnectS2I
+  plural: kafkaconnects2i
+  singular: kafkaconnects2is
+  listKind: KafkaConnectS2IList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1beta1
+  kind: KafkaConnectS2I
+  modelClass: io.strimzi.api.kafka.model.KafkaConnectS2I
+  plural: kafkaconnects2i
+  singular: kafkaconnects2is
+  listKind: KafkaConnectS2IList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+
+# KafkaTopic
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1alpha1
+  kind: KafkaTopic
+  modelClass: io.strimzi.api.kafka.model.KafkaTopic
+  plural: kafkatopics
+  singular: kafkatopic
+  listKind: KafkaTopicList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1beta1
+  kind: KafkaTopic
+  modelClass: io.strimzi.api.kafka.model.KafkaTopic
+  plural: kafkatopics
+  singular: kafkatopic
+  listKind: KafkaTopicList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+
+# KafkaUser
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1alpha1
+  kind: KafkaUser
+  modelClass: io.strimzi.api.kafka.model.KafkaUser
+  plural: kafkausers
+  singular: kafkauser
+  listKind: KafkaUserList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1beta1
+  kind: KafkaUser
+  modelClass: io.strimzi.api.kafka.model.KafkaUser
+  plural: kafkausers
+  singular: kafkauser
+  listKind: KafkaUserList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+
+# KafkaMirrorMaker
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1alpha1
+  kind: KafkaMirrorMaker
+  modelClass: io.strimzi.api.kafka.model.KafkaMirrorMaker
+  plural: kafkamirrormakers
+  singular: kafkamirrormaker
+  listKind: KafkaMirrorMakerList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1beta1
+  kind: KafkaMirrorMaker
+  modelClass: io.strimzi.api.kafka.model.KafkaMirrorMaker
+  plural: kafkamirrormakers
+  singular: kafkamirrormaker
+  listKind: KafkaMirrorMakerList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+
+# KafkaBridge
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1alpha1
+  kind: KafkaBridge
+  modelClass: io.strimzi.api.kafka.model.KafkaBridge
+  plural: kafkabridges
+  singular: kafkabridge
+  listKind: KafkaBridgeList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+
+# KafkaConnector
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1alpha1
+  kind: KafkaConnector
+  modelClass: io.strimzi.api.kafka.model.KafkaConnector
+  plural: kafkaconnectors
+  singular: kafkaconnector
+  listKind: KafkaConnectorList
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus
+
+# KafkaMirrorMaker2
+- group: kafka.strimzi.io
+  crdApiVersion: apiextensions.k8s.io/v1beta1
+  version: v1alpha1
+  kind: KafkaMirrorMaker2
+  modelClass: io.strimzi.api.kafka.model.KafkaMirrorMaker2
+  plural: kafkamirrormaker2s
+  singular: kafkamirrormaker2
+  listKind: KafkaMirrorMaker2List
+  scope: Namespaced
+  statusClass: io.fabric8.kubernetes.api.model.apiextensions.CustomResourceSubresourceStatus

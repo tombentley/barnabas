@@ -40,10 +40,6 @@ import static org.junit.jupiter.api.Assertions.fail;
  */
 public class ExamplesTest {
 
-    static {
-        Crds.registerCustomKinds();
-    }
-
     private static final Pattern PARAMETER_PATTERN = Pattern.compile("\\$\\{\\{(.+?)\\}?\\}");
 
     /**

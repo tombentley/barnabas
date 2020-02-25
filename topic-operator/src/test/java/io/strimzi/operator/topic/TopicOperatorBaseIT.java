@@ -21,6 +21,9 @@ import io.strimzi.test.k8s.KubeClusterResource;
 import io.strimzi.test.k8s.cluster.KubeCluster;
 import io.strimzi.test.k8s.exceptions.NoClusterException;
 import io.vertx.core.Vertx;
+import io.vertx.core.VertxOptions;
+import io.vertx.micrometer.MicrometerMetricsOptions;
+import io.vertx.micrometer.VertxPrometheusOptions;
 import kafka.server.KafkaConfig$;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
@@ -69,9 +72,6 @@ import static java.util.Collections.singletonMap;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
-import io.vertx.core.VertxOptions;
-import io.vertx.micrometer.MicrometerMetricsOptions;
-import io.vertx.micrometer.VertxPrometheusOptions;
 
 @SuppressWarnings("checkstyle:ClassFanOutComplexity")
 public abstract class TopicOperatorBaseIT {
@@ -172,7 +172,6 @@ public abstract class TopicOperatorBaseIT {
         adminClient = AdminClient.create(p);
 
         kubeClient = kubeClient().getClient();
-        Crds.registerCustomKinds();
         LOGGER.info("Using namespace {}", NAMESPACE);
         startTopicOperator();
 

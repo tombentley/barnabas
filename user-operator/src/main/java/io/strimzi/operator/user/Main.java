@@ -7,9 +7,8 @@ package io.strimzi.operator.user;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClient;
-import io.strimzi.api.kafka.Crds;
-import io.strimzi.api.kafka.model.DoneableKafkaUser;
 import io.strimzi.api.kafka.KafkaUserList;
+import io.strimzi.api.kafka.model.DoneableKafkaUser;
 import io.strimzi.api.kafka.model.KafkaUser;
 import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
@@ -22,6 +21,9 @@ import io.strimzi.operator.user.operator.SimpleAclOperator;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
+import io.vertx.core.VertxOptions;
+import io.vertx.micrometer.MicrometerMetricsOptions;
+import io.vertx.micrometer.VertxPrometheusOptions;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -29,23 +31,10 @@ import java.security.Security;
 import java.util.HashMap;
 import java.util.Map;
 
-import io.vertx.core.VertxOptions;
-import io.vertx.micrometer.MicrometerMetricsOptions;
-import io.vertx.micrometer.VertxPrometheusOptions;
-
 @SuppressFBWarnings("DM_EXIT")
 @SuppressWarnings("deprecation")
 public class Main {
     private static final Logger log = LogManager.getLogger(Main.class.getName());
-
-    static {
-        try {
-            Crds.registerCustomKinds();
-        } catch (Error | RuntimeException t) {
-            log.error("Failed to register CRDs", t);
-            throw t;
-        }
-    }
 
     public static void main(String[] args) {
         log.info("UserOperator {} is starting", Main.class.getPackage().getImplementationVersion());

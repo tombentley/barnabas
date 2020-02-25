@@ -67,10 +67,6 @@ import static org.junit.jupiter.api.Assertions.fail;
 @ExtendWith(TestExecutionWatcher.class)
 public abstract class BaseST implements TestSeparator {
 
-    static {
-        Crds.registerCustomKinds();
-    }
-
     protected KubeClusterResource cluster = KubeClusterResource.getInstance();
     protected KafkaClient externalBasicKafkaClient = (KafkaClient) ClientFactory.getClient(EClientType.BASIC);
     protected InternalKafkaClient internalKafkaClient = (InternalKafkaClient) ClientFactory.getClient(EClientType.INTERNAL);
