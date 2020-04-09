@@ -121,7 +121,6 @@ public abstract class AbstractModel {
 
     public static final String ANNO_STRIMZI_CM_GENERATION = Annotations.STRIMZI_DOMAIN + "cm-generation";
     public static final String ANNO_STRIMZI_LOGGING_HASH = Annotations.STRIMZI_DOMAIN + "logging-hash";
-    public static final String ANNO_STRIMZI_OLD_LOGGING_HASH = Annotations.STRIMZI_DOMAIN + "old-logging-hash";
 
     protected static final List<EnvVar> PROXY_ENV_VARS;
     static {
