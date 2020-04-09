@@ -145,7 +145,9 @@ public abstract class StatefulSetOperator extends AbstractScalableResourceOperat
         String name = sts.getMetadata().getName();
         return podOperations.getAsync(sts.getMetadata().getNamespace(), podName).compose(pod -> {
             Future<Void> fut;
-            if (podNeedsRestart.apply(pod) != null) {
+            String reasons = podNeedsRestart.apply(pod);
+            if (reasons != null && !reasons.isEmpty()) {
+                log.debug("Rolling update of {}/{}: pod {} due to {}", namespace, name, podName, reasons);
                 fut = restartPod(sts, pod);
             } else {
                 log.debug("Rolling update of {}/{}: pod {} no need to roll", namespace, name, podName);

@@ -1429,7 +1429,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             // Scale-down and Scale-up might have change the STS. we should get a fresh one.
             return zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
                     .compose(sts -> zkSetOperations.maybeRollingUpdate(sts,
-                        pod -> getReasonsToRestartPod(zkDiffs.resource(), pod, existingZookeeperCertsChanged, false, this.clusterCa)))
+                        pod -> getReasonsToRestartPod(zkDiffs.resource(), pod, existingZookeeperCertsChanged, null, this.clusterCa)))
                     .map(this);
         }
 
@@ -1651,21 +1651,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                     log.debug("Determining kafka pod {} dynamic update ability", finalPodId);
                                     return CompositeFuture.join(futCurrent, futDesired)
                                             .compose(res -> {
-                                                ConfigMap kafkaCm = res.result().resultAt(1);
-                                                String oldLoggingHash = sts.getSpec().getTemplate().getMetadata().getAnnotations().get(AbstractModel.ANNO_STRIMZI_OLD_LOGGING_HASH);
-                                                String currentLoggingHash = getStringHash(kafkaCm.getData().get(AbstractModel.ANCILLARY_CM_KEY_LOG_CONFIG));
                                                 KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res.result().resultAt(0), res.result().resultAt(1), kafkaCluster.getKafkaVersion(), finalPodId);
-                                                boolean loggingChanged = !oldLoggingHash.isEmpty() && !oldLoggingHash.equals(currentLoggingHash);
-                                                boolean nodePortChanged = kafkaCluster.isExposedWithNodePort() != Boolean.parseBoolean(sts.getSpec().getTemplate().getMetadata().getAnnotations().get(KafkaCluster.ANNO_STRIMZI_WAS_EXPOSED_WITH_NODEPORT));
 
-                                                if (nodePortChanged) {
-                                                    log.debug("nodeport listener changed, rolling");
-                                                    kafkaPodsUpdatedDynamically.put(finalPodId, !nodePortChanged);
-                                                } else if (loggingChanged) {
-                                                    log.debug("logging changed, rolling");
-                                                    kafkaPodsUpdatedDynamically.put(finalPodId, !loggingChanged);
-                                                } else if (configurationDiff.getDiff().asOrderedProperties().asMap().size() > 0) {
-                                                    log.debug("logging not changed, kafka did dynamically:{}", !configurationDiff.cannotBeUpdatedDynamically());
+                                                if (configurationDiff.getDiff().asOrderedProperties().asMap().size() > 0) {
+                                                    log.debug("kafka changed, dynamically? : {}", !configurationDiff.cannotBeUpdatedDynamically());
                                                     kafkaPodsUpdatedDynamically.put(finalPodId, !configurationDiff.cannotBeUpdatedDynamically());
                                                     AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig(), new AlterConfigsOptions());
                                                     for (Map.Entry entry: alterConfigResult.values().entrySet()) {
@@ -1673,12 +1662,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                                         try {
                                                             log.debug("AlterConfig result {}", kafkaFuture.get(operationTimeoutMs, TimeUnit.MILLISECONDS));
                                                         } catch (InvalidRequestException | InterruptedException | ExecutionException | TimeoutException e) {
-                                                            log.warn("Error during dynamic reconfiguration {}. Rolling the pod.", e.getMessage());
+                                                            log.warn("Error during dynamic reconfiguration. Rolling the pod. {}", e.getMessage());
                                                             kafkaPodsUpdatedDynamically.put(finalPodId, false);
                                                         }
                                                     }
                                                 } else {
-                                                    log.debug("kafka nor logging changed");
+                                                    log.debug("kafka not changed");
                                                     kafkaPodsUpdatedDynamically.put(finalPodId, null);
                                                 }
                                                 ac.close();
@@ -2476,9 +2465,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     String.valueOf(getCaCertGeneration(this.clientsCa)));
 
             Annotations.annotations(template).put(AbstractModel.ANNO_STRIMZI_LOGGING_HASH, kafkaLoggingHash);
-            Annotations.annotations(template).put(AbstractModel.ANNO_STRIMZI_OLD_LOGGING_HASH, oldKafkaLoggingHash);
-            Annotations.annotations(template).put(KafkaCluster.ANNO_STRIMZI_WAS_EXPOSED_WITH_NODEPORT, Boolean.toString(kafkaCluster.isExposedWithNodePort()));
-            Annotations.annotations(template).put(KafkaCluster.ANNO_STRIMZI_BROKER_CONFIGURATION_HASH, kafkaBrokerConfigurationHash);
+            //Annotations.annotations(template).put(KafkaCluster.ANNO_STRIMZI_BROKER_CONFIGURATION_HASH, kafkaBrokerConfigurationHash);
 
             // Annotations with custom cert thumbprints to help with rolling updates when they change
             if (tlsListenerCustomCertificateThumbprint != null) {
@@ -3160,7 +3147,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          */
         private String getReasonsToRestartPod(StatefulSet sts, Pod pod,
                                        boolean nodeCertsChange,
-                                       Boolean podUpdatedDynamically,
+                                       Boolean kafkaPodUpdatedDynamically,
                                        Ca... cas) {
             if (pod == null)    {
                 // When the Pod doesn't exist, it doesn't need to be restarted.
@@ -3184,8 +3171,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     reasons.add("Pod has old " + ca + " certificate generation");
                 }
             }
-            if (!isPodUpToDate && (podUpdatedDynamically != null && !podUpdatedDynamically)) {
+            if (!isPodUpToDate) {
                 reasons.add("Pod has old generation");
+            }
+            if (kafkaPodUpdatedDynamically != null && !kafkaPodUpdatedDynamically) {
+                reasons.add("Kafka configuration changed");
             }
             if (fsResizingRestartRequest.contains(pod.getMetadata().getName()))   {
                 reasons.add("file system needs to be resized");

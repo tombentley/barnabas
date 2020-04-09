@@ -106,11 +106,11 @@ public class KafkaBrokerConfigurationDiff {
     }
 
     public boolean cannotBeUpdatedDynamically() {
-        // TODO all the magic of listeners combinations
         if (diff == null) {
             return false;
         } else return diff.anyReadOnly(kafkaVersion)
-                || !diff.unknownConfigs(kafkaVersion).isEmpty();
+                || !diff.unknownConfigs(kafkaVersion).isEmpty()
+                || diff.containsListenersChange();
     }
 
     /**
