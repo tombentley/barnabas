@@ -103,6 +103,7 @@ import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
+import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AlterConfigsOptions;
 import org.apache.kafka.clients.admin.AlterConfigsResult;
 import org.apache.kafka.clients.admin.Config;
@@ -1643,36 +1644,42 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
                     for (int podId = 0; podId < replicas; podId++) {
                         int finalPodId = podId;
+                        Future<Admin> acFut = kbch.adminClient(sts, podId);
                         configFutures.add(
-                            kbch.adminClient(sts, podId)
-                                .compose(ac -> {
-                                    Future<Map<ConfigResource, Config>> futCurrent = kbch.getCurrentConfig(finalPodId, ac);
-                                    Future<ConfigMap> futDesired = configMapOperations.getAsync(namespace, KafkaCluster.metricAndLogConfigsName(name));
-                                    log.debug("Determining kafka pod {} dynamic update ability", finalPodId);
-                                    return CompositeFuture.join(futCurrent, futDesired)
-                                            .compose(res -> {
-                                                KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res.result().resultAt(0), res.result().resultAt(1), kafkaCluster.getKafkaVersion(), finalPodId);
+                                acFut.compose(ac -> {
+                                    if (ac == null) {
+                                        kafkaPodsUpdatedDynamically.put(finalPodId, null);
+                                        log.warn("Could not create admin client.");
+                                        return Future.succeededFuture();
+                                    } else {
+                                        Future<Map<ConfigResource, Config>> futCurrent = kbch.getCurrentConfig(finalPodId, ac);
+                                        Future<ConfigMap> futDesired = configMapOperations.getAsync(namespace, KafkaCluster.metricAndLogConfigsName(name));
+                                        log.debug("Determining kafka pod {} dynamic update ability", finalPodId);
+                                        return CompositeFuture.join(futCurrent, futDesired)
+                                                .compose(res -> {
+                                                    KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res.result().resultAt(0), res.result().resultAt(1), kafkaCluster.getKafkaVersion(), finalPodId);
 
-                                                if (configurationDiff.getDiff().asOrderedProperties().asMap().size() > 0) {
-                                                    log.debug("kafka changed, dynamically? : {}", !configurationDiff.cannotBeUpdatedDynamically());
-                                                    kafkaPodsUpdatedDynamically.put(finalPodId, !configurationDiff.cannotBeUpdatedDynamically());
-                                                    AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig(), new AlterConfigsOptions());
-                                                    for (Map.Entry entry: alterConfigResult.values().entrySet()) {
-                                                        KafkaFuture kafkaFuture = (KafkaFuture) entry.getValue();
-                                                        try {
-                                                            log.debug("AlterConfig result {}", kafkaFuture.get(operationTimeoutMs, TimeUnit.MILLISECONDS));
-                                                        } catch (InvalidRequestException | InterruptedException | ExecutionException | TimeoutException e) {
-                                                            log.warn("Error during dynamic reconfiguration. Rolling the pod. {}", e.getMessage());
-                                                            kafkaPodsUpdatedDynamically.put(finalPodId, false);
+                                                    if (configurationDiff.getDiff().asOrderedProperties().asMap().size() > 0) {
+                                                        log.debug("kafka changed, dynamically? : {}", !configurationDiff.cannotBeUpdatedDynamically());
+                                                        kafkaPodsUpdatedDynamically.put(finalPodId, !configurationDiff.cannotBeUpdatedDynamically());
+                                                        AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig(), new AlterConfigsOptions());
+                                                        for (Map.Entry entry : alterConfigResult.values().entrySet()) {
+                                                            KafkaFuture kafkaFuture = (KafkaFuture) entry.getValue();
+                                                            try {
+                                                                log.debug("AlterConfig result {}", kafkaFuture.get(operationTimeoutMs, TimeUnit.MILLISECONDS));
+                                                            } catch (InvalidRequestException | InterruptedException | ExecutionException | TimeoutException e) {
+                                                                log.warn("Error during dynamic reconfiguration. Rolling the pod. {}", e.getMessage());
+                                                                kafkaPodsUpdatedDynamically.put(finalPodId, false);
+                                                            }
                                                         }
+                                                    } else {
+                                                        log.debug("kafka not changed");
+                                                        kafkaPodsUpdatedDynamically.put(finalPodId, null);
                                                     }
-                                                } else {
-                                                    log.debug("kafka not changed");
-                                                    kafkaPodsUpdatedDynamically.put(finalPodId, null);
-                                                }
-                                                ac.close();
-                                                return Future.succeededFuture();
-                                            });
+                                                    ac.close();
+                                                    return Future.succeededFuture();
+                                                });
+                                    }
                                 }));
                     }
                     return CompositeFuture.join(configFutures);
