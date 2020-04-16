@@ -159,7 +159,7 @@ public class KafkaBrokerConfigurationDiff {
                         updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValue, entry.get().value()), AlterConfigOp.OpType.DELETE));
                     } else if (entry.get().isDefault()) {
                         // entry is in current, is not in desired, is default -> it uses default value, skip
-                        log.debug("{} not set in desired, using default value", entry.get().name());
+                        log.trace("{} not set in desired, using default value", entry.get().name());
                     } else {
                         // entry is in current, is not in desired, is not default -> it was using non-default value and was removed
                         // if the entry was custom, it should be deleted
@@ -167,13 +167,13 @@ public class KafkaBrokerConfigurationDiff {
                             String defVal = KafkaConfiguration.getDefaultValueOfProperty(pathValue, kafkaVersion) == null ? "null" : KafkaConfiguration.getDefaultValueOfProperty(pathValue, kafkaVersion).toString();
                             difference.put(pathValue, defVal);
                             updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValue, defVal), AlterConfigOp.OpType.DELETE));
-                            log.debug("{} not set in desired, unsetting back to default {}", entry.get().name(), defVal);
+                            log.trace("{} not set in desired, unsetting back to default {}", entry.get().name(), defVal);
                         }
                     }
                 } else if (d.get("op").asText().equals("replace")) {
                     // entry is in the current, desired is updated value
                     if (!isIgnorableProperty(pathValue)) {
-                        log.debug("{} has new desired value {}", entry.get().name(), desiredMap.get(entry.get().name()));
+                        log.trace("{} has new desired value {}", entry.get().name(), desiredMap.get(entry.get().name()));
                         updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValue, desiredMap.get(pathValue)), AlterConfigOp.OpType.SET));
                         difference.put(pathValue, desiredMap.get(pathValue));
                     }
@@ -182,7 +182,7 @@ public class KafkaBrokerConfigurationDiff {
                 if (d.get("op").asText().equals("add")) {
                     // entry is not in the current, it is added
                     if (!isIgnorableProperty(pathValue)) {
-                        log.debug("add new {} {}", pathValue, d.get("op").asText());
+                        log.trace("add new {} {}", pathValue, d.get("op").asText());
                         difference.put(pathValue, desiredMap.get(pathValue));
                         updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValue, desiredMap.get(pathValue)), AlterConfigOp.OpType.SET));
                     }
