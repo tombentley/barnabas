@@ -63,7 +63,6 @@ import io.strimzi.systemtest.utils.kubeUtils.objects.PersistentVolumeClaimUtils;
 import io.strimzi.systemtest.utils.kubeUtils.objects.PodUtils;
 import io.strimzi.systemtest.utils.kubeUtils.objects.ServiceUtils;
 import io.strimzi.test.TestUtils;
-import io.strimzi.test.WaitException;
 import io.strimzi.test.executor.ExecResult;
 import io.strimzi.test.timemeasuring.Operation;
 import io.vertx.core.json.JsonArray;
@@ -2340,7 +2339,7 @@ class KafkaST extends BaseST {
                 basicExternalKafkaClientPlain.receiveMessagesPlain()
         );
 
-        assertThrows(WaitException.class, () -> {
+        assertThrows(Exception.class, () -> {
             basicExternalKafkaClientTls.sendMessagesTls(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             basicExternalKafkaClientTls.receiveMessagesTls(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             LOGGER.error("Producer & Consumer did not send and receive messages because external listener is set to plain communication");
@@ -2365,7 +2364,7 @@ class KafkaST extends BaseST {
                 basicExternalKafkaClientTls.sendMessagesTls()
         );
 
-        assertThrows(WaitException.class, () -> {
+        assertThrows(Exception.class, () -> {
             basicExternalKafkaClientPlain.sendMessagesPlain(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             basicExternalKafkaClientPlain.receiveMessagesPlain(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             LOGGER.error("Producer & Consumer did not send and receive messages because external listener is set to tls communication");
@@ -2385,7 +2384,7 @@ class KafkaST extends BaseST {
 
         StatefulSetUtils.waitTillSsHasRolled(kafkaStatefulSetName(CLUSTER_NAME), kafkaReplicas, kafkaPods);
 
-        assertThrows(WaitException.class, () -> {
+        assertThrows(Exception.class, () -> {
             basicExternalKafkaClientTls.sendMessagesTls(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             basicExternalKafkaClientTls.receiveMessagesTls(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             LOGGER.error("Producer & Consumer did not send and receive messages because external listener is set to plain communication");
