@@ -63,6 +63,7 @@ import io.strimzi.systemtest.utils.kubeUtils.objects.PersistentVolumeClaimUtils;
 import io.strimzi.systemtest.utils.kubeUtils.objects.PodUtils;
 import io.strimzi.systemtest.utils.kubeUtils.objects.ServiceUtils;
 import io.strimzi.test.TestUtils;
+import io.strimzi.test.WaitException;
 import io.strimzi.test.executor.ExecResult;
 import io.strimzi.test.timemeasuring.Operation;
 import io.vertx.core.json.JsonArray;
@@ -84,8 +85,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Random;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -2288,7 +2287,7 @@ class KafkaST extends BaseST {
     @Tag(NODEPORT_SUPPORTED)
     @Tag(LOADBALANCER_SUPPORTED)
     @Tag(EXTERNAL_CLIENTS_USED)
-    void testDynamicConfigurationExternalTls() throws InterruptedException, ExecutionException, TimeoutException {
+    void testDynamicConfigurationExternalTls() {
         int kafkaReplicas = 2;
         Map<String, Object> kafkaConfig = new HashMap<>();
         kafkaConfig.put("offsets.topic.replication.factor", "1");
@@ -2341,7 +2340,7 @@ class KafkaST extends BaseST {
                 basicExternalKafkaClientPlain.receiveMessagesPlain()
         );
 
-        assertThrows(ExecutionException.class, () -> {
+        assertThrows(WaitException.class, () -> {
             basicExternalKafkaClientTls.sendMessagesTls(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             basicExternalKafkaClientTls.receiveMessagesTls(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             LOGGER.error("Producer & Consumer did not send and receive messages because external listener is set to plain communication");
@@ -2366,7 +2365,7 @@ class KafkaST extends BaseST {
                 basicExternalKafkaClientTls.sendMessagesTls()
         );
 
-        assertThrows(ExecutionException.class, () -> {
+        assertThrows(WaitException.class, () -> {
             basicExternalKafkaClientPlain.sendMessagesPlain(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             basicExternalKafkaClientPlain.receiveMessagesPlain(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             LOGGER.error("Producer & Consumer did not send and receive messages because external listener is set to tls communication");
@@ -2386,7 +2385,7 @@ class KafkaST extends BaseST {
 
         StatefulSetUtils.waitTillSsHasRolled(kafkaStatefulSetName(CLUSTER_NAME), kafkaReplicas, kafkaPods);
 
-        assertThrows(ExecutionException.class, () -> {
+        assertThrows(WaitException.class, () -> {
             basicExternalKafkaClientTls.sendMessagesTls(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             basicExternalKafkaClientTls.receiveMessagesTls(Constants.GLOBAL_CLIENTS_EXCEPT_ERROR_TIMEOUT);
             LOGGER.error("Producer & Consumer did not send and receive messages because external listener is set to plain communication");
