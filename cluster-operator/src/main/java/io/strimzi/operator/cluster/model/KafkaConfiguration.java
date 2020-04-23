@@ -10,8 +10,6 @@ import io.strimzi.api.kafka.model.KafkaClusterSpec;
 import io.strimzi.kafka.config.model.ConfigModel;
 import io.strimzi.kafka.config.model.ConfigModels;
 import io.strimzi.kafka.config.model.Scope;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,7 +27,6 @@ import static java.util.Collections.emptyList;
  * Class for handling Kafka configuration passed by the user
  */
 public class KafkaConfiguration extends AbstractConfiguration {
-    private static final Logger log = LogManager.getLogger(KafkaConfiguration.class.getName());
 
     public static final String INTERBROKER_PROTOCOL_VERSION = "inter.broker.protocol.version";
     public static final String LOG_MESSAGE_FORMAT_VERSION = "log.message.format.version";
@@ -161,17 +158,6 @@ public class KafkaConfiguration extends AbstractConfiguration {
         Set<String> result = new HashSet<>(asOrderedProperties().asMap().keySet());
         result.removeAll(c.keySet());
         return result;
-    }
-
-    /* test */
-    public static Object getDefaultValueOfProperty(String property, KafkaVersion kafkaVersion) {
-        Map<String, ConfigModel> c = readConfigModel(kafkaVersion);
-        ConfigModel optProp = c.get(property);
-        if (optProp != null) {
-            return optProp.getDefaultValue();
-        } else {
-            return null;
-        }
     }
 
     public boolean containsListenersChange() {

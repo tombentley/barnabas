@@ -96,20 +96,20 @@ public abstract class StatefulSetOperator extends AbstractScalableResourceOperat
     public Future<Void> maybeRollingUpdate(StatefulSet sts, Function<Pod, String> podNeedsRestart) {
         String cluster = sts.getMetadata().getLabels().get(Labels.STRIMZI_CLUSTER_LABEL);
         String namespace = sts.getMetadata().getNamespace();
-        Future<Secret> clusterCaKeySecretFuture = secretOperations.getAsync(
+        Future<Secret> clusterCaCertSecretFuture = secretOperations.getAsync(
                 namespace, KafkaResources.clusterCaCertificateSecretName(cluster));
         Future<Secret> coKeySecretFuture = secretOperations.getAsync(
                 namespace, ClusterOperator.secretName(cluster));
-        return CompositeFuture.join(clusterCaKeySecretFuture, coKeySecretFuture).compose(compositeFuture -> {
-            Secret clusterCaKeySecret = compositeFuture.resultAt(0);
-            if (clusterCaKeySecret == null) {
-                return Future.failedFuture(Util.missingSecretException(namespace, KafkaCluster.clusterCaKeySecretName(cluster)));
+        return CompositeFuture.join(clusterCaCertSecretFuture, coKeySecretFuture).compose(compositeFuture -> {
+            Secret clusterCaCertSecret = compositeFuture.resultAt(0);
+            if (clusterCaCertSecret == null) {
+                return Future.failedFuture(Util.missingSecretException(namespace, KafkaCluster.clusterCaCertSecretName(cluster)));
             }
             Secret coKeySecret = compositeFuture.resultAt(1);
             if (coKeySecret == null) {
                 return Future.failedFuture(Util.missingSecretException(namespace, ClusterOperator.secretName(cluster)));
             }
-            return maybeRollingUpdate(sts, podNeedsRestart, clusterCaKeySecret, coKeySecret);
+            return maybeRollingUpdate(sts, podNeedsRestart, clusterCaCertSecret, coKeySecret);
         });
     }
 

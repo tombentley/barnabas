@@ -81,6 +81,7 @@ import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperScaler;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperScalerProvider;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperSetOperator;
+import io.strimzi.operator.common.AdminClientProvider;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.InvalidConfigurationException;
 import io.strimzi.operator.common.PasswordGenerator;
@@ -103,12 +104,9 @@ import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
-import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AlterConfigsOptions;
 import org.apache.kafka.clients.admin.AlterConfigsResult;
-import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.common.KafkaFuture;
-import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.InvalidRequestException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -133,8 +131,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.TreeSet;
 import java.util.function.Supplier;
@@ -175,6 +171,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
     private final NodeOperator nodeOperator;
     private final CrdOperator<KubernetesClient, Kafka, KafkaList, DoneableKafka> crdOperator;
     private final ZookeeperScalerProvider zkScalerProvider;
+    private final AdminClientProvider adminClientProvider;
 
     /**
      * @param vertx The Vertx instance
@@ -203,6 +200,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         this.crdOperator = supplier.kafkaOperator;
         this.nodeOperator = supplier.nodeOperator;
         this.zkScalerProvider = supplier.zkScalerProvider;
+        this.adminClientProvider = supplier.adminClientProvider;
     }
 
     @Override
@@ -412,6 +410,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         private String zkLoggingHash = "";
         private String kafkaLoggingHash = "";
+        private String kafkaBrokerConfigurationHash = "";
+        private ConfigMap brokerCm;
 
         /* test */ EntityOperator entityOperator;
         /* test */ Deployment eoDeployment = null;
@@ -1631,57 +1631,48 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         Future<ReconciliationState> kafkaBrokerDynamicConfiguration() {
-            KafkaBrokerConfigurationHelper kbch = new KafkaBrokerConfigurationHelper(kafkaSetOperations.getAdminClientProvider(), secretOperations);
-            return kafkaSetOperations.getAsync(namespace, KafkaCluster.kafkaClusterName(name))
-                .compose(sts -> {
-                    if (sts == null) {
-                        return Future.succeededFuture();
-                    }
-                    int replicas = kafkaCluster.getReplicas();
-                    List<Future> configFutures = new ArrayList<>(replicas);
+            int replicas = kafkaCluster.getReplicas();
+            List<Future> configFutures = new ArrayList<>(replicas);
 
-                    for (int podId = 0; podId < replicas; podId++) {
-                        int finalPodId = podId;
-                        Future<Admin> acFut = kbch.adminClient(sts, podId);
-                        configFutures.add(
-                                acFut.compose(ac -> {
-                                    if (ac == null) {
-                                        kafkaPodsUpdatedDynamically.put(finalPodId, null);
-                                        log.warn("Could not create admin client.");
-                                        return Future.succeededFuture();
-                                    } else {
-                                        Future<Map<ConfigResource, Config>> futCurrent = kbch.getCurrentConfig(finalPodId, ac);
-                                        Future<ConfigMap> futDesired = configMapOperations.getAsync(namespace, KafkaCluster.metricAndLogConfigsName(name));
-                                        log.debug("Determining kafka pod {} dynamic update ability", finalPodId);
-                                        return CompositeFuture.join(futCurrent, futDesired)
-                                                .compose(res -> {
-                                                    KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res.result().resultAt(0), res.result().resultAt(1), kafkaCluster.getKafkaVersion(), finalPodId);
+            for (int podId = 0; podId < replicas; podId++) {
+                int finalPodId = podId;
+                configFutures.add(podOperations.readiness(namespace, KafkaResources.kafkaPodName(name, podId), 1_000, operationTimeoutMs)
+                    .compose(ignore ->
+                            KafkaBrokerConfigurationHelper.adminClient(secretOperations, adminClientProvider, namespace, name, finalPodId)
+                    .compose(ac -> {
+                        if (ac == null) {
+                            kafkaPodsUpdatedDynamically.put(finalPodId, null);
+                            log.warn("{} Could not create admin client.", reconciliation);
+                            return Future.succeededFuture();
+                        } else {
+                            log.debug("{} Determining kafka pod {} dynamic update ability", reconciliation, finalPodId);
+                            return KafkaBrokerConfigurationHelper.getCurrentConfig(vertx, operationTimeoutMs, finalPodId, ac).compose(res -> {
+                                KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res, this.brokerCm, kafkaCluster.getKafkaVersion(), finalPodId);
 
-                                                    if (configurationDiff.getDiff().asOrderedProperties().asMap().size() > 0) {
-                                                        log.debug("kafka changed, dynamically? : {}", !configurationDiff.cannotBeUpdatedDynamically());
-                                                        kafkaPodsUpdatedDynamically.put(finalPodId, !configurationDiff.cannotBeUpdatedDynamically());
-                                                        AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig(), new AlterConfigsOptions());
-                                                        for (Map.Entry entry : alterConfigResult.values().entrySet()) {
-                                                            KafkaFuture kafkaFuture = (KafkaFuture) entry.getValue();
-                                                            try {
-                                                                log.debug("AlterConfig result {}", kafkaFuture.get(operationTimeoutMs, TimeUnit.MILLISECONDS));
-                                                            } catch (InvalidRequestException | InterruptedException | ExecutionException | TimeoutException e) {
-                                                                log.warn("Error during dynamic reconfiguration. Rolling the pod. {}", e.getMessage());
-                                                                kafkaPodsUpdatedDynamically.put(finalPodId, false);
-                                                            }
-                                                        }
-                                                    } else {
-                                                        log.debug("kafka not changed");
-                                                        kafkaPodsUpdatedDynamically.put(finalPodId, null);
-                                                    }
-                                                    ac.close();
-                                                    return Future.succeededFuture();
-                                                });
+                                if (!configurationDiff.isEmpty()) {
+                                    AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig(), new AlterConfigsOptions());
+                                    for (Map.Entry entry : alterConfigResult.values().entrySet()) {
+                                        KafkaFuture kafkaFuture = (KafkaFuture) entry.getValue();
+                                        Util.waitFor(vertx, "KafkaFuture to be completed", 1_000, operationTimeoutMs, () -> kafkaFuture.isDone());
+                                        try {
+                                            log.debug("{} AlterConfig result {}", reconciliation, kafkaFuture.get());
+                                            kafkaPodsUpdatedDynamically.put(finalPodId, true);
+                                        } catch (InvalidRequestException | InterruptedException | ExecutionException e) {
+                                            log.warn("{} Error during dynamic reconfiguration. Rolling the pod. {}", reconciliation, e.getMessage());
+                                            kafkaPodsUpdatedDynamically.put(finalPodId, false);
+                                        }
                                     }
-                                }));
-                    }
-                    return CompositeFuture.join(configFutures);
-                }).map(this);
+                                } else {
+                                    log.debug("{} Kafka configuration not changed", reconciliation);
+                                    kafkaPodsUpdatedDynamically.put(finalPodId, null);
+                                }
+                                ac.close();
+                                return Future.succeededFuture();
+                            });
+                        }
+                    })));
+            }
+            return withVoid(CompositeFuture.join(configFutures));
         }
 
         Future<ReconciliationState> withKafkaDiff(Future<ReconcileResult<StatefulSet>> r) {
@@ -1916,7 +1907,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
                             for (Pod broker : pods) {
                                 String podName = broker.getMetadata().getName();
-                                Integer podIndex = Integer.parseInt(podName.substring(podName.lastIndexOf("-") + 1));
+                                Integer podIndex = getPodIndexFromPodName(podName);
 
                                 if (kafkaCluster.getExternalServiceAdvertisedHostOverride(podIndex) != null)    {
                                     ListenerAddress address = new ListenerAddressBuilder()
@@ -2291,6 +2282,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
             ConfigMap brokerCm = kafkaCluster.generateAncillaryConfigMap(loggingCm, kafkaExternalAdvertisedHostnames, kafkaExternalAdvertisedPorts);
 
+            String brokerConfiguration = brokerCm.getData().getOrDefault(KafkaCluster.BROKER_ADVERTISED_HOSTNAMES_FILENAME, "");
+            brokerConfiguration += brokerCm.getData().getOrDefault(KafkaCluster.BROKER_ADVERTISED_PORTS_FILENAME, "");
+            this.kafkaBrokerConfigurationHash = getStringHash(brokerConfiguration);
+
+            this.brokerCm = brokerCm;
             String loggingConfiguration = brokerCm.getData().get(AbstractModel.ANCILLARY_CM_KEY_LOG_CONFIG);
             this.kafkaLoggingHash = getStringHash(loggingConfiguration);
 
@@ -2334,6 +2330,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         int getPodIndexFromPvcName(String pvcName)  {
             return Integer.parseInt(pvcName.substring(pvcName.lastIndexOf("-") + 1));
+        }
+
+        int getPodIndexFromPodName(String podName)  {
+            return Integer.parseInt(podName.substring(podName.lastIndexOf("-") + 1));
         }
 
         Future<ReconciliationState> maybeResizeReconcilePvcs(List<PersistentVolumeClaim> pvcs, AbstractModel cluster) {
@@ -2465,7 +2465,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     String.valueOf(getCaCertGeneration(this.clientsCa)));
 
             Annotations.annotations(template).put(AbstractModel.ANNO_STRIMZI_LOGGING_HASH, kafkaLoggingHash);
-            //Annotations.annotations(template).put(KafkaCluster.ANNO_STRIMZI_BROKER_CONFIGURATION_HASH, kafkaBrokerConfigurationHash);
+            Annotations.annotations(template).put(KafkaCluster.ANNO_STRIMZI_BROKER_CONFIGURATION_HASH, kafkaBrokerConfigurationHash);
 
             // Annotations with custom cert thumbprints to help with rolling updates when they change
             if (tlsListenerCustomCertificateThumbprint != null) {
@@ -2489,8 +2489,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> kafkaRollingUpdate() {
             return withVoid(kafkaSetOperations.maybeRollingUpdate(kafkaDiffs.resource(), pod ->
-                    getReasonsToRestartPod(kafkaDiffs.resource(), pod, existingKafkaCertsChanged, kafkaPodsUpdatedDynamically.get(Integer.parseInt(pod.getMetadata().getName().substring(pod.getMetadata().getName().lastIndexOf("-") + 1))), this.clusterCa, this.clientsCa)
-            ));
+                    getReasonsToRestartPod(kafkaDiffs.resource(), pod, existingKafkaCertsChanged, kafkaPodsUpdatedDynamically.get(getPodIndexFromPodName(pod.getMetadata().getName())), this.clusterCa, this.clientsCa)));
         }
 
         Future<ReconciliationState> kafkaScaleUp() {

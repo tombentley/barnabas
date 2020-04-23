@@ -72,8 +72,4 @@ public class KafkaSetOperator extends StatefulSetOperator {
             () -> new BackOff(250, 2, 10), sts, clusterCaCertSecret, coKeySecret, adminClientProvider)
                 .rollingRestart(podNeedsRestart);
     }
-
-    public AdminClientProvider getAdminClientProvider() {
-        return adminClientProvider;
-    }
 }
