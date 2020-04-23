@@ -398,6 +398,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private Integer zkCurrentReplicas = null;
 
         private KafkaCluster kafkaCluster = null;
+        private int oldReplicas;
         /* test */ KafkaStatus kafkaStatus = new KafkaStatus();
 
         private Service kafkaService;
@@ -1617,7 +1618,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     .compose(sts -> {
                         Storage oldStorage = getOldStorage(sts);
 
-                        int oldReplicas = 0;
+                        oldReplicas = 0;
                         if (sts != null && sts.getSpec() != null)   {
                             oldReplicas = sts.getSpec().getReplicas();
                         }
@@ -1631,7 +1632,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         Future<ReconciliationState> kafkaBrokerDynamicConfiguration() {
-            int replicas = kafkaCluster.getReplicas();
+            int replicas = Math.min(oldReplicas, kafkaCluster.getReplicas());
             List<Future> configFutures = new ArrayList<>(replicas);
 
             for (int podId = 0; podId < replicas; podId++) {
