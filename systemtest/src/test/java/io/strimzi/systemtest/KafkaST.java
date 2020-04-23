@@ -2082,7 +2082,7 @@ class KafkaST extends BaseST {
     }
 
     @Test
-    void testDynamicConfiguration() {
+    void testSimpleDynamicConfiguration() {
         int kafkaReplicas = 2;
         Map<String, Object> kafkaConfig = new HashMap<>();
         kafkaConfig.put("offsets.topic.replication.factor", "1");
@@ -2144,11 +2144,10 @@ class KafkaST extends BaseST {
         });
 
         StatefulSetUtils.waitTillSsHasRolled(kafkaStatefulSetName(CLUSTER_NAME), kafkaReplicas, kafkaPodsSnapshot);
-
     }
 
     @Test
-    void testDynamicConfigurationWintExternalListeners() {
+    void testDynamicConfigurationWithExternalListeners() {
         int kafkaReplicas = 2;
         int zkReplicas = 1;
         Map<String, Object> kafkaConfig = new HashMap<>();
