@@ -76,9 +76,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
         this.kafkaVersion = kafkaVersion;
         this.brokerId = brokerId;
         Config brokerConfigs = this.current.get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId)));
-        if (brokerConfigs == null) {
-            log.warn("Failed to get broker {} configuration", brokerId);
-        } else {
+        if (brokerConfigs != null) {
             this.currentEntries = brokerConfigs.entries();
             this.diff = computeDiff();
         }
