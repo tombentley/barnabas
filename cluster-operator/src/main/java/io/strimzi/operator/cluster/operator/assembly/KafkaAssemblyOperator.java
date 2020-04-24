@@ -1654,7 +1654,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                     AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig(), new AlterConfigsOptions());
                                     for (Map.Entry entry : alterConfigResult.values().entrySet()) {
                                         KafkaFuture kafkaFuture = (KafkaFuture) entry.getValue();
-                                        Util.waitFor(vertx, "KafkaFuture to be completed",  "updated", 1_000, operationTimeoutMs, () -> kafkaFuture.isDone());
+                                        Util.waitFor(vertx, "kafka config",  "updated", 1_000, operationTimeoutMs, () -> kafkaFuture.isDone());
                                         try {
                                             log.debug("{} AlterConfig result {}", reconciliation, kafkaFuture.get());
                                             kafkaPodsUpdatedDynamically.put(finalPodId, true);
@@ -1671,9 +1671,14 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                 return Future.succeededFuture();
                             });
                         }
+                    }).recover(ignore2 -> {
+                        kafkaPodsUpdatedDynamically.put(finalPodId, false);
+                        return Future.succeededFuture();
                     })));
             }
-            return withVoid(CompositeFuture.join(configFutures));
+            return withVoid(CompositeFuture.join(configFutures).recover(ignore ->
+                Future.succeededFuture()
+            ));
         }
 
         Future<ReconciliationState> withKafkaDiff(Future<ReconcileResult<StatefulSet>> r) {
