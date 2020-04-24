@@ -104,10 +104,9 @@ import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
-import org.apache.kafka.clients.admin.AlterConfigsOptions;
 import org.apache.kafka.clients.admin.AlterConfigsResult;
 import org.apache.kafka.common.KafkaFuture;
-import org.apache.kafka.common.errors.InvalidRequestException;
+import org.apache.kafka.common.config.ConfigResource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.quartz.CronExpression;
@@ -398,7 +397,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private Integer zkCurrentReplicas = null;
 
         private KafkaCluster kafkaCluster = null;
-        private int oldReplicas;
+        private int oldKafkaReplicas;
         /* test */ KafkaStatus kafkaStatus = new KafkaStatus();
 
         private Service kafkaService;
@@ -412,7 +411,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private String zkLoggingHash = "";
         private String kafkaLoggingHash = "";
         private String kafkaBrokerConfigurationHash = "";
-        private ConfigMap brokerCm;
+        private ConfigMap kafkaCm;
 
         /* test */ EntityOperator entityOperator;
         /* test */ Deployment eoDeployment = null;
@@ -432,10 +431,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         // Certificate change indicators
         private boolean existingZookeeperCertsChanged = false;
         private boolean existingKafkaCertsChanged = false;
-        private Map<Integer, Boolean> kafkaPodsUpdatedDynamically = new HashMap<>();
         private boolean existingKafkaExporterCertsChanged = false;
         private boolean existingEntityOperatorCertsChanged = false;
         private boolean existingCruiseControlCertsChanged = false;
+
+        // Dynamic kafka broker change indicator
+        private Map<Integer, Boolean> kafkaPodsUpdatedDynamically = new HashMap<>();
 
         // Custom Listener certificates
         private String tlsListenerCustomCertificate;
@@ -1618,12 +1619,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     .compose(sts -> {
                         Storage oldStorage = getOldStorage(sts);
 
-                        oldReplicas = 0;
+                        oldKafkaReplicas = 0;
                         if (sts != null && sts.getSpec() != null)   {
-                            oldReplicas = sts.getSpec().getReplicas();
+                            oldKafkaReplicas = sts.getSpec().getReplicas();
                         }
 
-                        this.kafkaCluster = KafkaCluster.fromCrd(kafkaAssembly, versions, oldStorage, oldReplicas);
+                        this.kafkaCluster = KafkaCluster.fromCrd(kafkaAssembly, versions, oldStorage, oldKafkaReplicas);
                         this.kafkaService = kafkaCluster.generateService();
                         this.kafkaHeadlessService = kafkaCluster.generateHeadlessService();
 
@@ -1631,11 +1632,17 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     });
         }
 
+        /**
+         * If the kafka pod is running, change its configuration dynamically if it is possible (and needed).
+         * If it is not possible set the flag for specific podID an it will be rolled in {@code kafkaRollingUpdate}.
+         * @return Succeeded future
+         */
         Future<ReconciliationState> kafkaBrokerDynamicConfiguration() {
-            int replicas = Math.min(oldReplicas, kafkaCluster.getReplicas());
-            List<Future> configFutures = new ArrayList<>(replicas);
+            // patches scale up/down situations
+            int runningReplicas = Math.min(oldKafkaReplicas, kafkaCluster.getReplicas());
+            List<Future> configFutures = new ArrayList<>(runningReplicas);
 
-            for (int podId = 0; podId < replicas; podId++) {
+            for (int podId = 0; podId < runningReplicas; podId++) {
                 int finalPodId = podId;
                 configFutures.add(podOperations.readiness(namespace, KafkaResources.kafkaPodName(name, podId), 1_000, operationTimeoutMs)
                     .compose(ignore ->
@@ -1648,26 +1655,31 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                         } else {
                             log.debug("{} Determining kafka pod {} dynamic update ability", reconciliation, finalPodId);
                             return KafkaBrokerConfigurationHelper.getCurrentConfig(vertx, operationTimeoutMs, finalPodId, ac).compose(res -> {
-                                KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res, this.brokerCm, kafkaCluster.getKafkaVersion(), finalPodId);
-
+                                KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res, this.kafkaCm, kafkaCluster.getKafkaVersion(), finalPodId);
+                                boolean acClosed = false;
                                 if (!configurationDiff.isEmpty()) {
-                                    AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig(), new AlterConfigsOptions());
-                                    for (Map.Entry entry : alterConfigResult.values().entrySet()) {
-                                        KafkaFuture kafkaFuture = (KafkaFuture) entry.getValue();
+                                    AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig());
+                                    for (Map.Entry<ConfigResource, KafkaFuture<Void>> entry : alterConfigResult.values().entrySet()) {
+                                        KafkaFuture kafkaFuture = entry.getValue();
                                         Util.waitFor(vertx, "kafka config",  "updated", 1_000, operationTimeoutMs, () -> kafkaFuture.isDone());
                                         try {
-                                            log.debug("{} AlterConfig result {}", reconciliation, kafkaFuture.get());
+                                            log.debug("{} Dynamic AlterConfig result for pod {} {}", reconciliation, finalPodId, kafkaFuture.get());
                                             kafkaPodsUpdatedDynamically.put(finalPodId, true);
-                                        } catch (InvalidRequestException | InterruptedException | ExecutionException e) {
+                                        } catch (InterruptedException | ExecutionException e) {
                                             log.warn("{} Error during dynamic reconfiguration. Rolling the pod. {}", reconciliation, e.getMessage());
                                             kafkaPodsUpdatedDynamically.put(finalPodId, false);
+                                        } finally {
+                                            ac.close();
+                                            acClosed = true;
                                         }
                                     }
                                 } else {
                                     log.debug("{} Kafka configuration not changed", reconciliation);
                                     kafkaPodsUpdatedDynamically.put(finalPodId, null);
                                 }
-                                ac.close();
+                                if (!acClosed) {
+                                    ac.close();
+                                }
                                 return Future.succeededFuture();
                             });
                         }
@@ -2288,11 +2300,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
             ConfigMap brokerCm = kafkaCluster.generateAncillaryConfigMap(loggingCm, kafkaExternalAdvertisedHostnames, kafkaExternalAdvertisedPorts);
 
+            // if BROKER_ADVERTISED_HOSTNAMES_FILENAME or BROKER_ADVERTISED_PORTS_FILENAME changes, compute a hash and put it into annotationsF
             String brokerConfiguration = brokerCm.getData().getOrDefault(KafkaCluster.BROKER_ADVERTISED_HOSTNAMES_FILENAME, "");
             brokerConfiguration += brokerCm.getData().getOrDefault(KafkaCluster.BROKER_ADVERTISED_PORTS_FILENAME, "");
             this.kafkaBrokerConfigurationHash = getStringHash(brokerConfiguration);
 
-            this.brokerCm = brokerCm;
+            this.kafkaCm = brokerCm;
             String loggingConfiguration = brokerCm.getData().get(AbstractModel.ANCILLARY_CM_KEY_LOG_CONFIG);
             this.kafkaLoggingHash = getStringHash(loggingConfiguration);
 
@@ -3173,7 +3186,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 reasons.add("Pod has old generation");
             }
             if (kafkaPodUpdatedDynamically != null && !kafkaPodUpdatedDynamically) {
-                reasons.add("Kafka configuration changed");
+                reasons.add("Kafka configuration changed (dynamic update not possible)");
             }
             if (fsResizingRestartRequest.contains(pod.getMetadata().getName()))   {
                 reasons.add("file system needs to be resized");

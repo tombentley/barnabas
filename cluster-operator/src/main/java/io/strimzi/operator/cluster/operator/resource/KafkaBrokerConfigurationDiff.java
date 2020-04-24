@@ -21,27 +21,29 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static io.fabric8.kubernetes.client.internal.PatchUtils.patchMapper;
 
 /**
- * Computes a diff between current config supplied as a Map ConfigResource, Config and desired config supplied as a ConfigMap
+ * Computes a diff between the current config (supplied as a Map ConfigResource) and the desired config (supplied as a ConfigMap).
  * An algorithm:
  *  1. Create map from supplied desired ConfigMap
  *  2. Fill placeholders (e.g. ${BROKER_ID}) in desired map
- *  3a. If the entry is in IGNORABLE_PROPERTIES or entry.value from desired is equal to entry.value from current, do nothing
+ *  3a. Loop over all entries. If the entry is in IGNORABLE_PROPERTIES or entry.value from desired is equal to entry.value from current, do nothing
  *      else add it to the diff
- *  3b. If entry was removed from desired, add it to the diff with default value.
+ *  3b. If entry was removed from desired, add it to the diff with null value.
  *  3c. If custom entry was removed, delete property
  *
  */
 public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
 
-    private static final Logger log = LogManager.getLogger(KafkaBrokerConfigurationDiff.class.getName());
+    private static final Logger log = LogManager.getLogger(KafkaBrokerConfigurationDiff.class);
     private final Map<ConfigResource, Config> current;
     private Collection<ConfigEntry> currentEntries;
     private ConfigMap desired;
@@ -52,6 +54,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
 
     /**
      * These options are skipped because they contain placeholders
+     * 909[1-4] is for skipping all (internal, plain, secured, external) listeners properties
      */
     public static final Pattern IGNORABLE_PROPERTIES = Pattern.compile(
             "^(broker\\.id"
@@ -83,8 +86,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
     }
 
     private KafkaConfiguration emptyKafkaConf() {
-        Map<String, Object> conf = new HashMap<>();
-        return new KafkaConfiguration(conf.entrySet());
+        return new KafkaConfiguration(Collections.emptySet());
     }
 
 
@@ -94,10 +96,19 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
         });
     }
 
+    /**
+     * Returns computed diff
+     * @return computed diff
+     */
     public KafkaConfiguration getDiff() {
         return this.diff;
     }
 
+    /**
+     * Returns true if property in desired map has a default value
+     * @param key name of the property
+     * @return true if property in desired map has a default value
+     */
     public boolean isDesiredPropertyDefaultValue(String key) {
         Optional<ConfigEntry> entry = currentEntries.stream().filter(configEntry -> configEntry.name().equals(key)).findFirst();
         if (entry.isPresent()) {
@@ -106,7 +117,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
         return false;
     }
 
-    public boolean cannotBeUpdatedDynamically() {
+    /* test */public boolean cannotBeUpdatedDynamically() {
         if (diff == null) {
             return false;
         } else return diff.anyReadOnly(kafkaVersion)
@@ -130,16 +141,14 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
      * @return KafkaConfiguration containing all entries which were changed from current in desired configuration
      */
     public KafkaConfiguration computeDiff() {
-        Map<String, String> currentMap = new HashMap<>();
+        Map<String, String> currentMap;
         Map<String, String> difference = new HashMap<>();
 
         Collection<AlterConfigOp> updatedCE = new ArrayList<>();
 
-        currentEntries.stream().forEach(e -> {
-            currentMap.put(e.name(), e.value());
-        });
+        currentMap = currentEntries.stream().collect(Collectors.toMap(configEntry -> configEntry.name(), configEntry -> configEntry.value()));
 
-        Map<String, String> desiredMap = ModelUtils.configMap2Map(desired, "server.config");
+        Map<String, String> desiredMap = ModelUtils.configMapToMap(desired, "server.config");
 
         fillPlaceholderValue(desiredMap, "STRIMZI_BROKER_ID", Integer.toString(brokerId));
 
@@ -148,35 +157,41 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
         JsonNode jsonDiff = JsonDiff.asJson(source, target);
 
         for (JsonNode d : jsonDiff) {
-            String pathValueWithoutSlash = d.get("path").asText().substring(1);
             String pathValue = d.get("path").asText();
+            String pathValueWithoutSlash = pathValue.substring(1);
 
-            Optional<ConfigEntry> entry = currentEntries.stream().filter(e -> e.name().equals(pathValueWithoutSlash)).findFirst();
+            Optional<ConfigEntry> optEntry = currentEntries.stream().filter(configEntry -> configEntry.name().equals(pathValueWithoutSlash)).findFirst();
 
-            if (entry.isPresent()) {
+            if (optEntry.isPresent()) {
+                ConfigEntry entry = optEntry.get();
                 if (d.get("op").asText().equals("remove")) {
-                    if (!entry.get().source().name().equals("DEFAULT_CONFIG")) {
+                    if (!entry.source().equals(ConfigEntry.ConfigSource.DEFAULT_CONFIG)) {
                         // we are deleting custom option
                         difference.put(pathValueWithoutSlash, "deleted entry");
-                        updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValueWithoutSlash, entry.get().value()), AlterConfigOp.OpType.DELETE));
-                    } else if (entry.get().isDefault()) {
+                        updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValueWithoutSlash, entry.value()), AlterConfigOp.OpType.DELETE));
+                        log.trace("removing custom property {}", entry.name());
+                    } else if (entry.isDefault()) {
                         // entry is in current, is not in desired, is default -> it uses default value, skip
-                        log.trace("{} not set in desired, using default value", entry.get().name());
+                        log.trace("{} not set in desired, using default value", entry.name());
                     } else {
                         // entry is in current, is not in desired, is not default -> it was using non-default value and was removed
                         // if the entry was custom, it should be deleted
                         if (!isIgnorableProperty(pathValueWithoutSlash)) {
                             difference.put(pathValueWithoutSlash, null);
                             updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValueWithoutSlash, null), AlterConfigOp.OpType.DELETE));
-                            log.trace("{} not set in desired, unsetting back to default {}", entry.get().name(), null);
+                            log.trace("{} not set in desired, unsetting back to default {}", entry.name(), null);
+                        } else {
+                            log.trace("{} is ignorable, not considering as removed");
                         }
                     }
                 } else if (d.get("op").asText().equals("replace")) {
                     // entry is in the current, desired is updated value
                     if (!isIgnorableProperty(pathValueWithoutSlash)) {
-                        log.trace("{} has new desired value {}", entry.get().name(), desiredMap.get(entry.get().name()));
+                        log.trace("{} has new desired value {}", entry.name(), desiredMap.get(entry.name()));
                         updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValueWithoutSlash, desiredMap.get(pathValueWithoutSlash)), AlterConfigOp.OpType.SET));
                         difference.put(pathValueWithoutSlash, desiredMap.get(pathValueWithoutSlash));
+                    } else {
+                        log.trace("{} is ignorable, not considering as replaced");
                     }
                 }
             } else {
@@ -186,6 +201,8 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
                         log.trace("add new {} {}", pathValueWithoutSlash, d.get("op").asText());
                         difference.put(pathValueWithoutSlash, desiredMap.get(pathValueWithoutSlash));
                         updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValueWithoutSlash, desiredMap.get(pathValueWithoutSlash)), AlterConfigOp.OpType.SET));
+                    } else {
+                        log.trace("{} is ignorable, not considering as added");
                     }
                 }
             }
@@ -201,14 +218,11 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
         });
 
         updated.put(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId)), updatedCE);
-
-        String diffString = difference.toString();
-        diffString = diffString.substring(1, diffString.length() - 1).replace(", ", "\n");
-        return KafkaConfiguration.unvalidated(diffString);
+        return KafkaConfiguration.unvalidated(difference);
     }
 
     @Override
     public boolean isEmpty() {
-        return diff.asOrderedProperties().asMap().size() == 0;
+        return diff.isEmpty();
     }
 }
