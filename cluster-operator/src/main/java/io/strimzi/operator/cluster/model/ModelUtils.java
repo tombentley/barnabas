@@ -554,8 +554,8 @@ public class ModelUtils {
     }
 
     /**
-     * This method transforms ConfigMap data entry form String into the List of Strings, where entry = line from input.
-     * The comments are ignored.
+     * This method transforms a String into a List of Strings, where entry = line from input.
+     * The lines beginning with '#' (comments) are ignored.
      * @param config ConfigMap data as a String
      * @return List of String key=value
      */
@@ -570,7 +570,6 @@ public class ModelUtils {
                 }
             }
         }
-
         return validLines;
     }
 
@@ -581,7 +580,7 @@ public class ModelUtils {
      * @return String value of ConfigMap data entry. If the key does not exist in the ConfigMap, return null
      */
     public static String getDataFromConfigMap(ConfigMap configMap, String key) {
-        if (configMap == null || configMap.getData() == null || configMap.getData().get(key) == null) {
+        if (configMap == null || configMap.getData() == null) {
             return null;
         }
         return configMap.getData().get(key);
@@ -593,11 +592,11 @@ public class ModelUtils {
      * @param key key to get data from ConfigMap
      * @return Map of (key, value)
      */
-    public static Map<String, String> configMap2Map(ConfigMap configMap, String key) {
+    public static Map<String, String> configMapToMap(ConfigMap configMap, String key) {
         Map<String, String> result = new HashMap<>();
         List<String> list = ModelUtils.getLinesWithoutCommentsAndEmptyLines(getDataFromConfigMap(configMap, key));
         for (String line: list) {
-            String[] split = line.split("=");
+            String[] split = line.split("=", 2);
             if (split.length == 1) {
                 result.put(split[0], "");
             } else {

@@ -64,6 +64,17 @@ public class KafkaConfiguration extends AbstractConfiguration {
     }
 
     /**
+     * Returns a KafkaConfiguration created without forbidden option filtering.
+     * @param map A map representation of the Properties
+     * @return The KafkaConfiguration
+     */
+    public static KafkaConfiguration unvalidated(Map<String, String> map) {
+        StringBuilder string = new StringBuilder();
+        map.entrySet().forEach(entry -> string.append(entry.getKey() + "=" + entry.getValue() + "\n"));
+        return new KafkaConfiguration(string.toString(), emptyList());
+    }
+
+    /**
      * Validate the configs in this KafkaConfiguration returning a list of errors.
      * @param kafkaVersion The broker version.
      * @return A list of error messages.
@@ -162,6 +173,10 @@ public class KafkaConfiguration extends AbstractConfiguration {
 
     public boolean containsListenersChange() {
         return asOrderedProperties().asMap().keySet().contains("listeners");
+    }
+
+    public boolean isEmpty() {
+        return this.asOrderedProperties().asMap().size() == 0;
     }
 
 }
