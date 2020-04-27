@@ -107,6 +107,7 @@ import io.vertx.core.Vertx;
 import org.apache.kafka.clients.admin.AlterConfigsResult;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.config.ConfigResource;
+import org.apache.kafka.common.errors.InvalidRequestException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.quartz.CronExpression;
@@ -1658,23 +1659,28 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                 KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res, this.kafkaCm, kafkaCluster.getKafkaVersion(), finalPodId);
                                 boolean acClosed = false;
                                 if (!configurationDiff.isEmpty()) {
-                                    AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig());
-                                    for (Map.Entry<ConfigResource, KafkaFuture<Void>> entry : alterConfigResult.values().entrySet()) {
-                                        KafkaFuture kafkaFuture = entry.getValue();
-                                        Util.waitFor(vertx, "kafka config",  "updated", 1_000, operationTimeoutMs, () -> kafkaFuture.isDone());
-                                        try {
-                                            log.debug("{} Dynamic AlterConfig result for pod {} {}", reconciliation, finalPodId, kafkaFuture.get());
-                                            kafkaPodsUpdatedDynamically.put(finalPodId, true);
-                                        } catch (InterruptedException | ExecutionException e) {
-                                            log.warn("{} Error during dynamic reconfiguration. Rolling the pod. {}", reconciliation, e.getMessage());
-                                            kafkaPodsUpdatedDynamically.put(finalPodId, false);
-                                        } finally {
-                                            ac.close();
-                                            acClosed = true;
+                                    try {
+                                        AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig());
+                                        for (Map.Entry<ConfigResource, KafkaFuture<Void>> entry : alterConfigResult.values().entrySet()) {
+                                            KafkaFuture kafkaFuture = entry.getValue();
+                                            Util.waitFor(vertx, "kafka config", "updated", 1_000, operationTimeoutMs, () -> kafkaFuture.isDone());
+                                            try {
+                                                log.debug("{} Dynamic AlterConfig result for pod {} {}", reconciliation, finalPodId, kafkaFuture.get());
+                                                kafkaPodsUpdatedDynamically.put(finalPodId, true);
+                                            } catch (InterruptedException | ExecutionException e) {
+                                                log.debug("{} Error during dynamic reconfiguration. Rolling the pod with id {}. {}", reconciliation, finalPodId, e.getMessage());
+                                                kafkaPodsUpdatedDynamically.put(finalPodId, false);
+                                            } finally {
+                                                ac.close();
+                                                acClosed = true;
+                                            }
                                         }
+                                    } catch (InvalidRequestException e) {
+                                        log.debug("Could not dynamically update broker {} configuration. Reason {}", finalPodId, e);
+                                        kafkaPodsUpdatedDynamically.put(finalPodId, false);
                                     }
                                 } else {
-                                    log.debug("{} Kafka configuration not changed", reconciliation);
+                                    log.debug("{} Kafka broker {} configuration not changed", reconciliation, finalPodId);
                                     kafkaPodsUpdatedDynamically.put(finalPodId, null);
                                 }
                                 if (!acClosed) {
@@ -1684,6 +1690,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             });
                         }
                     }).recover(ignore2 -> {
+                        log.debug("recovering from the failed dynamic updating {}", ignore2);
                         kafkaPodsUpdatedDynamically.put(finalPodId, false);
                         return Future.succeededFuture();
                     })));

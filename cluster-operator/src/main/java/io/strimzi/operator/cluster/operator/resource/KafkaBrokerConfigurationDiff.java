@@ -146,7 +146,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
 
         Collection<AlterConfigOp> updatedCE = new ArrayList<>();
 
-        currentMap = currentEntries.stream().collect(Collectors.toMap(configEntry -> configEntry.name(), configEntry -> configEntry.value()));
+        currentMap = currentEntries.stream().collect(Collectors.toMap(configEntry -> configEntry.name(), configEntry -> configEntry.value() == null ? "null" : configEntry.value()));
 
         Map<String, String> desiredMap = ModelUtils.configMapToMap(desired, "server.config");
 
