@@ -130,7 +130,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
-import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.TreeSet;
 import java.util.function.Supplier;
@@ -1654,27 +1653,23 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             log.warn("{} Could not create admin client.", reconciliation);
                             return Future.succeededFuture();
                         } else {
-                            log.debug("{} Determining kafka pod {} dynamic update ability", reconciliation, finalPodId);
-                            return KafkaBrokerConfigurationHelper.getCurrentConfig(vertx, operationTimeoutMs, finalPodId, ac).compose(res -> {
+                            log.debug("{} Determining kafka broker {} dynamic update ability", reconciliation, finalPodId);
+                            return KafkaBrokerConfigurationHelper.getCurrentConfig(finalPodId, ac).compose(res -> {
                                 KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res, this.kafkaCm, kafkaCluster.getKafkaVersion(), finalPodId);
-                                boolean acClosed = false;
                                 if (!configurationDiff.isEmpty()) {
                                     try {
                                         AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig());
-                                        for (Map.Entry<ConfigResource, KafkaFuture<Void>> entry : alterConfigResult.values().entrySet()) {
-                                            KafkaFuture kafkaFuture = entry.getValue();
-                                            Util.waitFor(vertx, "kafka config", "updated", 1_000, operationTimeoutMs, () -> kafkaFuture.isDone());
-                                            try {
-                                                log.debug("{} Dynamic AlterConfig result for pod {} {}", reconciliation, finalPodId, kafkaFuture.get());
-                                                kafkaPodsUpdatedDynamically.put(finalPodId, true);
-                                            } catch (InterruptedException | ExecutionException e) {
-                                                log.debug("{} Error during dynamic reconfiguration. Rolling the pod with id {}. {}", reconciliation, finalPodId, e.getMessage());
+                                        KafkaFuture<Void> brokerConfigFuture = alterConfigResult.values().get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(finalPodId)));
+                                        return kafkaFutureToVertxFuture(brokerConfigFuture).compose(result -> {
+                                            log.debug("{} Dynamic AlterConfig result for broker {} {}", reconciliation, finalPodId, result);
+                                            kafkaPodsUpdatedDynamically.put(finalPodId, true);
+                                            return Future.succeededFuture();
+                                        },
+                                            error -> {
+                                                log.debug("{} Error during dynamic reconfiguration. Rolling the broekr {}. {}", reconciliation, finalPodId, error);
                                                 kafkaPodsUpdatedDynamically.put(finalPodId, false);
-                                            } finally {
-                                                ac.close();
-                                                acClosed = true;
-                                            }
-                                        }
+                                                return Future.succeededFuture();
+                                            });
                                     } catch (InvalidRequestException e) {
                                         log.debug("Could not dynamically update broker {} configuration. Reason {}", finalPodId, e);
                                         kafkaPodsUpdatedDynamically.put(finalPodId, false);
@@ -1683,11 +1678,18 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                     log.debug("{} Kafka broker {} configuration not changed", reconciliation, finalPodId);
                                     kafkaPodsUpdatedDynamically.put(finalPodId, null);
                                 }
-                                if (!acClosed) {
-                                    ac.close();
-                                }
                                 return Future.succeededFuture();
-                            });
+                            }); /*.setHandler(ign -> {
+                                log.info("closing ac instance {}", ac.toString());
+                                if (ac != null) {
+                                    try {
+                                        ac.close(Duration.ofSeconds(10));
+                                    } catch (Throwable e) {
+                                        log.warn("Ignoring exception when closing admin client", e);
+                                    }
+                                }
+                                log.info("ac instance closed");
+                            });*/
                         }
                     }).recover(ignore2 -> {
                         log.debug("recovering from the failed dynamic updating {}", ignore2);
@@ -3546,6 +3548,20 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         } catch (NoSuchAlgorithmException e)    {
             throw new RuntimeException("Failed to create SHA-512 MessageDigest instance");
         }
+    }
+
+    public static <T> Future<T> kafkaFutureToVertxFuture(KafkaFuture<T> kf) {
+        Promise<T> promise = Promise.promise();
+        kf.whenComplete((result, error) -> {
+            if (error != null) {
+                log.debug("Kafkafuture failed {}", error);
+                promise.fail(error);
+            } else {
+                log.debug("KafkaFuture succeeded");
+                promise.complete(result);
+            }
+        });
+        return promise.future();
     }
 
 }
