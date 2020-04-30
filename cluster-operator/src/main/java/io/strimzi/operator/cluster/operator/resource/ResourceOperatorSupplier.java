@@ -91,7 +91,7 @@ public class ResourceOperatorSupplier {
     public final NodeOperator nodeOperator;
     public final ZookeeperScalerProvider zkScalerProvider;
     public final MetricsProvider metricsProvider;
-    public final AdminClientProvider adminClientProvider;
+    public AdminClientProvider adminClientProvider;
 
     public ResourceOperatorSupplier(Vertx vertx, KubernetesClient client, PlatformFeaturesAvailability pfa, long operationTimeoutMs) {
         this(vertx, client,
