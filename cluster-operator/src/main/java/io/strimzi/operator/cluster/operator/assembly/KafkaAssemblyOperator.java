@@ -1684,7 +1684,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 int finalPodId = podId;
                 configFutures.add(podOperations.readiness(namespace, KafkaResources.kafkaPodName(name, podId), 1_000, operationTimeoutMs)
                     .compose(ignore ->
-                            adminClient(adminClientProvider, namespace, name, finalPodId))
+                            adminClient(adminClientProvider, namespace, name, finalPodId)
                     .compose(ac -> {
                         if (ac == null) {
                             kafkaPodsUpdatedDynamically.put(finalPodId, null);
@@ -1738,9 +1738,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                         log.debug("{} recovering from the failed dynamic updating {}", reconciliation, ignore2);
                         kafkaPodsUpdatedDynamically.put(finalPodId, false);
                         return Future.succeededFuture();
+                    })).recover(fail -> {
+                        log.warn("{} kafka pod {} not ready", reconciliation, finalPodId);
+                        kafkaPodsUpdatedDynamically.put(finalPodId, null);
+                        return Future.succeededFuture();
                     }));
             }
-            return withVoid(CompositeFuture.join(configFutures));
+            return withVoid(CompositeFuture.join(configFutures).recover(brekeke -> Future.succeededFuture()));
         }
 
         Future<ReconciliationState> withKafkaDiff(Future<ReconcileResult<StatefulSet>> r) {
