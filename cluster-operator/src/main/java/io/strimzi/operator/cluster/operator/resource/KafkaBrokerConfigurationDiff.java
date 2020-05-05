@@ -6,7 +6,6 @@
 package io.strimzi.operator.cluster.operator.resource;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.zjsonpatch.JsonDiff;
 import io.strimzi.operator.cluster.model.KafkaConfiguration;
 import io.strimzi.operator.cluster.model.KafkaVersion;
@@ -31,9 +30,9 @@ import java.util.stream.Collectors;
 import static io.fabric8.kubernetes.client.internal.PatchUtils.patchMapper;
 
 /**
- * Computes a diff between the current config (supplied as a Map ConfigResource) and the desired config (supplied as a ConfigMap).
+ * Computes a diff between the current config (supplied as a Map ConfigResource) and the desired config (supplied as a String).
  * An algorithm:
- *  1. Create map from supplied desired ConfigMap
+ *  1. Create map from supplied desired String
  *  2. Fill placeholders (e.g. ${BROKER_ID}) in desired map
  *  3a. Loop over all entries. If the entry is in IGNORABLE_PROPERTIES or entry.value from desired is equal to entry.value from current, do nothing
  *      else add it to the diff
@@ -46,7 +45,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
     private static final Logger log = LogManager.getLogger(KafkaBrokerConfigurationDiff.class);
     private final Map<ConfigResource, Config> current;
     private Collection<ConfigEntry> currentEntries;
-    private ConfigMap desired;
+    private String desired;
     private KafkaConfiguration diff;
     private KafkaVersion kafkaVersion;
     private int brokerId;
@@ -58,7 +57,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
      */
     public static final Pattern IGNORABLE_PROPERTIES = Pattern.compile(
             "^(broker\\.id"
-            + "|.*-909[1-4].ssl.keystore.location"
+            + "|.*-909[1-4]\\.ssl\\.keystore\\.location"
             + "|.*-909[1-4]\\.ssl\\.keystore\\.password"
             + "|.*-909[1-4]\\.ssl\\.keystore\\.type"
             + "|.*-909[1-4]\\.ssl\\.truststore\\.location"
@@ -72,7 +71,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
             + "|super\\.users"
             + "|broker\\.rack)$");
 
-    public KafkaBrokerConfigurationDiff(Map<ConfigResource, Config> current, ConfigMap desired, KafkaVersion kafkaVersion, int brokerId) {
+    public KafkaBrokerConfigurationDiff(Map<ConfigResource, Config> current, String desired, KafkaVersion kafkaVersion, int brokerId) {
         this.current = current;
         this.diff = emptyKafkaConf(); // init
         this.desired = desired;
@@ -148,7 +147,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
 
         currentMap = currentEntries.stream().collect(Collectors.toMap(configEntry -> configEntry.name(), configEntry -> configEntry.value() == null ? "null" : configEntry.value()));
 
-        Map<String, String> desiredMap = ModelUtils.configMapToMap(desired, "server.config");
+        Map<String, String> desiredMap = ModelUtils.stringToMap(desired);
 
         fillPlaceholderValue(desiredMap, "STRIMZI_BROKER_ID", Integer.toString(brokerId));
 

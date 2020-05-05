@@ -579,14 +579,13 @@ public class ModelUtils {
     }
 
     /**
-     * Transforms data from ConfigMap into Map
-     * @param configMap ConfigMap to get data from
-     * @param key key to get data from ConfigMap
+     * Transforms data from String into Map. The entries are line separated tuples of key=value.
+     * @param string string to get data from
      * @return Map of (key, value)
      */
-    public static Map<String, String> configMapToMap(ConfigMap configMap, String key) {
+    public static Map<String, String> stringToMap(String string) {
         Map<String, String> result = new HashMap<>();
-        List<String> list = ModelUtils.getLinesWithoutCommentsAndEmptyLines(getDataFromConfigMap(configMap, key));
+        List<String> list = ModelUtils.getLinesWithoutCommentsAndEmptyLines(string);
         for (String line: list) {
             String[] split = line.split("=", 2);
             if (split.length == 1) {

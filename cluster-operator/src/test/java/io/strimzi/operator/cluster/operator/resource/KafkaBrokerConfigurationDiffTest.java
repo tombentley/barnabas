@@ -5,8 +5,6 @@
 
 package io.strimzi.operator.cluster.operator.resource;
 
-import io.fabric8.kubernetes.api.model.ConfigMap;
-import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.test.TestUtils;
@@ -36,8 +34,7 @@ public class KafkaBrokerConfigurationDiffTest {
     KafkaVersion kafkaVersion = VERSIONS.version(KAFKA_VERSION);
     private int brokerId = 0;
 
-    private ConfigMap getDesiredConfiguration(List<ConfigEntry> additional) {
-        ConfigMapBuilder configMap = new ConfigMapBuilder();
+    private String getDesiredConfiguration(List<ConfigEntry> additional) {
         try (InputStream is = getClass().getClassLoader().getResourceAsStream("desired-kafka-broker.conf")) {
             String desiredConfigString = TestUtils.readResource(is);
 
@@ -45,13 +42,11 @@ public class KafkaBrokerConfigurationDiffTest {
                 desiredConfigString += "\n" + ce.name() + "=" + ce.value();
             }
 
-            HashMap<String, String> data = new HashMap();
-            data.put("server.config", desiredConfigString);
-            configMap.addToData(data);
+            return desiredConfigString;
         } catch (IOException e) {
             e.printStackTrace();
         }
-        return configMap.build();
+        return "";
     }
 
     private Map<ConfigResource, Config> getCurrentConfiguration(List<ConfigEntry> additional) {
