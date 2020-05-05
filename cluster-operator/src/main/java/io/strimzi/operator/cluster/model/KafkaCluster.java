@@ -233,6 +233,7 @@ public class KafkaCluster extends AbstractModel {
     private boolean isJmxAuthenticated;
     private CertAndKeySecretSource secretSourceExternal = null;
     private CertAndKeySecretSource secretSourceTls = null;
+    private String brokersConfiguration;
 
     // Templates
     protected Map<String, String> templateExternalBootstrapServiceLabels;
@@ -2503,7 +2504,7 @@ public class KafkaCluster extends AbstractModel {
     }
 
     private String generateBrokerConfiguration()   {
-        return new KafkaBrokerConfigurationBuilder()
+        String result = new KafkaBrokerConfigurationBuilder()
                 .withBrokerId()
                 .withRackId(rack)
                 .withZookeeper()
@@ -2513,6 +2514,12 @@ public class KafkaCluster extends AbstractModel {
                 .withCruiseControl(cluster, cruiseControlSpec, ccNumPartitions, ccReplicationFactor)
                 .withUserConfiguration(configuration)
                 .build().trim();
+        this.brokersConfiguration = result;
+        return result;
+    }
+
+    public String getBrokersConfiguration() {
+        return this.brokersConfiguration;
     }
 
     public ConfigMap generateAncillaryConfigMap(ConfigMap externalLoggingCm, Set<String> advertisedHostnames, Set<String> advertisedPorts)   {

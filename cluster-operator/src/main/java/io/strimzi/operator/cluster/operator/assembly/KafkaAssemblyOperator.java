@@ -414,7 +414,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private String zkLoggingHash = "";
         private String kafkaLoggingHash = "";
         private String kafkaBrokerConfigurationHash = "";
-        private ConfigMap kafkaCm;
+        private String kafkaConfig;
 
         /* test */ EntityOperator entityOperator;
         /* test */ Deployment eoDeployment = null;
@@ -1677,10 +1677,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          */
         Future<ReconciliationState> kafkaBrokerDynamicConfiguration() {
             // patches scale up/down situations
-            int runningReplicas = Math.min(oldKafkaReplicas, kafkaCluster.getReplicas());
-            List<Future> configFutures = new ArrayList<>(runningReplicas);
+            int runningBeforeAndAfterReplicas = Math.min(oldKafkaReplicas, kafkaCluster.getReplicas());
+            List<Future> configFutures = new ArrayList<>(runningBeforeAndAfterReplicas);
 
-            for (int podId = 0; podId < runningReplicas; podId++) {
+            for (int podId = 0; podId < runningBeforeAndAfterReplicas; podId++) {
                 int finalPodId = podId;
                 configFutures.add(podOperations.readiness(namespace, KafkaResources.kafkaPodName(name, podId), 1_000, operationTimeoutMs)
                     .compose(ignore ->
@@ -1696,7 +1696,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             getCurrentConfig(finalPodId, ac)
                                     .compose(res -> {
                                         log.trace("Broker description {}", res);
-                                        KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res, this.kafkaCm, kafkaCluster.getKafkaVersion(), finalPodId);
+                                        KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res, this.kafkaConfig, kafkaCluster.getKafkaVersion(), finalPodId);
                                         if (!configurationDiff.isEmpty()) {
                                             try {
                                                 AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig());
@@ -1707,7 +1707,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                                     return Future.<Void>succeededFuture();
                                                 },
                                                     error -> {
-                                                        log.debug("{} Error during dynamic reconfiguration. Rolling the broekr {}. {}", reconciliation, finalPodId, error);
+                                                        log.debug("{} Error during dynamic reconfiguration. Rolling the broker {}. {}", reconciliation, finalPodId, error);
                                                         kafkaPodsUpdatedDynamically.put(finalPodId, false);
                                                         return Future.<Void>succeededFuture();
                                                     });
@@ -1723,11 +1723,9 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                     }).setHandler(ign -> {
                                         if (ac != null) {
                                             try {
-                                                log.debug("closing ac instance");
                                                 ac.close(Duration.ofMinutes(2));
-                                                log.debug("ac instance closed");
                                             } catch (Throwable e) {
-                                                log.warn("Ignoring exception when closing admin client", e);
+                                                log.warn("{} Ignoring exception when closing admin client", reconciliation, e);
                                             }
                                         }
                                         p.handle(ign);
@@ -2353,13 +2351,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             }
 
             ConfigMap brokerCm = kafkaCluster.generateAncillaryConfigMap(loggingCm, kafkaExternalAdvertisedHostnames, kafkaExternalAdvertisedPorts);
+            this.kafkaConfig = kafkaCluster.getBrokersConfiguration();
 
             // if BROKER_ADVERTISED_HOSTNAMES_FILENAME or BROKER_ADVERTISED_PORTS_FILENAME changes, compute a hash and put it into annotationsF
             String brokerConfiguration = brokerCm.getData().getOrDefault(KafkaCluster.BROKER_ADVERTISED_HOSTNAMES_FILENAME, "");
             brokerConfiguration += brokerCm.getData().getOrDefault(KafkaCluster.BROKER_ADVERTISED_PORTS_FILENAME, "");
             this.kafkaBrokerConfigurationHash = getStringHash(brokerConfiguration);
 
-            this.kafkaCm = brokerCm;
             String loggingConfiguration = brokerCm.getData().get(AbstractModel.ANCILLARY_CM_KEY_LOG_CONFIG);
             this.kafkaLoggingHash = getStringHash(loggingConfiguration);
 
