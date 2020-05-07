@@ -95,7 +95,7 @@ public class KafkaConfiguration extends AbstractConfiguration {
         return errors;
     }
 
-    private static Map<String, ConfigModel> readConfigModel(KafkaVersion kafkaVersion) {
+    public static Map<String, ConfigModel> readConfigModel(KafkaVersion kafkaVersion) {
         String name = "/kafka-" + kafkaVersion.version() + "-config-model.json";
         try {
             try (InputStream in = KafkaConfiguration.class.getResourceAsStream(name)) {
@@ -169,10 +169,6 @@ public class KafkaConfiguration extends AbstractConfiguration {
         Set<String> result = new HashSet<>(asOrderedProperties().asMap().keySet());
         result.removeAll(c.keySet());
         return result;
-    }
-
-    public boolean containsListenersChange() {
-        return asOrderedProperties().asMap().keySet().contains("listeners");
     }
 
     public boolean isEmpty() {

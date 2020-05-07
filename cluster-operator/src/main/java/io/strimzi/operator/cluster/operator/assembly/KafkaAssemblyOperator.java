@@ -1695,15 +1695,15 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             Promise<Void> p = Promise.promise();
                             getCurrentConfig(finalPodId, ac)
                                     .compose(res -> {
-                                        log.trace("Broker description {}", res);
+                                        log.trace("{} Broker description {}", reconciliation, res);
                                         KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res, this.kafkaConfig, kafkaCluster.getKafkaVersion(), finalPodId);
                                         if (!configurationDiff.isEmpty()) {
                                             try {
-                                                AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getUpdatedConfig());
+                                                AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getConfigDiff());
                                                 KafkaFuture<Void> brokerConfigFuture = alterConfigResult.values().get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(finalPodId)));
                                                 return kafkaFutureToVertxFuture(brokerConfigFuture).compose(result -> {
-                                                    log.debug("{} Dynamic AlterConfig result for broker {} {}", reconciliation, finalPodId, result);
-                                                    kafkaPodsUpdatedDynamically.put(finalPodId, true);
+                                                    log.debug("{} Dynamic AlterConfig result for broker {}. Can be updated dynamically {}", reconciliation, finalPodId, configurationDiff.canBeUpdatedDynamically());
+                                                    kafkaPodsUpdatedDynamically.put(finalPodId, configurationDiff.canBeUpdatedDynamically());
                                                     return Future.<Void>succeededFuture();
                                                 },
                                                     error -> {
@@ -3598,7 +3598,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         kf.whenComplete((result, error) -> {
             vertx.runOnContext(ignored -> {
                 if (error != null) {
-                    log.debug("Kafkafuture failed {}", error);
+                    log.debug("Kafkafuture failed ", error);
                     promise.fail(error);
                 } else {
                     log.debug("KafkaFuture succeeded");
