@@ -7,6 +7,8 @@ package io.strimzi.operator.cluster.operator.resource;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import io.fabric8.zjsonpatch.JsonDiff;
+import io.strimzi.kafka.config.model.ConfigModel;
+import io.strimzi.kafka.config.model.Scope;
 import io.strimzi.operator.cluster.model.KafkaConfiguration;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.ModelUtils;
@@ -24,6 +26,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -46,10 +49,11 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
     private final Map<ConfigResource, Config> current;
     private Collection<ConfigEntry> currentEntries;
     private String desired;
-    private KafkaConfiguration diff;
+    private Map<ConfigResource, Collection<AlterConfigOp>> diff;
     private KafkaVersion kafkaVersion;
     private int brokerId;
-    Map<ConfigResource, Collection<AlterConfigOp>> updated = new HashMap<>();
+    private Map<String, ConfigModel> configModel;
+
 
     /**
      * These options are skipped because they contain placeholders
@@ -68,14 +72,14 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
             + "|.*-909[1-4]\\.sasl\\.enabled\\.mechanisms"
             + "|advertised\\.listeners"
             + "|zookeeper\\.connect"
-            + "|super\\.users"
             + "|broker\\.rack)$");
 
     public KafkaBrokerConfigurationDiff(Map<ConfigResource, Config> current, String desired, KafkaVersion kafkaVersion, int brokerId) {
         this.current = current;
-        this.diff = emptyKafkaConf(); // init
+        this.diff = Collections.emptyMap(); // init
         this.desired = desired;
         this.kafkaVersion = kafkaVersion;
+        this.configModel = KafkaConfiguration.readConfigModel(kafkaVersion);
         this.brokerId = brokerId;
         Config brokerConfigs = this.current.get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId)));
         if (brokerConfigs != null) {
@@ -84,23 +88,10 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
         }
     }
 
-    private KafkaConfiguration emptyKafkaConf() {
-        return new KafkaConfiguration(Collections.emptySet());
-    }
-
-
     private void fillPlaceholderValue(Map<String, String> orderedProperties, String placeholder, String value) {
         orderedProperties.entrySet().forEach(entry -> {
             entry.setValue(entry.getValue().replaceAll("\\$\\{" + Pattern.quote(placeholder) + "\\}", value));
         });
-    }
-
-    /**
-     * Returns computed diff
-     * @return computed diff
-     */
-    public KafkaConfiguration getDiff() {
-        return this.diff;
     }
 
     /**
@@ -116,19 +107,41 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
         return false;
     }
 
-    /* test */public boolean cannotBeUpdatedDynamically() {
+    public boolean canBeUpdatedDynamically() {
         if (diff == null) {
-            return false;
-        } else return diff.anyReadOnly(kafkaVersion)
-                || !diff.unknownConfigs(kafkaVersion).isEmpty()
-                || diff.containsListenersChange();
+            return true;
+        } else {
+            AtomicBoolean tempResult = new AtomicBoolean(true);
+            diff.get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId))).forEach(entry -> {
+                if (isEntryCustom(entry.configEntry()) || isEntryReadOnly(entry.configEntry())) {
+                    tempResult.set(false);
+                }
+            });
+            return tempResult.get();
+        }
+    }
+
+    /**
+     * @param entry tested ConfigEntry
+     * @return true if the entry is READ_ONLY
+     */
+    private boolean isEntryReadOnly(ConfigEntry entry) {
+        return configModel.get(entry.name()).getScope().equals(Scope.READ_ONLY);
     }
 
     /**
      * @return Map object which is used for dynamic configuration of kafka broker
      */
-    public Map<ConfigResource, Collection<AlterConfigOp>> getUpdatedConfig() {
-        return updated;
+    public Map<ConfigResource, Collection<AlterConfigOp>> getConfigDiff() {
+        return diff;
+    }
+
+    /**
+     *
+     * @return size of the broker config difference
+     */
+    public int getDiffSize() {
+        return diff.get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId))).size();
     }
 
     private boolean isIgnorableProperty(String key) {
@@ -139,7 +152,8 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
      * Computes diff between two maps. Entries in IGNORABLE_PROPERTIES are skipped
      * @return KafkaConfiguration containing all entries which were changed from current in desired configuration
      */
-    public KafkaConfiguration computeDiff() {
+    public Map<ConfigResource, Collection<AlterConfigOp>> computeDiff() {
+        Map<ConfigResource, Collection<AlterConfigOp>> updated = new HashMap<>();
         Map<String, String> currentMap;
         Map<String, String> difference = new HashMap<>();
 
@@ -164,21 +178,24 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
             if (optEntry.isPresent()) {
                 ConfigEntry entry = optEntry.get();
                 if (d.get("op").asText().equals("remove")) {
-                    if (!entry.source().equals(ConfigEntry.ConfigSource.DEFAULT_CONFIG)) {
+                    if (isEntryCustom(entry)) {
                         // we are deleting custom option
                         difference.put(pathValueWithoutSlash, "deleted entry");
                         updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValueWithoutSlash, entry.value()), AlterConfigOp.OpType.DELETE));
                         log.trace("removing custom property {}", entry.name());
                     } else if (entry.isDefault()) {
-                        // entry is in current, is not in desired, is default -> it uses default value, skip
+                        // entry is in current, is not in desired, is default -> it uses default value, skip.
+                        // Some default properties do not have set ConfigEntry.ConfigSource.DEFAULT_CONFIG and thus
+                        // we are removing property. That might cause redundant RU. To fix this we would have to add defaultValue
+                        // to the configModel
                         log.trace("{} not set in desired, using default value", entry.name());
                     } else {
                         // entry is in current, is not in desired, is not default -> it was using non-default value and was removed
                         // if the entry was custom, it should be deleted
                         if (!isIgnorableProperty(pathValueWithoutSlash)) {
-                            difference.put(pathValueWithoutSlash, null);
+                            difference.put(pathValueWithoutSlash, "deleted entry");
                             updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValueWithoutSlash, null), AlterConfigOp.OpType.DELETE));
-                            log.trace("{} not set in desired, unsetting back to default {}", entry.name(), null);
+                            log.trace("{} not set in desired, unsetting back to default {}", entry.name(), "deleted entry");
                         } else {
                             log.trace("{} is ignorable, not considering as removed");
                         }
@@ -206,22 +223,26 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
                 }
             }
 
-            /*log.debug("Kafka Broker Config Differs : {}", d);
+            log.debug("Kafka Broker {} Config Differs : {}", brokerId, d);
             log.debug("Current Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(source, pathValue));
-            log.debug("Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));*/
+            log.debug("Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));
         }
 
-
-        difference.entrySet().forEach(e -> {
-            log.info("{} broker conf differs: '{}' -> '{}'", e.getKey(), currentMap.get(e.getKey()), e.getValue());
-        });
-
         updated.put(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId)), updatedCE);
-        return KafkaConfiguration.unvalidated(difference);
+        return updated;
     }
 
     @Override
     public boolean isEmpty() {
         return diff.isEmpty();
+    }
+
+    /**
+     * For some reason not all default entries have set ConfigEntry.ConfigSource.DEFAULT_CONFIG so we need to compare
+     * @param entry tested ConfigEntry
+     * @return true if entry is default (not custom)
+     */
+    private boolean isEntryCustom(ConfigEntry entry) {
+        return !this.configModel.keySet().contains(entry.name());
     }
 }
