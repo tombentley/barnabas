@@ -171,6 +171,23 @@ public class KafkaConfiguration extends AbstractConfiguration {
         return result;
     }
 
+    /**
+     * Return the config properties with their values in this KafkaConfiguration which are not known broker configs.
+     * These might be consumed by broker plugins.
+     * @param kafkaVersion The broker version.
+     * @return The unknown configs.
+     */
+    public Set<String> unknownConfigsWithValues(KafkaVersion kafkaVersion) {
+        Map<String, ConfigModel> c = readConfigModel(kafkaVersion);
+        Set<String> result = new HashSet<>();
+        for (Map.Entry<String, String> e :this.asOrderedProperties().asMap().entrySet()) {
+            if (!c.containsKey(e.getKey())) {
+                result.add(e.getKey() + "=" + e.getValue());
+            }
+        }
+        return result;
+    }
+
     public boolean isEmpty() {
         return this.asOrderedProperties().asMap().size() == 0;
     }
