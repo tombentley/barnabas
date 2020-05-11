@@ -104,9 +104,8 @@ public class KafkaBrokerConfigurationDiffTest {
         ArrayList<ConfigEntry> ces = new ArrayList<>();
         ces.add(new ConfigEntry("custom.property", "42"));
         KafkaBrokerConfigurationDiff kcd = new KafkaBrokerConfigurationDiff(getCurrentConfiguration(new ArrayList<>()), getDesiredConfiguration(ces), kafkaVersion, brokerId);
-        assertThat(kcd.getDiffSize(), is(1));
-        assertThat(kcd.canBeUpdatedDynamically(), is(false));
-        assertConfig(kcd, new ConfigEntry("custom.property", "42"));
+        assertThat(kcd.getDiffSize(), is(0));
+        assertThat(kcd.canBeUpdatedDynamically(), is(true));
 
     }
 
@@ -115,9 +114,9 @@ public class KafkaBrokerConfigurationDiffTest {
         List<ConfigEntry> ces = singletonList(new ConfigEntry("custom.property", "42", false, true, false));
         KafkaBrokerConfigurationDiff kcd = new KafkaBrokerConfigurationDiff(getCurrentConfiguration(ces),
                 getDesiredConfiguration(emptyList()), kafkaVersion, brokerId);
-        assertThat(kcd.getDiffSize(), is(1));
-        assertThat(kcd.canBeUpdatedDynamically(), is(false));
-        assertConfig(kcd, new ConfigEntry("custom.property", "42"));
+        assertThat(kcd.getDiffSize(), is(0));
+        assertThat(kcd.canBeUpdatedDynamically(), is(true));
+        // custom changes are applied by changing STS
     }
 
     @Test
@@ -135,9 +134,8 @@ public class KafkaBrokerConfigurationDiffTest {
         List<ConfigEntry> ces2 = singletonList(new ConfigEntry("custom.property", "43", false, true, false));
         KafkaBrokerConfigurationDiff kcd = new KafkaBrokerConfigurationDiff(getCurrentConfiguration(ces),
                 getDesiredConfiguration(ces2), kafkaVersion, brokerId);
-        assertThat(kcd.getDiffSize(), is(1));
-        assertThat(kcd.canBeUpdatedDynamically(), is(false));
-        assertConfig(kcd, new ConfigEntry("custom.property", "43"));
+        assertThat(kcd.getDiffSize(), is(0));
+        assertThat(kcd.canBeUpdatedDynamically(), is(true));
     }
 
     @Test
@@ -264,22 +262,11 @@ public class KafkaBrokerConfigurationDiffTest {
     }
 
     @Test
-    public void testListenerChanged() {
-        List<ConfigEntry> ces = singletonList(new ConfigEntry("listener", "REPLICATION-9091:SSL,PLAIN-9092:SASL_PLAINTEXT,TLS-9093:SSL,EXTERNAL-9094:SSL", false, true, false));
-        List<ConfigEntry> ces2 = singletonList(new ConfigEntry("listener", "REPLICATION-9091:SSL,PLAIN-9092:SASL_PLAINTEXT,TLS-9093:SSL", false, true, false));
-        KafkaBrokerConfigurationDiff kcd = new KafkaBrokerConfigurationDiff(getCurrentConfiguration(ces),
-                getDesiredConfiguration(ces2), kafkaVersion, brokerId);
-        assertThat(kcd.getDiffSize(), is(1));
-        assertThat(kcd.canBeUpdatedDynamically(), is(false));
-        assertConfig(kcd, new ConfigEntry("listener", "REPLICATION-9091:SSL,PLAIN-9092:SASL_PLAINTEXT,TLS-9093:SSL"));
-    }
-
-    @Test
     public void testChangedMoreProperties() {
         ArrayList<ConfigEntry> ces = new ArrayList<>();
         ces.add(new ConfigEntry("inter.broker.listener.name", "david", false, true, false));
-        ces.add(new ConfigEntry("inter.broker.listener.name2", "karel", false, true, false));
-        ces.add(new ConfigEntry("inter.broker.listener.name3", "honza", false, true, false));
+        ces.add(new ConfigEntry("group.min.session.timeout.ms", "42", false, true, false));
+        ces.add(new ConfigEntry("host.name", "honza", false, true, false));
         KafkaBrokerConfigurationDiff kcd = new KafkaBrokerConfigurationDiff(getCurrentConfiguration(emptyList()),
                 getDesiredConfiguration(ces), kafkaVersion, brokerId);
         assertThat(kcd.getDiffSize(), is(3));
