@@ -1727,7 +1727,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                             kafkaPodsUpdatedDynamically.put(finalPodId, "");
                                         }
                                         return Future.<Void>succeededFuture();
-                                    }).setHandler(ign -> {
+                                    }).onComplete(ign -> {
                                         if (ac != null) {
                                             try {
                                                 ac.close(Duration.ofMinutes(2));
