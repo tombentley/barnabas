@@ -6,7 +6,6 @@ package io.strimzi.operator.cluster.model;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.OwnerReference;
@@ -563,19 +562,6 @@ public class ModelUtils {
             }
         }
         return validLines;
-    }
-
-    /**
-     * Gets data from ConfigMap as a String
-     * @param configMap ConfigMap to get data from
-     * @param key key to get data from ConfigMap
-     * @return String value of ConfigMap data entry. If the key does not exist in the ConfigMap, return null
-     */
-    public static String getDataFromConfigMap(ConfigMap configMap, String key) {
-        if (configMap == null || configMap.getData() == null) {
-            return null;
-        }
-        return configMap.getData().get(key);
     }
 
     /**

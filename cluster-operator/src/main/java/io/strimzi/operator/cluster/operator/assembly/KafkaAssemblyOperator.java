@@ -1682,7 +1682,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             List<Future> configFutures = new ArrayList<>(runningBeforeAndAfterReplicas);
 
             for (int podId = 0; podId < runningBeforeAndAfterReplicas; podId++) {
-                // TODO improvement: if this.kafkaBrokerConfigurationHash changed, we can skip entire comparing algorithm
                 int finalPodId = podId;
                 configFutures.add(podOperations.readiness(namespace, KafkaResources.kafkaPodName(name, podId), 1_000, operationTimeoutMs)
                     .compose(ignore ->
@@ -2360,7 +2359,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             ConfigMap brokerCm = kafkaCluster.generateAncillaryConfigMap(loggingCm, kafkaExternalAdvertisedHostnames, kafkaExternalAdvertisedPorts);
             this.kafkaConfig = kafkaCluster.getBrokersConfiguration();
 
-            // if BROKER_ADVERTISED_HOSTNAMES_FILENAME or BROKER_ADVERTISED_PORTS_FILENAME changes, compute a hash and put it into annotationsF
+            // if BROKER_ADVERTISED_HOSTNAMES_FILENAME or BROKER_ADVERTISED_PORTS_FILENAME changes, compute a hash and put it into annotation
             String brokerConfiguration = brokerCm.getData().getOrDefault(KafkaCluster.BROKER_ADVERTISED_HOSTNAMES_FILENAME, "");
             brokerConfiguration += brokerCm.getData().getOrDefault(KafkaCluster.BROKER_ADVERTISED_PORTS_FILENAME, "");
 
