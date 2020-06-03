@@ -95,6 +95,11 @@ public class KafkaConfiguration extends AbstractConfiguration {
         return errors;
     }
 
+    /**
+     * Gets the config model for the given version of the Kafka broker.
+     * @param kafkaVersion The broker version.
+     * @return The config model for that broker version.
+     */
     public static Map<String, ConfigModel> readConfigModel(KafkaVersion kafkaVersion) {
         String name = "/kafka-" + kafkaVersion.version() + "-config-model.json";
         try {
@@ -178,10 +183,10 @@ public class KafkaConfiguration extends AbstractConfiguration {
      * @return The unknown configs.
      */
     public Set<String> unknownConfigsWithValues(KafkaVersion kafkaVersion) {
-        Map<String, ConfigModel> c = readConfigModel(kafkaVersion);
+        Map<String, ConfigModel> configModel = readConfigModel(kafkaVersion);
         Set<String> result = new HashSet<>();
         for (Map.Entry<String, String> e :this.asOrderedProperties().asMap().entrySet()) {
-            if (!c.containsKey(e.getKey())) {
+            if (!configModel.containsKey(e.getKey())) {
                 result.add(e.getKey() + "=" + e.getValue());
             }
         }

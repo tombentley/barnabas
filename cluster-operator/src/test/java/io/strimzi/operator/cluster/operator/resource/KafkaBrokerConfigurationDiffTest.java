@@ -19,9 +19,7 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import static java.util.Collections.emptyList;
@@ -51,9 +49,7 @@ public class KafkaBrokerConfigurationDiffTest {
         return "";
     }
 
-    private Map<ConfigResource, Config> getCurrentConfiguration(List<ConfigEntry> additional) {
-        Map<ConfigResource, Config> current = new HashMap<>();
-        ConfigResource cr = new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId));
+    private Config getCurrentConfiguration(List<ConfigEntry> additional) {
         List<ConfigEntry> entryList = new ArrayList<>();
 
         try (InputStream is = getClass().getClassLoader().getResourceAsStream("current-kafka-broker.conf")) {
@@ -73,8 +69,7 @@ public class KafkaBrokerConfigurationDiffTest {
         }
 
         Config config = new Config(entryList);
-        current.put(cr, config);
-        return current;
+        return config;
     }
 
     private void assertConfig(KafkaBrokerConfigurationDiff kcd, ConfigEntry ce) {
@@ -88,7 +83,7 @@ public class KafkaBrokerConfigurationDiffTest {
     @Test
     public void testDefaultValue() {
         KafkaBrokerConfigurationDiff kcd = new KafkaBrokerConfigurationDiff(getCurrentConfiguration(emptyList()), getDesiredConfiguration(emptyList()), kafkaVersion, brokerId);
-        assertThat(kcd.isDesiredPropertyDefaultValue("offset.metadata.max.bytes"), is(true));
+        assertThat(kcd.isDesiredPropertyDefaultValue("offset.metadata.max.bytes", getCurrentConfiguration(emptyList())), is(true));
     }
 
     @Test
@@ -96,7 +91,7 @@ public class KafkaBrokerConfigurationDiffTest {
         List<ConfigEntry> ces = singletonList(new ConfigEntry("offset.metadata.max.bytes", "4097"));
         KafkaBrokerConfigurationDiff kcd = new KafkaBrokerConfigurationDiff(getCurrentConfiguration(ces),
                 getDesiredConfiguration(emptyList()), kafkaVersion, brokerId);
-        assertThat(kcd.isDesiredPropertyDefaultValue("offset.metadata.max.bytes"), is(false));
+        assertThat(kcd.isDesiredPropertyDefaultValue("offset.metadata.max.bytes", getCurrentConfiguration(ces)), is(false));
     }
 
     @Test
