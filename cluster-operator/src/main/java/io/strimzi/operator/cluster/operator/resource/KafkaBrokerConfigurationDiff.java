@@ -117,15 +117,14 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
     }
 
     /**
-     * @return Map object which is used for dynamic configuration of kafka broker
+     * @return A map which can be used for dynamic configuration of kafka broker
      */
     public Map<ConfigResource, Collection<AlterConfigOp>> getConfigDiff() {
         return diff;
     }
 
     /**
-     *
-     * @return size of the broker config difference
+     * @return The number of broker configs which are different.
      */
     public int getDiffSize() {
         return diff.get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId))).size();
@@ -232,6 +231,9 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
         }
     }
 
+    /**
+     * @return whether the current config and the desired config are identical (thus, no update is necessary).
+     */
     @Override
     public boolean isEmpty() {
         return diff.isEmpty();
