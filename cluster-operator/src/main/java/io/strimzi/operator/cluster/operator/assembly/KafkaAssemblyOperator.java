@@ -1636,9 +1636,15 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     });
         }
 
-        protected Future<Map<ConfigResource, Config>> getCurrentConfig(int podId, Admin ac) {
-            ConfigResource resource = new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(podId));
-            return kafkaFutureToVertxFuture(reconciliation, ac.describeConfigs(singletonList(resource)).all());
+        /**
+         * Returns a Future which completes with the config of the given broker.
+         * @param ac The admin client
+         * @param brokerId The id of the broker.
+         * @return a Future which completes with the config of the given broker.
+         */
+        protected Future<Config> brokerConfig(Admin ac, int brokerId) {
+            ConfigResource resource = new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(brokerId));
+            return kafkaFutureToVertxFuture(reconciliation, ac.describeConfigs(singletonList(resource)).values().get(resource));
         }
 
         protected Future<Admin> adminClient(AdminClientProvider adminClientProvider, String namespace, String cluster, int podId) {
@@ -1672,7 +1678,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         /**
-         * If the kafka pod is running, change its configuration dynamically if it is possible (and needed).
+         * If the kafka pod is ready, change its configuration dynamically if both necessary and possible.
          * If it is not possible set the flag for specific podID an it will be rolled in {@code kafkaRollingUpdate}.
          * @return Succeeded future
          */
@@ -1683,44 +1689,39 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
             for (int podId = 0; podId < runningBeforeAndAfterReplicas; podId++) {
                 int finalPodId = podId;
-                configFutures.add(podOperations.readiness(namespace, KafkaResources.kafkaPodName(name, podId), 1_000, operationTimeoutMs)
+                configFutures.add(podOperations.readiness(namespace, KafkaResources.kafkaPodName(name, finalPodId), 1_000, operationTimeoutMs)
                     .compose(ignore ->
                             adminClient(adminClientProvider, namespace, name, finalPodId)
                     .compose(ac -> {
                         if (ac == null) {
                             kafkaPodsUpdatedDynamically.put(finalPodId, null);
-                            log.warn("{} Could not create admin client.", reconciliation);
+                            log.warn("{}: Could not create admin client for pod {}.", reconciliation, finalPodId);
                             return Future.succeededFuture();
                         } else {
-                            log.debug("{} Determining kafka broker {} dynamic update ability", reconciliation, finalPodId);
+                            log.debug("{}: Determining whether kafka broker {} can be update dynamically", reconciliation, finalPodId);
                             Promise<Void> p = Promise.promise();
-                            getCurrentConfig(finalPodId, ac)
-                                    .compose(res -> {
-                                        log.trace("{} Broker description {}", reconciliation, res);
-                                        KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(res.get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(finalPodId))), this.kafkaConfig, kafkaCluster.getKafkaVersion(), finalPodId);
+                            brokerConfig(ac, finalPodId)
+                                    .compose(brokerConfig -> {
+                                        log.trace("{}: Broker description {}", reconciliation, brokerConfig);
+                                        KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(brokerConfig, this.kafkaConfig, kafkaCluster.getKafkaVersion(), finalPodId);
                                         if (!configurationDiff.isEmpty()) {
                                             if (!configurationDiff.canBeUpdatedDynamically()) {
                                                 kafkaPodsUpdatedDynamically.put(finalPodId, "dynamic update not possible");
                                                 return Future.succeededFuture();
                                             } else {
-                                                try {
-                                                    return updateBrokerConfigDynamically(finalPodId, ac, configurationDiff);
-                                                } catch (InvalidRequestException e) {
-                                                    log.debug("{} Could not dynamically update broker {} configuration. Reason {}", reconciliation, finalPodId, e);
-                                                    kafkaPodsUpdatedDynamically.put(finalPodId, "dynamic update not possible");
-                                                }
+                                                return updateBrokerConfigDynamically(finalPodId, ac, configurationDiff);
                                             }
                                         } else {
-                                            log.debug("{} Kafka broker {} configuration not changed", reconciliation, finalPodId);
+                                            log.debug("{}: Kafka broker {} configuration is unchanged", reconciliation, finalPodId);
                                             kafkaPodsUpdatedDynamically.put(finalPodId, "");
                                         }
-                                        return Future.<Void>succeededFuture();
+                                        return Future.succeededFuture();
                                     }).onComplete(ign -> {
                                         if (ac != null) {
                                             try {
                                                 ac.close(Duration.ofMinutes(2));
                                             } catch (Throwable e) {
-                                                log.warn("{} Ignoring exception when closing admin client", reconciliation, e);
+                                                log.warn("{}: Ignoring exception when closing admin client", reconciliation, e);
                                             }
                                         }
                                         p.handle(ign);
@@ -1728,11 +1729,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             return p.future();
                         }
                     }).recover(ignore2 -> {
-                        log.debug("{} recovering from the failed dynamic updating {}", reconciliation, ignore2);
+                        log.debug("{}: recovering from the failed dynamic updating {}", reconciliation, ignore2);
                         kafkaPodsUpdatedDynamically.put(finalPodId, "dynamic update failed");
                         return Future.succeededFuture();
                     })).recover(fail -> {
-                        log.warn("{} kafka pod {} not ready", reconciliation, finalPodId);
+                        log.warn("{}: kafka pod {} not ready", reconciliation, finalPodId);
                         kafkaPodsUpdatedDynamically.put(finalPodId, "");
                         return Future.succeededFuture();
                     }));
@@ -1741,22 +1742,24 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         private Future<Void> updateBrokerConfigDynamically(int finalPodId, Admin ac, KafkaBrokerConfigurationDiff configurationDiff) {
-            AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getConfigDiff());
-            KafkaFuture<Void> brokerConfigFuture = alterConfigResult.values().get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(finalPodId)));
-            return getDynamicUpdateFuture(finalPodId, brokerConfigFuture);
-        }
-
-        private Future<Void> getDynamicUpdateFuture(int finalPodId, KafkaFuture<Void> brokerConfigFuture) {
-            return kafkaFutureToVertxFuture(reconciliation, brokerConfigFuture).compose(result -> {
-                log.debug("{} Dynamic AlterConfig result for broker {}. Can be updated dynamically", reconciliation, finalPodId);
-                kafkaPodsUpdatedDynamically.put(finalPodId, "");
-                return Future.<Void>succeededFuture();
-            },
-                error -> {
-                    log.debug("{} Error during dynamic reconfiguration. Rolling the broker {}. {}", reconciliation, finalPodId, error);
-                    kafkaPodsUpdatedDynamically.put(finalPodId, "error during dynamic configuration");
+            try {
+                AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getConfigDiff());
+                KafkaFuture<Void> brokerConfigFuture = alterConfigResult.values().get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(finalPodId)));
+                return kafkaFutureToVertxFuture(reconciliation, brokerConfigFuture).compose(result -> {
+                    log.debug("{}: Dynamic AlterConfig result for broker {}. Can be updated dynamically", reconciliation, finalPodId);
+                    kafkaPodsUpdatedDynamically.put(finalPodId, "");
                     return Future.<Void>succeededFuture();
-                });
+                },
+                    error -> {
+                        log.debug("{}: Error during dynamic reconfiguration. Rolling the broker {}. {}", reconciliation, finalPodId, error);
+                        kafkaPodsUpdatedDynamically.put(finalPodId, "error during dynamic configuration");
+                        return Future.<Void>succeededFuture();
+                    });
+            } catch (InvalidRequestException e) {
+                log.debug("{}: Could not dynamically update broker {} configuration. Reason {}", reconciliation, finalPodId, e);
+                kafkaPodsUpdatedDynamically.put(finalPodId, "dynamic update not possible");
+                return Future.<Void>succeededFuture();
+            }
         }
 
         Future<ReconciliationState> withKafkaDiff(Future<ReconcileResult<StatefulSet>> r) {
