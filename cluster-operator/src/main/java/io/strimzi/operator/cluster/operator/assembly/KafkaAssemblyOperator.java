@@ -415,7 +415,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private String zkLoggingHash = "";
         private String kafkaLoggingHash = "";
         private String kafkaBrokerConfigurationHash = "";
-        private String kafkaConfig;
 
         /* test */ EntityOperator entityOperator;
         /* test */ Deployment eoDeployment = null;
@@ -1643,8 +1642,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          * @return a Future which completes with the config of the given broker.
          */
         protected Future<Config> brokerConfig(Admin ac, int brokerId) {
-            ConfigResource resource = new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(brokerId));
-            return kafkaFutureToVertxFuture(reconciliation, ac.describeConfigs(singletonList(resource)).values().get(resource));
+            ConfigResource resource = Util.getBrokersConfig(brokerId);
+            return Util.kafkaFutureToVertxFuture(vertx, reconciliation, ac.describeConfigs(singletonList(resource)).values().get(resource));
         }
 
         protected Future<Admin> adminClient(AdminClientProvider adminClientProvider, String namespace, String cluster, int podId) {
@@ -1703,7 +1702,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             brokerConfig(ac, finalPodId)
                                     .compose(brokerConfig -> {
                                         log.trace("{}: Broker description {}", reconciliation, brokerConfig);
-                                        KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(brokerConfig, this.kafkaConfig, kafkaCluster.getKafkaVersion(), finalPodId);
+                                        KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(brokerConfig, kafkaCluster.getBrokersConfiguration(), kafkaCluster.getKafkaVersion(), finalPodId);
                                         if (!configurationDiff.isEmpty()) {
                                             if (!configurationDiff.canBeUpdatedDynamically()) {
                                                 kafkaPodsUpdatedDynamically.put(finalPodId, "dynamic update not possible");
@@ -1728,15 +1727,17 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                     });
                             return p.future();
                         }
-                    }).recover(ignore2 -> {
-                        log.debug("{}: recovering from the failed dynamic updating {}", reconciliation, ignore2);
-                        kafkaPodsUpdatedDynamically.put(finalPodId, "dynamic update failed");
-                        return Future.succeededFuture();
-                    })).recover(fail -> {
-                        log.warn("{}: kafka pod {} not ready", reconciliation, finalPodId);
-                        kafkaPodsUpdatedDynamically.put(finalPodId, "");
-                        return Future.succeededFuture();
-                    }));
+                    })
+                                .recover(ignore2 -> {
+                                    log.debug("{}: recovering from the failed dynamic updating {}", reconciliation, ignore2);
+                                    kafkaPodsUpdatedDynamically.put(finalPodId, "dynamic update failed");
+                                    return Future.succeededFuture();
+                                }))
+                        .recover(fail -> {
+                            log.warn("{}: kafka pod {} not ready", reconciliation, finalPodId);
+                            kafkaPodsUpdatedDynamically.put(finalPodId, "");
+                            return Future.succeededFuture();
+                        }));
             }
             return withVoid(CompositeFuture.join(configFutures).recover(ignore -> Future.succeededFuture()));
         }
@@ -1744,8 +1745,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private Future<Void> updateBrokerConfigDynamically(int finalPodId, Admin ac, KafkaBrokerConfigurationDiff configurationDiff) {
             try {
                 AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getConfigDiff());
-                KafkaFuture<Void> brokerConfigFuture = alterConfigResult.values().get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(finalPodId)));
-                return kafkaFutureToVertxFuture(reconciliation, brokerConfigFuture).compose(result -> {
+                KafkaFuture<Void> brokerConfigFuture = alterConfigResult.values().get(Util.getBrokersConfig(finalPodId));
+                return Util.kafkaFutureToVertxFuture(vertx, reconciliation, brokerConfigFuture).compose(result -> {
                     log.debug("{}: Dynamic AlterConfig result for broker {}. Can be updated dynamically", reconciliation, finalPodId);
                     kafkaPodsUpdatedDynamically.put(finalPodId, "");
                     return Future.<Void>succeededFuture();
@@ -2368,7 +2369,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             }
 
             ConfigMap brokerCm = kafkaCluster.generateAncillaryConfigMap(loggingCm, kafkaExternalAdvertisedHostnames, kafkaExternalAdvertisedPorts);
-            this.kafkaConfig = kafkaCluster.getBrokersConfiguration();
 
             // if BROKER_ADVERTISED_HOSTNAMES_FILENAME or BROKER_ADVERTISED_PORTS_FILENAME changes, compute a hash and put it into annotation
             String brokerConfiguration = brokerCm.getData().getOrDefault(KafkaCluster.BROKER_ADVERTISED_HOSTNAMES_FILENAME, "");
@@ -3611,22 +3611,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         } catch (NoSuchAlgorithmException e)    {
             throw new RuntimeException("Failed to create SHA-512 MessageDigest instance");
         }
-    }
-
-    public <T> Future<T> kafkaFutureToVertxFuture(Reconciliation reconciliation, KafkaFuture<T> kf) {
-        Promise<T> promise = Promise.promise();
-        kf.whenComplete((result, error) -> {
-            vertx.runOnContext(ignored -> {
-                if (error != null) {
-                    log.debug("{} Kafkafuture failed ", reconciliation, error);
-                    promise.fail(error);
-                } else {
-                    log.debug("{} KafkaFuture succeeded", reconciliation);
-                    promise.complete(result);
-                }
-            });
-        });
-        return promise.future();
     }
 
 }

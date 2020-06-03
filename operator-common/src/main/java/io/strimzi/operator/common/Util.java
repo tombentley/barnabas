@@ -10,6 +10,8 @@ import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
+import org.apache.kafka.common.KafkaFuture;
+import org.apache.kafka.common.config.ConfigResource;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -289,5 +291,29 @@ public class Util {
     public static boolean shouldDisableHttp2() {
         return System.getProperty("java.version", "").startsWith("1.8")
                     && System.getenv("HTTP2_DISABLE") == null;
+    }
+
+    public static <T> Future<T> kafkaFutureToVertxFuture(Vertx vertx, Reconciliation reconciliation, KafkaFuture<T> kf) {
+        Promise<T> promise = Promise.promise();
+        kf.whenComplete((result, error) -> {
+            vertx.runOnContext(ignored -> {
+                if (error != null) {
+                    LOGGER.debug("{} Kafkafuture failed ", reconciliation, error);
+                    promise.fail(error);
+                } else {
+                    LOGGER.debug("{} KafkaFuture succeeded", reconciliation);
+                    promise.complete(result);
+                }
+            });
+        });
+        return promise.future();
+    }
+
+    public static ConfigResource getBrokersConfig(int podId) {
+        return Util.getBrokersConfig(Integer.toString(podId));
+    }
+
+    public static ConfigResource getBrokersConfig(String podId) {
+        return new ConfigResource(ConfigResource.Type.BROKER, podId);
     }
 }

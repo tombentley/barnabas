@@ -12,6 +12,7 @@ import io.strimzi.kafka.config.model.Scope;
 import io.strimzi.operator.cluster.model.KafkaConfiguration;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.OrderedProperties;
+import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.operator.resource.AbstractResourceDiff;
 import org.apache.kafka.clients.admin.AlterConfigOp;
 import org.apache.kafka.clients.admin.Config;
@@ -99,7 +100,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
             return true;
         } else {
             AtomicBoolean tempResult = new AtomicBoolean(true);
-            diff.get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId))).forEach(entry -> {
+            diff.get(Util.getBrokersConfig(brokerId)).forEach(entry -> {
                 if (isEntryReadOnly(entry.configEntry())) {
                     tempResult.set(false);
                 }
@@ -127,7 +128,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
      * @return The number of broker configs which are different.
      */
     public int getDiffSize() {
-        return diff.get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId))).size();
+        return diff.get(Util.getBrokersConfig(brokerId)).size();
     }
 
     private static boolean isIgnorableProperty(String key) {
@@ -191,7 +192,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
             log.debug("Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));
         }
 
-        updated.put(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(brokerId)), updatedCE);
+        updated.put(Util.getBrokersConfig(brokerId), updatedCE);
         return Collections.unmodifiableMap(updated);
     }
 
