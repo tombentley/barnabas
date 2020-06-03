@@ -143,7 +143,9 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
      * @param configModel default configuration for {@code kafkaVersion} of broker
      * @return KafkaConfiguration containing all entries which were changed from current in desired configuration
      */
-    private Map<ConfigResource, Collection<AlterConfigOp>> computeDiff(int brokerId, String desired, Config brokerConfigs, Map<String, ConfigModel> configModel) {
+    private static Map<ConfigResource, Collection<AlterConfigOp>> computeDiff(int brokerId, String desired,
+                                                                       Config brokerConfigs,
+                                                                       Map<String, ConfigModel> configModel) {
         Map<ConfigResource, Collection<AlterConfigOp>> updated = new HashMap<>();
         if (brokerConfigs == null) {
             return updated;
@@ -207,7 +209,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
         }
     }
 
-    private void removeProperty(Map<String, ConfigModel> configModel, Collection<AlterConfigOp> updatedCE, String pathValueWithoutSlash, ConfigEntry entry) {
+    private static void removeProperty(Map<String, ConfigModel> configModel, Collection<AlterConfigOp> updatedCE, String pathValueWithoutSlash, ConfigEntry entry) {
         if (isEntryCustom(entry.name(), configModel)) {
             // we are deleting custom option
             //updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValueWithoutSlash, entry.value()), AlterConfigOp.OpType.DELETE));
