@@ -1642,7 +1642,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         protected Future<Admin> adminClient(AdminClientProvider adminClientProvider, String namespace, String cluster, int podId) {
-            Promise<Admin> acPromise = Promise.promise();
             Future<Secret> clusterCaCertSecretFuture = secretOperations.getAsync(
                     namespace, KafkaResources.clusterCaCertificateSecretName(cluster));
             Future<Secret> coKeySecretFuture = secretOperations.getAsync(
@@ -1660,23 +1659,14 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 }
 
                 Promise<Admin> blockingPromise = Promise.promise();
-                vertx.createSharedWorkerExecutor("kubernetes-ops-pool").<Admin>executeBlocking(
+                vertx.createSharedWorkerExecutor("kubernetes-ops-pool").executeBlocking(
                     future -> {
-                        Admin ac;
                         try {
-                            ac = adminClientProvider.createAdminClient(hostname, clusterCaCertSecret, coKeySecret, "cluster-operator");
-                            acPromise.complete(ac);
+                            future.complete(adminClientProvider.createAdminClient(hostname, clusterCaCertSecret, coKeySecret, "cluster-operator"));
                         } catch (RuntimeException e) {
-                            log.warn("Failed to create Admin Client. {}", e);
-                            acPromise.complete(null);
+                            future.fail(e);
                         }
-                    }, res -> {
-                        if (res.succeeded()) {
-                            blockingPromise.complete(res.result());
-                        } else {
-                            blockingPromise.fail(res.cause());
-                        }
-                    });
+                    }, blockingPromise);
                 return blockingPromise.future();
             });
         }
