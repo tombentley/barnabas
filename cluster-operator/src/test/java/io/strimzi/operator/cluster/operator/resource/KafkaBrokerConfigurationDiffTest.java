@@ -12,7 +12,6 @@ import io.strimzi.test.TestUtils;
 import org.apache.kafka.clients.admin.AlterConfigOp;
 import org.apache.kafka.clients.admin.Config;
 import org.apache.kafka.clients.admin.ConfigEntry;
-import org.apache.kafka.common.config.ConfigResource;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
