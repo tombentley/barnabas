@@ -35,6 +35,7 @@ import org.apache.logging.log4j.Logger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 
 /**
@@ -42,6 +43,31 @@ import java.util.function.Function;
  * in addition to the usual operations.
  */
 public abstract class StatefulSetOperator extends AbstractScalableResourceOperator<KubernetesClient, StatefulSet, StatefulSetList, DoneableStatefulSet, RollableScalableResource<StatefulSet, DoneableStatefulSet>> {
+
+    public static class RestartReason {
+        private final String description;
+
+        public RestartReason(String description) {
+            this.description = description;
+        }
+
+        public String toString() {
+            return description;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            RestartReason that = (RestartReason) o;
+            return Objects.equals(description, that.description);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(description);
+        }
+    }
 
     private static final int NO_GENERATION = -1;
     private static final int INIT_GENERATION = 0;
@@ -90,10 +116,10 @@ public abstract class StatefulSetOperator extends AbstractScalableResourceOperat
      * once the pod has been recreated then given {@code isReady} function will be polled until it returns true,
      * before the process proceeds with the pod with the next higher number.
      * @param sts The StatefulSet
-     * @param podNeedsRestart Predicate for deciding whether the pod needs to be restarted.
+     * @param podNeedsRestart Function that returns a list is reasons why the given pod needs to be restarted, or an empty list if the pod does not need to be restarted.
      * @return A future that completes when any necessary rolling has been completed.
      */
-    public Future<Void> maybeRollingUpdate(StatefulSet sts, Function<Pod, String> podNeedsRestart) {
+    public Future<Void> maybeRollingUpdate(StatefulSet sts, Function<Pod, List<RestartReason>> podNeedsRestart) {
         String cluster = sts.getMetadata().getLabels().get(Labels.STRIMZI_CLUSTER_LABEL);
         String namespace = sts.getMetadata().getNamespace();
         Future<Secret> clusterCaCertSecretFuture = secretOperations.getAsync(
@@ -113,7 +139,7 @@ public abstract class StatefulSetOperator extends AbstractScalableResourceOperat
         });
     }
 
-    public abstract Future<Void> maybeRollingUpdate(StatefulSet sts, Function<Pod, String> podNeedsRestart, Secret clusterCaSecret, Secret coKeySecret);
+    public abstract Future<Void> maybeRollingUpdate(StatefulSet sts, Function<Pod, List<RestartReason>> podNeedsRestart, Secret clusterCaSecret, Secret coKeySecret);
 
     public Future<Void> deletePvc(StatefulSet sts, String pvcName) {
         String namespace = sts.getMetadata().getNamespace();
@@ -138,14 +164,14 @@ public abstract class StatefulSetOperator extends AbstractScalableResourceOperat
      * @param podNeedsRestart The function for deciding whether to restart the pod.
      * @return a Future which completes when the given (possibly recreated) pod is ready.
      */
-    Future<Void> maybeRestartPod(StatefulSet sts, String podName, Function<Pod, String> podNeedsRestart) {
+    Future<Void> maybeRestartPod(StatefulSet sts, String podName, Function<Pod, List<RestartReason>> podNeedsRestart) {
         long pollingIntervalMs = 1_000;
         long timeoutMs = operationTimeoutMs;
         String namespace = sts.getMetadata().getNamespace();
         String name = sts.getMetadata().getName();
         return podOperations.getAsync(sts.getMetadata().getNamespace(), podName).compose(pod -> {
             Future<Void> fut;
-            String reasons = podNeedsRestart.apply(pod);
+            List<RestartReason> reasons = podNeedsRestart.apply(pod);
             if (reasons != null && !reasons.isEmpty()) {
                 log.debug("Rolling update of {}/{}: pod {} due to {}", namespace, name, podName, reasons);
                 fut = restartPod(sts, pod);

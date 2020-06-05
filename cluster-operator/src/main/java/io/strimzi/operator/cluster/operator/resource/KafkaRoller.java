@@ -9,6 +9,7 @@ import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.strimzi.operator.cluster.model.KafkaCluster;
+import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator.RestartReason;
 import io.strimzi.operator.common.AdminClientProvider;
 import io.strimzi.operator.common.BackOff;
 import io.strimzi.operator.common.DefaultAdminClientProvider;
@@ -131,7 +132,7 @@ public class KafkaRoller {
         runnable -> new Thread(runnable, "kafka-roller"));
 
     private ConcurrentHashMap<Integer, RestartContext> podToContext = new ConcurrentHashMap<>();
-    private Function<Pod, String> podNeedsRestart;
+    private Function<Pod, List<RestartReason>> podNeedsRestart;
 
     /**
      * Asynchronously perform a rolling restart of some subset of the pods,
@@ -141,7 +142,7 @@ public class KafkaRoller {
      * @param podNeedsRestart Predicate for determining whether a pod should be rolled.
      * @return A Future completed when rolling is complete.
      */
-    Future<Void> rollingRestart(Function<Pod, String> podNeedsRestart) {
+    Future<Void> rollingRestart(Function<Pod, List<RestartReason>> podNeedsRestart) {
         this.podNeedsRestart = podNeedsRestart;
         List<Future> futures = new ArrayList<>(numPods);
         List<Integer> podIds = new ArrayList<>(numPods);
@@ -261,7 +262,7 @@ public class KafkaRoller {
             throw new UnforceableProblem("Error getting pod " + podName(podId), e);
         }
 
-        String reasonToRestartPod = podNeedsRestart.apply(pod);
+        List<RestartReason> reasonToRestartPod = podNeedsRestart.apply(pod);
         if (reasonToRestartPod != null && !reasonToRestartPod.isEmpty()) {
             log.info("Pod {} needs to be restarted. Reason: {}", podId, reasonToRestartPod);
             Admin adminClient = null;
