@@ -119,9 +119,6 @@ public abstract class AbstractModel {
     private static final String ENV_VAR_HTTPS_PROXY = "HTTPS_PROXY";
     private static final String ENV_VAR_NO_PROXY = "NO_PROXY";
 
-    public static final String ANNO_STRIMZI_CM_GENERATION = Annotations.STRIMZI_DOMAIN + "cm-generation";
-    public static final String ANNO_STRIMZI_LOGGING_HASH = Annotations.STRIMZI_DOMAIN + "logging-hash";
-
     protected static final List<EnvVar> PROXY_ENV_VARS;
     static {
         List<EnvVar> envVars = new ArrayList<>(3);
