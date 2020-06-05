@@ -15,6 +15,7 @@ import io.vertx.core.Vertx;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.List;
 import java.util.function.Function;
 
 /**
@@ -66,7 +67,7 @@ public class KafkaSetOperator extends StatefulSetOperator {
     }
 
     @Override
-    public Future<Void> maybeRollingUpdate(StatefulSet sts, Function<Pod, String> podNeedsRestart,
+    public Future<Void> maybeRollingUpdate(StatefulSet sts, Function<Pod, List<RestartReason>> podNeedsRestart,
                                            Secret clusterCaCertSecret, Secret coKeySecret) {
         return new KafkaRoller(vertx, podOperations, 1_000, operationTimeoutMs,
             () -> new BackOff(250, 2, 10), sts, clusterCaCertSecret, coKeySecret, adminClientProvider)

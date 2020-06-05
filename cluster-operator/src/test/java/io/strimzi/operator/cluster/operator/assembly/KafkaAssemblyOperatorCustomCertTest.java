@@ -4,6 +4,10 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import java.util.Base64;
+import java.util.List;
+import java.util.function.Function;
+
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.Secret;
@@ -40,16 +44,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 
-import java.util.Base64;
-import java.util.function.Function;
-
+import static io.strimzi.operator.cluster.operator.resource.StatefulSetOperator.RestartReason;
+import static java.util.Collections.singletonList;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasEntry;
 import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
-import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -72,7 +76,7 @@ public class KafkaAssemblyOperatorCustomCertTest {
     private ResourceOperatorSupplier supplier;
     private KafkaAssemblyOperator operator;
     private ArgumentCaptor<StatefulSet> reconcileStsCaptor;
-    private ArgumentCaptor<Function<Pod, String>> isPodToRestartFunctionCaptor;
+    private ArgumentCaptor<Function<Pod, List<RestartReason>>> isPodToRestartFunctionCaptor;
 
     /**
      * Mock the KafkaAssemblyOperator and override reconcile to only run through the steps we want to test
@@ -248,8 +252,8 @@ public class KafkaAssemblyOperatorCustomCertTest {
                         hasEntry(KafkaCluster.ANNO_STRIMZI_CUSTOM_CERT_THUMBPRINT_EXTERNAL_LISTENER, getExternalThumbprint()));
 
                 assertThat(isPodToRestartFunctionCaptor.getAllValues(), hasSize(1));
-                Function<Pod, String> isPodToRestart = isPodToRestartFunctionCaptor.getValue();
-                assertThat(isPodToRestart.apply(getPod(reconcileSts)), is(nullValue()));
+                Function<Pod, List<RestartReason>> isPodToRestart = isPodToRestartFunctionCaptor.getValue();
+                assertThat(isPodToRestart.apply(getPod(reconcileSts)), is(empty()));
 
                 async.flag();
             })));
@@ -269,16 +273,17 @@ public class KafkaAssemblyOperatorCustomCertTest {
                         hasEntry(KafkaCluster.ANNO_STRIMZI_CUSTOM_CERT_THUMBPRINT_EXTERNAL_LISTENER, getExternalThumbprint()));
 
                 assertThat(isPodToRestartFunctionCaptor.getAllValues(), hasSize(1));
-                Function<Pod, String> isPodToRestart = isPodToRestartFunctionCaptor.getValue();
+                Function<Pod, List<RestartReason>> isPodToRestart = isPodToRestartFunctionCaptor.getValue();
 
                 Pod pod = getPod(reconcileSts);
                 assertThat("Tls listener thumbprint annotation matches, restart should not be required",
-                        isPodToRestart.apply(pod), is(nullValue()));
+                        isPodToRestart.apply(pod), is(empty()));
 
                 pod.getMetadata().getAnnotations().put(KafkaCluster.ANNO_STRIMZI_CUSTOM_CERT_THUMBPRINT_TLS_LISTENER,
                         Base64.getEncoder().encodeToString("Not the right one!".getBytes()));
                 assertThat("Tls listener thumbprint annotation changed, pod should need restart",
-                        isPodToRestart.apply(pod), is("custom certificate on the TLS listener changes"));
+                        isPodToRestart.apply(pod),
+                        equalTo(singletonList(new RestartReason("custom certificate on the TLS listener changes"))));
 
                 async.flag();
             })));
@@ -302,14 +307,15 @@ public class KafkaAssemblyOperatorCustomCertTest {
 
                 Pod pod = getPod(reconcileSts);
 
-                Function<Pod, String> isPodToRestart = isPodToRestartFunctionCaptor.getValue();
+                Function<Pod, List<RestartReason>> isPodToRestart = isPodToRestartFunctionCaptor.getValue();
                 assertThat("External listener Thumbprint annotation changed, pod should need restart",
-                        isPodToRestart.apply(pod), is(nullValue()));
+                        isPodToRestart.apply(pod), is(empty()));
 
                 pod.getMetadata().getAnnotations().put(KafkaCluster.ANNO_STRIMZI_CUSTOM_CERT_THUMBPRINT_EXTERNAL_LISTENER,
                         Base64.getEncoder().encodeToString("Not the right one!".getBytes()));
 
-                assertThat(isPodToRestart.apply(pod), is("custom certificate on the external listener changes"));
+                assertThat(isPodToRestart.apply(pod),
+                        equalTo(singletonList(new RestartReason("custom certificate on the external listener changes"))));
 
                 async.flag();
             })));
@@ -349,8 +355,8 @@ public class KafkaAssemblyOperatorCustomCertTest {
 
                 assertThat(isPodToRestartFunctionCaptor.getAllValues(), hasSize(1));
 
-                Function<Pod, String> isPodToRestart = isPodToRestartFunctionCaptor.getValue();
-                assertThat(isPodToRestart.apply(getPod(reconcileSts)), is(nullValue()));
+                Function<Pod, List<RestartReason>> isPodToRestart = isPodToRestartFunctionCaptor.getValue();
+                assertThat(isPodToRestart.apply(getPod(reconcileSts)), is(empty()));
 
                 async.flag();
             })));
