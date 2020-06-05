@@ -123,6 +123,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.function.Function;
@@ -408,7 +409,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private String zkLoggingHash = "";
         private String kafkaLoggingHash = "";
         private String kafkaBrokerConfigurationHash = "";
-        private String kafkaConfig;
 
         /* test */ EntityOperator entityOperator;
         /* test */ Deployment eoDeployment = null;
@@ -431,9 +431,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private boolean existingKafkaExporterCertsChanged = false;
         private boolean existingEntityOperatorCertsChanged = false;
         private boolean existingCruiseControlCertsChanged = false;
-
-        // Dynamic kafka broker change indicator
-        private Map<Integer, String> kafkaPodsUpdatedDynamically = new HashMap<>();
 
         // Custom Listener certificates
         private String tlsListenerCustomCertificate;
@@ -1426,7 +1423,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             // Scale-down and Scale-up might have change the STS. we should get a fresh one.
             return zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
                     .compose(sts -> zkSetOperations.maybeRollingUpdate(sts,
-                        pod -> getReasonsToRestartPod(zkDiffs.resource(), pod, existingZookeeperCertsChanged, null, this.clusterCa)))
+                        pod -> getReasonsToRestartPod(zkDiffs.resource(), pod, existingZookeeperCertsChanged, this.clusterCa)))
                     .map(this);
         }
 
@@ -1623,7 +1620,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                         this.kafkaCluster = KafkaCluster.fromCrd(kafkaAssembly, versions, oldStorage, oldKafkaReplicas);
                         this.kafkaService = kafkaCluster.generateService();
                         this.kafkaHeadlessService = kafkaCluster.generateHeadlessService();
-
                         return Future.succeededFuture(this);
                     });
         }
@@ -2445,7 +2441,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> kafkaRollingUpdate() {
             return withVoid(kafkaSetOperations.maybeRollingUpdate(kafkaDiffs.resource(), pod ->
-                    getReasonsToRestartPod(kafkaDiffs.resource(), pod, existingKafkaCertsChanged, kafkaPodsUpdatedDynamically.get(getPodIndexFromPodName(pod.getMetadata().getName())), this.clusterCa, this.clientsCa)));
+                    getReasonsToRestartPod(kafkaDiffs.resource(), pod, existingKafkaCertsChanged, this.clusterCa, this.clientsCa)));
         }
 
         Future<ReconciliationState> kafkaScaleUp() {
@@ -3095,7 +3091,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          */
         private List<RestartReason> getReasonsToRestartPod(StatefulSet sts, Pod pod,
                                                            boolean nodeCertsChange,
-                                                           String kafkaPodCannotBeUpdatedDynamicallyReason,
                                                            Ca... cas) {
             if (pod == null)    {
                 // When the Pod doesn't exist, it doesn't need to be restarted.
@@ -3108,6 +3103,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             boolean isCustomCertExternalListenerUpToDate = isCustomCertUpToDate(sts, pod, KafkaCluster.ANNO_STRIMZI_CUSTOM_CERT_THUMBPRINT_EXTERNAL_LISTENER);
 
             List<RestartReason> reasons = new ArrayList<>(3);
+            if (this.kafkaCluster != null) {
+                // kafkaCluster is null when determining zk pods
+                reasons.add(new BrokerConfigChange(kafkaCluster.getBrokersConfiguration(), this.kafkaCluster.getKafkaVersion()));
+            }
+
             for (Ca ca: cas) {
                 if (ca.certRenewed()) {
                     reasons.add(new RestartReason(ca + " certificate renewal"));
@@ -3121,9 +3121,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             }
             if (!isPodUpToDate) {
                 reasons.add(new RestartReason("Pod has old generation"));
-            }
-            if (kafkaPodCannotBeUpdatedDynamicallyReason != null && !kafkaPodCannotBeUpdatedDynamicallyReason.isEmpty()) {
-                reasons.add(new BrokerConfigChange(this.kafkaConfig, this.kafkaCluster.getKafkaVersion()));
             }
             if (fsResizingRestartRequest.contains(pod.getMetadata().getName()))   {
                 reasons.add(new RestartReason("file system needs to be resized"));
@@ -3494,6 +3491,19 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         public KafkaVersion kafkaVersion() {
             return kafkaVersion;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            BrokerConfigChange that = (BrokerConfigChange) o;
+            return Objects.equals(kafkaConfig, that.kafkaConfig) && Objects.equals(kafkaVersion, that.kafkaVersion);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(kafkaConfig, kafkaVersion);
         }
     }
 }

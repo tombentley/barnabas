@@ -242,6 +242,7 @@ public class KafkaRoller {
                             e);
                 } else {
                     long delay1 = ctx.backOff.delayMs();
+                    e.printStackTrace();
                     log.info("Could not roll pod {} due to {}, retrying after at least {}ms",
                             podId, e, delay1);
                     schedule(podId, delay1, TimeUnit.MILLISECONDS);
@@ -286,14 +287,17 @@ public class KafkaRoller {
                         if (canRoll(adminClient, podId, 60_000, TimeUnit.MILLISECONDS)) {
                             // Check for rollability before trying a dynamic update so that if the dynamic update fails we can go to a full restart
                             boolean updatedDynamically = false;
-                            if (reasonToRestartPod.size() == 1
-                                    && reasonToRestartPod.get(0) instanceof BrokerConfigChange) {
-                                BrokerConfigChange brokerChange = (BrokerConfigChange) reasonToRestartPod.get(1);
+
+                            if (reasonToRestartPod.size() == 1 && reasonToRestartPod.get(0) instanceof BrokerConfigChange) {
+                                BrokerConfigChange brokerChange = (BrokerConfigChange) reasonToRestartPod.get(0);
                                 updatedDynamically = maybeReconfigureBroker(adminClient, podId, brokerChange.kafkaConfig(), brokerChange.kafkaVersion());
                             }
+
                             if (!updatedDynamically) {
                                 log.debug("Pod {} can be rolled now", podId);
                                 restartAndAwaitReadiness(pod, operationTimeoutMs, TimeUnit.MILLISECONDS);
+                            } else {
+                                log.debug("Pod {} updated dynamically", podId);
                             }
                         } else {
                             log.debug("Pod {} cannot be rolled right now", podId);
@@ -323,17 +327,20 @@ public class KafkaRoller {
     }
 
     private static <T> Future<T> kafkaFutureToVertxFuture(Vertx vertx, KafkaFuture<T> kf) {
-        Promise<T> promise = Promise.promise();
-        kf.whenComplete((result, error) -> {
-            vertx.runOnContext(ignored -> {
-                if (error != null) {
-                    promise.fail(error);
-                } else {
-                    promise.complete(result);
-                }
+        if (kf != null) {
+            Promise<T> promise = Promise.promise();
+            kf.whenComplete((result, error) -> {
+                vertx.runOnContext(ignored -> {
+                    if (error != null) {
+                        promise.fail(error);
+                    } else {
+                        promise.complete(result);
+                    }
+                });
             });
-        });
-        return promise.future();
+            return promise.future();
+        }
+        return Future.succeededFuture();
     }
 
     /**
@@ -354,7 +361,7 @@ public class KafkaRoller {
         try {
             AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getConfigDiff());
             KafkaFuture<Void> brokerConfigFuture = alterConfigResult.values().get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(podId)));
-            Void await = await(kafkaFutureToVertxFuture(vertx, brokerConfigFuture), 30, TimeUnit.SECONDS,
+            await(kafkaFutureToVertxFuture(vertx, brokerConfigFuture), 30, TimeUnit.SECONDS,
                 error -> new ForceableProblem("Error doing dynamic update", error));
             log.debug("Dynamic AlterConfig result for broker {}. Can be updated dynamically", podId);
             // TODO probably don't want a _kube_ readiness check here, but need something to check that the broker is still OK
