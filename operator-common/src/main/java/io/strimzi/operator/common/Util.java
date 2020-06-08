@@ -293,20 +293,23 @@ public class Util {
                     && System.getenv("HTTP2_DISABLE") == null;
     }
 
-    public static <T> Future<T> kafkaFutureToVertxFuture(Vertx vertx, Reconciliation reconciliation, KafkaFuture<T> kf) {
+    public static <T> Future<T> kafkaFutureToVertxFuture(Vertx vertx, KafkaFuture<T> kf) {
         Promise<T> promise = Promise.promise();
-        kf.whenComplete((result, error) -> {
-            vertx.runOnContext(ignored -> {
-                if (error != null) {
-                    LOGGER.debug("{} Kafkafuture failed ", reconciliation, error);
-                    promise.fail(error);
-                } else {
-                    LOGGER.debug("{} KafkaFuture succeeded", reconciliation);
-                    promise.complete(result);
-                }
+        if (kf != null) {
+            kf.whenComplete((result, error) -> {
+                vertx.runOnContext(ignored -> {
+                    if (error != null) {
+                        promise.fail(error);
+                    } else {
+                        promise.complete(result);
+                    }
+                });
             });
-        });
-        return promise.future();
+            return promise.future();
+        } else {
+            LOGGER.trace("KafkaFuture is null");
+            return Future.succeededFuture();
+        }
     }
 
     public static ConfigResource getBrokersConfig(int podId) {

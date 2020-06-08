@@ -31,6 +31,7 @@ import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator.Restart
 import io.strimzi.operator.common.AdminClientProvider;
 import io.strimzi.operator.common.BackOff;
 import io.strimzi.operator.common.DefaultAdminClientProvider;
+import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.operator.resource.PodOperator;
 import io.vertx.core.CompositeFuture;
@@ -326,23 +327,6 @@ public class KafkaRoller {
         }
     }
 
-    private static <T> Future<T> kafkaFutureToVertxFuture(Vertx vertx, KafkaFuture<T> kf) {
-        if (kf != null) {
-            Promise<T> promise = Promise.promise();
-            kf.whenComplete((result, error) -> {
-                vertx.runOnContext(ignored -> {
-                    if (error != null) {
-                        promise.fail(error);
-                    } else {
-                        promise.complete(result);
-                    }
-                });
-            });
-            return promise.future();
-        }
-        return Future.succeededFuture();
-    }
-
     /**
      * Returns a Future which completes with the config of the given broker.
      * @param ac The admin client
@@ -351,7 +335,7 @@ public class KafkaRoller {
      */
     protected Config brokerConfig(Admin ac, int brokerId) throws ForceableProblem, InterruptedException {
         ConfigResource resource = new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(brokerId));
-        return await(kafkaFutureToVertxFuture(vertx, ac.describeConfigs(singletonList(resource)).values().get(resource)),
+        return await(Util.kafkaFutureToVertxFuture(vertx, ac.describeConfigs(singletonList(resource)).values().get(resource)),
             30, TimeUnit.SECONDS,
             error -> new ForceableProblem("Error getting broker config", error)
         );
@@ -361,7 +345,7 @@ public class KafkaRoller {
         try {
             AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getConfigDiff());
             KafkaFuture<Void> brokerConfigFuture = alterConfigResult.values().get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(podId)));
-            await(kafkaFutureToVertxFuture(vertx, brokerConfigFuture), 30, TimeUnit.SECONDS,
+            await(Util.kafkaFutureToVertxFuture(vertx, brokerConfigFuture), 30, TimeUnit.SECONDS,
                 error -> new ForceableProblem("Error doing dynamic update", error));
             log.debug("Dynamic AlterConfig result for broker {}. Can be updated dynamically", podId);
             // TODO probably don't want a _kube_ readiness check here, but need something to check that the broker is still OK
@@ -384,7 +368,7 @@ public class KafkaRoller {
      * @throws ForceableProblem
      * @throws InterruptedException
      */
-    private boolean maybeReconfigureBroker(Admin ac, int podId, String kafkaConfig, KafkaVersion kafkaVersion) throws ForceableProblem, InterruptedException {
+    protected boolean maybeReconfigureBroker(Admin ac, int podId, String kafkaConfig, KafkaVersion kafkaVersion) throws ForceableProblem, InterruptedException {
         Config brokerConfig = brokerConfig(ac, podId);
         log.trace("Broker {}: description {}", podId, brokerConfig);
         KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(brokerConfig, kafkaConfig, kafkaVersion, podId);
