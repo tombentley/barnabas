@@ -72,6 +72,7 @@ import io.strimzi.operator.cluster.model.NodeUtils;
 import io.strimzi.operator.cluster.model.StatusDiff;
 import io.strimzi.operator.cluster.model.StorageUtils;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
+import io.strimzi.operator.cluster.operator.resource.BrokerConfigChange;
 import io.strimzi.operator.cluster.operator.resource.ConcurrentDeletionException;
 import io.strimzi.operator.cluster.operator.resource.KafkaSetOperator;
 import io.strimzi.operator.cluster.operator.resource.KafkaSpecChecker;
@@ -123,7 +124,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.function.Function;
@@ -3471,39 +3471,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return stringHash.toString();
         } catch (NoSuchAlgorithmException e)    {
             throw new RuntimeException("Failed to create SHA-512 MessageDigest instance");
-        }
-    }
-
-    public static class BrokerConfigChange extends RestartReason {
-
-        private final String kafkaConfig;
-        private final KafkaVersion kafkaVersion;
-
-        BrokerConfigChange(String kafkaConfig, KafkaVersion kafkaVersion) {
-            super("broker config changed");
-            this.kafkaConfig = kafkaConfig;
-            this.kafkaVersion = kafkaVersion;
-        }
-
-        public String kafkaConfig() {
-            return kafkaConfig;
-        }
-
-        public KafkaVersion kafkaVersion() {
-            return kafkaVersion;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            BrokerConfigChange that = (BrokerConfigChange) o;
-            return Objects.equals(kafkaConfig, that.kafkaConfig) && Objects.equals(kafkaVersion, that.kafkaVersion);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(kafkaConfig, kafkaVersion);
         }
     }
 }

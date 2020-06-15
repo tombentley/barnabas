@@ -26,7 +26,6 @@ import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.strimzi.operator.cluster.model.KafkaCluster;
 import io.strimzi.operator.cluster.model.KafkaVersion;
-import io.strimzi.operator.cluster.operator.assembly.KafkaAssemblyOperator.BrokerConfigChange;
 import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator.RestartReason;
 import io.strimzi.operator.common.AdminClientProvider;
 import io.strimzi.operator.common.BackOff;
@@ -379,7 +378,6 @@ public class KafkaRoller {
                 return false;
             }
         } else {
-            // In theory this can never happen
             return true;
         }
     }

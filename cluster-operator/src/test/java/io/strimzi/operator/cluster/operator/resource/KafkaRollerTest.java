@@ -371,11 +371,35 @@ public class KafkaRollerTest {
                 asList(0, 1, 3, 4, 2));
     }
 
+    @Test
+    public void testSuccessfulAlteringConfigNotRoll(VertxTestContext testContext) {
+        PodOperator podOps = mockPodOps(podId -> succeededFuture());
+        StatefulSet sts = buildStatefulSet();
+        TestingKafkaRoller kafkaRoller = new TestingKafkaRoller(sts, null, null, podOps,
+                null, null,
+                null, null, null,
+            brokerId -> succeededFuture(true), 2);
+        // The algorithm should carry on rolling the pods
+        doSuccessfulConfigUpdate(testContext, kafkaRoller,
+                emptyList());
+    }
+
     private TestingKafkaRoller rollerWithControllers(StatefulSet sts, PodOperator podOps, int... controllers) {
         return new TestingKafkaRoller(sts, null, null, podOps,
             null, null, null, null, null,
             brokerId -> succeededFuture(true),
             controllers);
+    }
+
+    private void doSuccessfulConfigUpdate(VertxTestContext testContext, TestingKafkaRoller kafkaRoller,
+                                            List<Integer> expected) {
+        Checkpoint async = testContext.checkpoint();
+        kafkaRoller.rollingRestart(pod -> emptyList())
+                .onComplete(testContext.succeeding(v -> {
+                    testContext.verify(() -> assertThat(restarted(), is(expected)));
+                    assertNoUnclosedAdminClient(testContext, kafkaRoller);
+                    async.flag();
+                }));
     }
 
     private void doSuccessfulRollingRestart(VertxTestContext testContext, TestingKafkaRoller kafkaRoller,
