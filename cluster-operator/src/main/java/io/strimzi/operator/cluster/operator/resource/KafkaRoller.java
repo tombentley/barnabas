@@ -347,8 +347,6 @@ public class KafkaRoller {
             await(Util.kafkaFutureToVertxFuture(vertx, brokerConfigFuture), 30, TimeUnit.SECONDS,
                 error -> new ForceableProblem("Error doing dynamic update", error));
             log.debug("Dynamic AlterConfig result for broker {}. Can be updated dynamically", podId);
-            // TODO probably don't want a _kube_ readiness check here, but need something to check that the broker is still OK
-            // awaitReadiness(null, 30, TimeUnit.SECONDS);
             return true;
         } catch (Exception e) {
             log.debug("Could not dynamically update broker {} configuration. Reason {}", podId, e);

@@ -212,7 +212,6 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
     private static void removeProperty(Map<String, ConfigModel> configModel, Collection<AlterConfigOp> updatedCE, String pathValueWithoutSlash, ConfigEntry entry) {
         if (isEntryCustom(entry.name(), configModel)) {
             // we are deleting custom option
-            //updatedCE.add(new AlterConfigOp(new ConfigEntry(pathValueWithoutSlash, entry.value()), AlterConfigOp.OpType.DELETE));
             log.trace("removing custom property {}", entry.name());
         } else if (entry.isDefault()) {
             // entry is in current, is not in desired, is default -> it uses default value, skip.
