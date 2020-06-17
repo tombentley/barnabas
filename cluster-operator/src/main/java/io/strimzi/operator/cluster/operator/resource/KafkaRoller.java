@@ -297,7 +297,7 @@ public class KafkaRoller {
                                 log.debug("Pod {} can be rolled now", podId);
                                 restartAndAwaitReadiness(pod, operationTimeoutMs, TimeUnit.MILLISECONDS);
                             } else {
-                                log.debug("Pod {} updated dynamically", podId);
+                                log.debug("Pod {} updated dynamically (or didn't need to be updated)", podId);
                             }
                         } else {
                             log.debug("Pod {} cannot be rolled right now", podId);
@@ -342,7 +342,9 @@ public class KafkaRoller {
 
     private boolean updateBrokerConfigDynamically(int podId, Admin ac, KafkaBrokerConfigurationDiff configurationDiff) {
         try {
-            AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configurationDiff.getConfigDiff());
+            var configDiff = configurationDiff.getConfigDiff();
+            log.debug("Altering broker {} with {}", podId, configDiff);
+            AlterConfigsResult alterConfigResult = ac.incrementalAlterConfigs(configDiff);
             KafkaFuture<Void> brokerConfigFuture = alterConfigResult.values().get(new ConfigResource(ConfigResource.Type.BROKER, Integer.toString(podId)));
             await(Util.kafkaFutureToVertxFuture(vertx, brokerConfigFuture), 30, TimeUnit.SECONDS,
                 error -> new ForceableProblem("Error doing dynamic update", error));
@@ -371,11 +373,14 @@ public class KafkaRoller {
         KafkaBrokerConfigurationDiff configurationDiff = new KafkaBrokerConfigurationDiff(brokerConfig, kafkaConfig, kafkaVersion, podId);
         if (!configurationDiff.isEmpty()) {
             if (configurationDiff.canBeUpdatedDynamically()) {
+                log.debug("Broker {} can be updated dynamically", podId);
                 return updateBrokerConfigDynamically(podId, ac, configurationDiff);
             } else {
+                log.debug("Broker {} cannot be updated dynamically", podId);
                 return false;
             }
         } else {
+            log.debug("Broker {} already has desired configuration", podId);
             return true;
         }
     }
