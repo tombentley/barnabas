@@ -35,7 +35,6 @@ import org.apache.logging.log4j.Logger;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.function.Function;
 
 /**
@@ -43,31 +42,6 @@ import java.util.function.Function;
  * in addition to the usual operations.
  */
 public abstract class StatefulSetOperator extends AbstractScalableResourceOperator<KubernetesClient, StatefulSet, StatefulSetList, DoneableStatefulSet, RollableScalableResource<StatefulSet, DoneableStatefulSet>> {
-
-    public static class RestartReason {
-        private final String description;
-
-        public RestartReason(String description) {
-            this.description = description;
-        }
-
-        public String toString() {
-            return description;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            RestartReason that = (RestartReason) o;
-            return Objects.equals(description, that.description);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(description);
-        }
-    }
 
     private static final int NO_GENERATION = -1;
     private static final int INIT_GENERATION = 0;
@@ -120,23 +94,31 @@ public abstract class StatefulSetOperator extends AbstractScalableResourceOperat
      * @return A future that completes when any necessary rolling has been completed.
      */
     public Future<Void> maybeRollingUpdate(StatefulSet sts, Function<Pod, List<RestartReason>> podNeedsRestart) {
+        return getSecrets(sts).compose(compositeFuture -> {
+            return maybeRollingUpdate(sts, podNeedsRestart, compositeFuture.resultAt(0), compositeFuture.resultAt(1));
+        });
+    }
+
+    protected CompositeFuture getSecrets(StatefulSet sts) {
         String cluster = sts.getMetadata().getLabels().get(Labels.STRIMZI_CLUSTER_LABEL);
         String namespace = sts.getMetadata().getNamespace();
         Future<Secret> clusterCaCertSecretFuture = secretOperations.getAsync(
-                namespace, KafkaResources.clusterCaCertificateSecretName(cluster));
+            namespace, KafkaResources.clusterCaCertificateSecretName(cluster)).compose(secret -> {
+                if (secret == null) {
+                    return Future.failedFuture(Util.missingSecretException(namespace, KafkaCluster.clusterCaCertSecretName(cluster)));
+                } else {
+                    return Future.succeededFuture(secret);
+                }
+            });
         Future<Secret> coKeySecretFuture = secretOperations.getAsync(
-                namespace, ClusterOperator.secretName(cluster));
-        return CompositeFuture.join(clusterCaCertSecretFuture, coKeySecretFuture).compose(compositeFuture -> {
-            Secret clusterCaCertSecret = compositeFuture.resultAt(0);
-            if (clusterCaCertSecret == null) {
-                return Future.failedFuture(Util.missingSecretException(namespace, KafkaCluster.clusterCaCertSecretName(cluster)));
-            }
-            Secret coKeySecret = compositeFuture.resultAt(1);
-            if (coKeySecret == null) {
-                return Future.failedFuture(Util.missingSecretException(namespace, ClusterOperator.secretName(cluster)));
-            }
-            return maybeRollingUpdate(sts, podNeedsRestart, clusterCaCertSecret, coKeySecret);
-        });
+            namespace, ClusterOperator.secretName(cluster)).compose(secret -> {
+                if (secret == null) {
+                    return Future.failedFuture(Util.missingSecretException(namespace, ClusterOperator.secretName(cluster)));
+                } else {
+                    return Future.succeededFuture(secret);
+                }
+            });
+        return CompositeFuture.join(clusterCaCertSecretFuture, coKeySecretFuture);
     }
 
     public abstract Future<Void> maybeRollingUpdate(StatefulSet sts, Function<Pod, List<RestartReason>> podNeedsRestart, Secret clusterCaSecret, Secret coKeySecret);

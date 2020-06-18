@@ -236,7 +236,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
      */
     @Override
     public boolean isEmpty() {
-        return diff.isEmpty();
+        return getDiffSize() > 0;
     }
 
     /**

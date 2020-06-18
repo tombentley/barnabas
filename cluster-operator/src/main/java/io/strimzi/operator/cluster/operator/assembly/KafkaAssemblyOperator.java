@@ -72,18 +72,20 @@ import io.strimzi.operator.cluster.model.NodeUtils;
 import io.strimzi.operator.cluster.model.StatusDiff;
 import io.strimzi.operator.cluster.model.StorageUtils;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
-import io.strimzi.operator.cluster.operator.resource.BrokerConfigChange;
 import io.strimzi.operator.cluster.operator.resource.ConcurrentDeletionException;
+import io.strimzi.operator.cluster.operator.resource.ForcedRestart;
+import io.strimzi.operator.cluster.operator.resource.KafkaRoller;
 import io.strimzi.operator.cluster.operator.resource.KafkaSetOperator;
 import io.strimzi.operator.cluster.operator.resource.KafkaSpecChecker;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator;
-import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator.RestartReason;
+import io.strimzi.operator.cluster.operator.resource.RestartReason;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperScaler;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperScalerProvider;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperSetOperator;
 import io.strimzi.operator.common.AdminClientProvider;
 import io.strimzi.operator.common.Annotations;
+import io.strimzi.operator.common.BackOff;
 import io.strimzi.operator.common.InvalidConfigurationException;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
@@ -726,9 +728,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 }
                 return zkRollFuture
                         .compose(i -> kafkaSetOperations.getAsync(namespace, KafkaCluster.kafkaClusterName(name)))
-                        .compose(sts -> kafkaSetOperations.maybeRollingUpdate(sts, rollPodAndLogReason,
-                                clusterCa.caCertSecret(),
-                                oldCoSecret))
+                        .compose(sts -> new KafkaRoller(vertx, reconciliation, podOperations, 1_000, operationTimeoutMs,
+                            () -> new BackOff(250, 2, 10), sts, clusterCa.caCertSecret(), oldCoSecret, adminClientProvider,
+                            kafkaCluster.getBrokersConfiguration(), kafkaCluster.getKafkaVersion())
+                            .rollingRestart(rollPodAndLogReason))
                         .compose(i -> rollDeploymentIfExists(EntityOperator.entityOperatorName(name), reason.toString()))
                         .compose(i -> rollDeploymentIfExists(KafkaExporter.kafkaExporterName(name), reason.toString()))
                         .compose(i -> rollDeploymentIfExists(CruiseControl.cruiseControlName(name), reason.toString()))
@@ -765,13 +768,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     if (sts != null) {
                         if (Annotations.booleanAnnotation(sts, Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE,
                                 false, Annotations.ANNO_OP_STRIMZI_IO_MANUAL_ROLLING_UPDATE)) {
-                            return kafkaSetOperations.maybeRollingUpdate(sts, pod -> {
+                            return maybeKafkaRoll(sts, pod -> {
                                 if (pod == null) {
                                     throw new ConcurrentDeletionException("Unexpectedly pod no longer exists during roll of StatefulSet.");
                                 }
                                 log.debug("{}: Rolling Kafka pod {} due to manual rolling update",
                                         reconciliation, pod.getMetadata().getName());
-                                return singletonList(new RestartReason("manual rolling update"));
+                                return singletonList(new ForcedRestart("manual rolling update"));
                             });
                         }
                     }
@@ -794,7 +797,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
                                 log.debug("{}: Rolling Zookeeper pod {} due to manual rolling update",
                                         reconciliation, pod.getMetadata().getName());
-                                return singletonList(new RestartReason("manual rolling update"));
+                                return singletonList(new ForcedRestart("manual rolling update"));
                             });
                         }
                     }
@@ -858,7 +861,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          */
         public Future<Void> waitForQuiescence(StatefulSet sts) {
             if (sts != null) {
-                return kafkaSetOperations.maybeRollingUpdate(sts,
+                return maybeKafkaRoll(sts,
                     pod -> {
                         boolean notUpToDate = !isPodUpToDate(sts, pod);
                         List<RestartReason> reason = emptyList();
@@ -1080,7 +1083,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             resultSts = (StatefulSet) ((ReconcileResult) result.resultAt(0)).resource();
                         }
 
-                        return kafkaSetOperations.maybeRollingUpdate(newSts, pod -> {
+                        return maybeKafkaRoll(newSts, pod -> {
                             log.info("{}: Upgrade: Patch + rolling update of {}: Pod {}", reconciliation, stsName, pod.getMetadata().getName());
                             return singletonList(new RestartReason("Upgrade phase 1 of " + (twoPhase ? 2 : 1) + ": Patch + rolling update of " + name + ": Pod " + pod.getMetadata().getName()));
                         }).map(resultSts);
@@ -1138,7 +1141,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             String cmName = KafkaCluster.metricAndLogConfigsName(this.name);
             log.info("{}: Upgrade: Patch + rolling update of {}", reconciliation, stsName);
             return CompositeFuture.join(kafkaSetOperations.reconcile(namespace, stsName, newSts), configMapOperations.reconcile(namespace, cmName, newCm))
-                    .compose(ignored -> kafkaSetOperations.maybeRollingUpdate(sts, pod -> {
+                    .compose(ignored -> maybeKafkaRoll(sts, pod -> {
                         log.info("{}: Upgrade: Patch + rolling update of {}: Pod {}", reconciliation, stsName, pod.getMetadata().getName());
                         return singletonList(new RestartReason("Upgrade: Patch + rolling update of " + name + ": Pod " + pod.getMetadata().getName()));
                     }))
@@ -1236,15 +1239,44 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             resultSts = (StatefulSet) ((ReconcileResult) result.resultAt(0)).resource();
                         }
 
-                        return kafkaSetOperations.maybeRollingUpdate(sts, pod -> {
+                        Function<Pod, List<RestartReason>> fn = pod -> {
                             log.info("{}: Downgrade: Patch + rolling update of {}: Pod {}", reconciliation, stsName, pod.getMetadata().getName());
                             return singletonList(new RestartReason("Downgrade phase 1 of " + phases + ": Patch + rolling update of " + name + ": Pod " + pod.getMetadata().getName()));
-                        }).map(resultSts);
+                        };
+                        return maybeKafkaRoll(sts, fn).map(resultSts);
                     })
                     .compose(ss2 -> {
                         log.info("{}: {}, phase 1 of {} completed", reconciliation, versionChange, phases);
                         return Future.succeededFuture(ss2);
                     });
+        }
+
+        protected CompositeFuture adminClientSecrets() {
+            Future<Secret> clusterCaCertSecretFuture = secretOperations.getAsync(
+                namespace, KafkaResources.clusterCaCertificateSecretName(name)).compose(secret -> {
+                    if (secret == null) {
+                        return Future.failedFuture(Util.missingSecretException(namespace, KafkaCluster.clusterCaCertSecretName(name)));
+                    } else {
+                        return Future.succeededFuture(secret);
+                    }
+                });
+            Future<Secret> coKeySecretFuture = secretOperations.getAsync(
+                namespace, ClusterOperator.secretName(name)).compose(secret -> {
+                    if (secret == null) {
+                        return Future.failedFuture(Util.missingSecretException(namespace, ClusterOperator.secretName(name)));
+                    } else {
+                        return Future.succeededFuture(secret);
+                    }
+                });
+            return CompositeFuture.join(clusterCaCertSecretFuture, coKeySecretFuture);
+        }
+
+        private Future<Void> maybeKafkaRoll(StatefulSet sts, Function<Pod, List<RestartReason>> podNeedsRestart) {
+            return adminClientSecrets()
+                .compose(compositeFuture -> new KafkaRoller(vertx, reconciliation, podOperations, 1_000, operationTimeoutMs,
+                    () -> new BackOff(250, 2, 10), sts, compositeFuture.resultAt(0), compositeFuture.resultAt(1), adminClientProvider,
+                        kafkaCluster.getBrokersConfiguration(), kafkaCluster.getKafkaVersion())
+                    .rollingRestart(podNeedsRestart));
         }
 
         /**
@@ -1293,7 +1325,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             String cmName = KafkaCluster.metricAndLogConfigsName(this.name);
             log.info("{}: Upgrade: Patch + rolling update of {}", reconciliation, stsName);
             return CompositeFuture.join(kafkaSetOperations.reconcile(namespace, stsName, newSts), configMapOperations.reconcile(namespace, cmName, newCm))
-                    .compose(ignored -> kafkaSetOperations.maybeRollingUpdate(sts, pod -> {
+                    .compose(ignored -> maybeKafkaRoll(sts, pod -> {
                         log.info("{}: Upgrade: Patch + rolling update of {}: Pod {}", reconciliation, stsName, pod.getMetadata().getName());
                         return singletonList(new RestartReason("Upgrade phase 2 of 2: Patch + rolling update of " + name + ": Pod " + pod.getMetadata().getName()));
                     }))
@@ -2440,7 +2472,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         Future<ReconciliationState> kafkaRollingUpdate() {
-            return withVoid(kafkaSetOperations.maybeRollingUpdate(kafkaDiffs.resource(), pod ->
+            return withVoid(maybeKafkaRoll(kafkaDiffs.resource(), pod ->
                     getReasonsToRestartPod(kafkaDiffs.resource(), pod, existingKafkaCertsChanged, this.clusterCa, this.clientsCa)));
         }
 
@@ -3103,10 +3135,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             boolean isCustomCertExternalListenerUpToDate = isCustomCertUpToDate(sts, pod, KafkaCluster.ANNO_STRIMZI_CUSTOM_CERT_THUMBPRINT_EXTERNAL_LISTENER);
 
             List<RestartReason> reasons = new ArrayList<>(3);
-            if (this.kafkaCluster != null) {
-                // kafkaCluster is null when determining zk pods
-                reasons.add(new BrokerConfigChange(kafkaCluster.getBrokersConfiguration(), this.kafkaCluster.getKafkaVersion()));
-            }
 
             for (Ca ca: cas) {
                 if (ca.certRenewed()) {

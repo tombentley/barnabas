@@ -15,9 +15,11 @@ import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
+import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.certs.CertManager;
 import io.strimzi.operator.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
+import io.strimzi.operator.cluster.ClusterOperator;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.ResourceUtils;
@@ -44,7 +46,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 
-import static io.strimzi.operator.cluster.operator.resource.StatefulSetOperator.RestartReason;
+import io.strimzi.operator.cluster.operator.resource.RestartReason;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -53,6 +55,7 @@ import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -147,6 +150,14 @@ public class KafkaAssemblyOperatorCustomCertTest {
                 .thenReturn(Future.succeededFuture(getTlsSecret()));
         when(mockSecretOps.getAsync(eq(namespace), eq("my-external-secret")))
                 .thenReturn(Future.succeededFuture(getExternalSecret()));
+        when(mockSecretOps.getAsync(eq(namespace), eq(KafkaResources.clusterCaCertificateSecretName(clusterName))))
+                .thenReturn(Future.succeededFuture(getExternalSecret()));
+        when(mockSecretOps.getAsync(eq(namespace), eq(ClusterOperator.secretName(clusterName))))
+                .thenReturn(Future.succeededFuture(getExternalSecret()));
+
+        when(supplier.podOperations.readiness(any(), any(), anyLong(), anyLong()))
+                .thenReturn(Future.succeededFuture());
+
         when(mockSecretOps.reconcile(any(), any(), any()))
                 .then(invocation -> Future.succeededFuture(ReconcileResult.created(invocation.getArgument(2))));
     }
