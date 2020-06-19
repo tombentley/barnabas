@@ -45,7 +45,7 @@ import static io.fabric8.kubernetes.client.internal.PatchUtils.patchMapper;
 public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
 
     private static final Logger log = LogManager.getLogger(KafkaBrokerConfigurationDiff.class);
-    private Map<ConfigResource, Collection<AlterConfigOp>> diff;
+    private final Collection<AlterConfigOp> diff;
     private int brokerId;
     private Map<String, ConfigModel> configModel;
 
@@ -69,7 +69,6 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
             + "|broker\\.rack)$");
 
     public KafkaBrokerConfigurationDiff(Config brokerConfigs, String desired, KafkaVersion kafkaVersion, int brokerId) {
-        this.diff = Collections.emptyMap(); // init
         this.configModel = KafkaConfiguration.readConfigModel(kafkaVersion);
         this.brokerId = brokerId;
         this.diff = computeDiff(brokerId, desired, brokerConfigs, configModel);
@@ -96,17 +95,13 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
     }
 
     public boolean canBeUpdatedDynamically() {
-        if (diff == null) {
-            return true;
-        } else {
-            AtomicBoolean tempResult = new AtomicBoolean(true);
-            diff.get(Util.getBrokersConfig(brokerId)).forEach(entry -> {
-                if (isEntryReadOnly(entry.configEntry())) {
-                    tempResult.set(false);
-                }
-            });
-            return tempResult.get();
+        boolean result = true;
+        for (AlterConfigOp entry : diff) {
+            if (isEntryReadOnly(entry.configEntry())) {
+                result = false;
+            }
         }
+        return result;
     }
 
     /**
@@ -121,14 +116,14 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
      * @return A map which can be used for dynamic configuration of kafka broker
      */
     public Map<ConfigResource, Collection<AlterConfigOp>> getConfigDiff() {
-        return diff;
+        return Collections.singletonMap(Util.getBrokersConfig(brokerId), diff);
     }
 
     /**
      * @return The number of broker configs which are different.
      */
     public int getDiffSize() {
-        return diff.get(Util.getBrokersConfig(brokerId)).size();
+        return diff.size();
     }
 
     private static boolean isIgnorableProperty(String key) {
@@ -143,18 +138,20 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
      * @param configModel default configuration for {@code kafkaVersion} of broker
      * @return KafkaConfiguration containing all entries which were changed from current in desired configuration
      */
-    private static Map<ConfigResource, Collection<AlterConfigOp>> computeDiff(int brokerId, String desired,
-                                                                       Config brokerConfigs,
-                                                                       Map<String, ConfigModel> configModel) {
-        Map<ConfigResource, Collection<AlterConfigOp>> updated = new HashMap<>();
+    private static Collection<AlterConfigOp> computeDiff(int brokerId, String desired,
+                                                         Config brokerConfigs,
+                                                         Map<String, ConfigModel> configModel) {
         if (brokerConfigs == null) {
-            return updated;
+            return Collections.emptyList();
         }
         Map<String, String> currentMap;
 
         Collection<AlterConfigOp> updatedCE = new ArrayList<>();
 
-        currentMap = brokerConfigs.entries().stream().collect(Collectors.toMap(configEntry -> configEntry.name(), configEntry -> configEntry.value() == null ? "null" : configEntry.value()));
+        currentMap = brokerConfigs.entries().stream().collect(
+                Collectors.toMap(
+                        configEntry -> configEntry.name(),
+                        configEntry -> configEntry.value() == null ? "null" : configEntry.value()));
 
         OrderedProperties orderedProperties = new OrderedProperties();
         orderedProperties.addStringPairs(desired);
@@ -170,18 +167,21 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
             String pathValue = d.get("path").asText();
             String pathValueWithoutSlash = pathValue.substring(1);
 
-            Optional<ConfigEntry> optEntry = brokerConfigs.entries().stream().filter(configEntry -> configEntry.name().equals(pathValueWithoutSlash)).findFirst();
+            Optional<ConfigEntry> optEntry = brokerConfigs.entries().stream()
+                    .filter(configEntry -> configEntry.name().equals(pathValueWithoutSlash))
+                    .findFirst();
 
+            String op = d.get("op").asText();
             if (optEntry.isPresent()) {
                 ConfigEntry entry = optEntry.get();
-                if (d.get("op").asText().equals("remove")) {
+                if ("remove".equals(op)) {
                     removeProperty(configModel, updatedCE, pathValueWithoutSlash, entry);
-                } else if (d.get("op").asText().equals("replace")) {
+                } else if ("replace".equals(op)) {
                     // entry is in the current, desired is updated value
                     updateOrAdd(entry.name(), configModel, desiredMap, updatedCE);
                 }
             } else {
-                if (d.get("op").asText().equals("add")) {
+                if ("add".equals(op)) {
                     // entry is not in the current, it is added
                     updateOrAdd(pathValueWithoutSlash, configModel, desiredMap, updatedCE);
                 }
@@ -192,8 +192,7 @@ public class KafkaBrokerConfigurationDiff extends AbstractResourceDiff {
             log.debug("Desired Kafka Broker Config path {} has value {}", pathValueWithoutSlash, lookupPath(target, pathValue));
         }
 
-        updated.put(Util.getBrokersConfig(brokerId), updatedCE);
-        return Collections.unmodifiableMap(updated);
+        return updatedCE;
     }
 
     private static void updateOrAdd(String propertyName, Map<String, ConfigModel> configModel, Map<String, String> desiredMap, Collection<AlterConfigOp> updatedCE) {
