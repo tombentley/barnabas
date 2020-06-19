@@ -543,7 +543,7 @@ public class KafkaRollerTest {
         }
 
         @Override
-        protected Admin adminClient(Integer podId) throws ForceableProblem {
+        protected Admin adminClient(Integer podId, boolean b) throws ForceableProblem {
             if (acOpenException != null) {
                 throw new ForceableProblem("An error while try to create the admin client", acOpenException);
             }
