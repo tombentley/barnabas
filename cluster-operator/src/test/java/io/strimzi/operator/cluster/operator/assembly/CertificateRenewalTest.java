@@ -1206,7 +1206,7 @@ public class CertificateRenewalTest {
     public void testRenewalOfDeploymentCertificatesWithNullSecret() throws IOException {
         CertAndKey newCertAndKey = new CertAndKey("new-key".getBytes(), "new-cert".getBytes(), "new-truststore".getBytes(), "new-keystore".getBytes(), "new-password");
         ClusterCa clusterCaMock = mock(ClusterCa.class);
-        when(clusterCaMock.generateSignedCert(anyString(), anyString())).thenReturn(newCertAndKey);
+        when(clusterCaMock.issueCertificate(anyString(), anyString())).thenReturn(newCertAndKey);
         String namespace = "my-namespace";
         String secretName = "my-secret";
         String commonName = "deployment";
@@ -1240,7 +1240,7 @@ public class CertificateRenewalTest {
         ClusterCa clusterCaMock = mock(ClusterCa.class);
         when(clusterCaMock.certRenewed()).thenReturn(true);
         when(clusterCaMock.isExpiring(any(), any())).thenReturn(false);
-        when(clusterCaMock.generateSignedCert(anyString(), anyString())).thenReturn(newCertAndKey);
+        when(clusterCaMock.issueCertificate(anyString(), anyString())).thenReturn(newCertAndKey);
         String namespace = "my-namespace";
         String secretName = "my-secret";
         String commonName = "deployment";
@@ -1274,7 +1274,7 @@ public class CertificateRenewalTest {
         ClusterCa clusterCaMock = mock(ClusterCa.class);
         when(clusterCaMock.certRenewed()).thenReturn(false);
         when(clusterCaMock.isExpiring(any(), any())).thenReturn(true);
-        when(clusterCaMock.generateSignedCert(anyString(), anyString())).thenReturn(newCertAndKey);
+        when(clusterCaMock.issueCertificate(anyString(), anyString())).thenReturn(newCertAndKey);
         String namespace = "my-namespace";
         String secretName = "my-secret";
         String commonName = "deployment";
@@ -1308,7 +1308,7 @@ public class CertificateRenewalTest {
         ClusterCa clusterCaMock = mock(ClusterCa.class);
         when(clusterCaMock.certRenewed()).thenReturn(false);
         when(clusterCaMock.isExpiring(any(), any())).thenReturn(true);
-        when(clusterCaMock.generateSignedCert(anyString(), anyString())).thenReturn(newCertAndKey);
+        when(clusterCaMock.issueCertificate(anyString(), anyString())).thenReturn(newCertAndKey);
         String namespace = "my-namespace";
         String secretName = "my-secret";
         String commonName = "deployment";

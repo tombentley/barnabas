@@ -275,8 +275,18 @@ public abstract class Ca {
         return result;
     }
 
-    /*test*/ CertAndKey generateSignedCert(Subject subject,
-                                            File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
+    /**
+     * Issues a certificate for the given subject, signed by the current CA cert/key pair.
+     * @param subject The subject
+     * @param csrFile The CSR file
+     * @param keyFile The file that will contain the issued certificate
+     * @param certFile The file that will contain the issued key
+     * @param keyStoreFile A keystore to be updated
+     * @return
+     * @throws IOException
+     */
+    /*test*/ CertAndKey issueCertificate(Subject subject,
+                                         File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
         log.debug("Generating certificate {} with SAN {}, signed by CA {}", subject, subject.subjectAltNames(), this);
 
         certManager.generateCsr(keyFile, csrFile, subject);
@@ -300,8 +310,8 @@ public abstract class Ca {
      * @return The CertAndKey
      * @throws IOException If the cert could not be generated.
      */
-    public CertAndKey generateSignedCert(String commonName) throws IOException {
-        return generateSignedCert(commonName, null);
+    public CertAndKey issueCertificate(String commonName) throws IOException {
+        return issueCertificate(commonName, null);
     }
 
     /**
@@ -311,7 +321,7 @@ public abstract class Ca {
      * @return The CertAndKey
      * @throws IOException If the cert could not be generated.
      */
-    public CertAndKey generateSignedCert(String commonName, String organization) throws IOException {
+    public CertAndKey issueCertificate(String commonName, String organization) throws IOException {
         File csrFile = File.createTempFile("tls", "csr");
         File keyFile = File.createTempFile("tls", "key");
         File certFile = File.createTempFile("tls", "cert");
@@ -325,7 +335,7 @@ public abstract class Ca {
 
         subject.setCommonName(commonName);
 
-        CertAndKey result = generateSignedCert(subject,
+        CertAndKey result = issueCertificate(subject,
                 csrFile, keyFile, certFile, keyStoreFile);
 
         delete(csrFile);
@@ -339,7 +349,7 @@ public abstract class Ca {
      * Copy already existing certificates from provided Secret based on number of effective replicas
      * and maybe generate new ones for new replicas (i.e. scale-up).
      */
-    protected Map<String, CertAndKey> maybeCopyOrGenerateCerts(
+    protected Map<String, CertAndKey> maybeCopyOrIssueCerts(
            int replicas,
            Function<Integer, Subject> subjectFn,
            Secret secret,
@@ -400,7 +410,7 @@ public abstract class Ca {
             if (!reasons.isEmpty())  {
                 log.debug("Certificate for pod {} need to be regenerated because: {}", podName, String.join(", ", reasons));
 
-                CertAndKey newCertAndKey = generateSignedCert(subject, brokerCsrFile, brokerKeyFile, brokerCertFile, brokerKeyStoreFile);
+                CertAndKey newCertAndKey = issueCertificate(subject, brokerCsrFile, brokerKeyFile, brokerCertFile, brokerKeyStoreFile);
                 certs.put(podName, newCertAndKey);
             }   else {
                 certs.put(podName, certAndKey);
@@ -414,7 +424,7 @@ public abstract class Ca {
             String podName = podNameFn.apply(i);
 
             log.debug("Certificate for {} to generate", podName);
-            CertAndKey k = generateSignedCert(subjectFn.apply(i),
+            CertAndKey k = issueCertificate(subjectFn.apply(i),
                     brokerCsrFile, brokerKeyFile, brokerCertFile, brokerKeyStoreFile);
             certs.put(podName, k);
         }
@@ -500,12 +510,14 @@ public abstract class Ca {
      * @param namespace The namespace containing the cluster.
      * @param clusterName The name of the cluster.
      * @param labels The labels of the {@code Secrets} created.
-     * @param additonalLabels The additional labels of the {@code Secrets} created.
-     * @param additonalAnnotations The additional annotations of the {@code Secrets} created.
+     * @param additionalLabels The additional labels of the {@code Secrets} created.
+     * @param additionalAnnotations The additional annotations of the {@code Secrets} created.
      * @param ownerRef The owner of the {@code Secrets} created.
      * @param maintenanceWindowSatisfied Flag indicating whether we are in the maintenance window
      */
-    public void createRenewOrReplace(String namespace, String clusterName, Map<String, String> labels, Map<String, String> additonalLabels, Map<String, String> additonalAnnotations, OwnerReference ownerRef, boolean maintenanceWindowSatisfied) {
+    public void reconcileCaState(String namespace, String clusterName, Map<String, String> labels,
+                                 Map<String, String> additionalLabels, Map<String, String> additionalAnnotations,
+                                 OwnerReference ownerRef, boolean maintenanceWindowSatisfied) {
         X509Certificate currentCert = cert(caCertSecret, CA_CRT);
         Map<String, String> certData;
         Map<String, String> keyData;
@@ -579,8 +591,8 @@ public abstract class Ca {
             keyAnnotations.put(ANNO_STRIMZI_IO_FORCE_REPLACE, Annotations.stringAnnotation(caKeySecret, ANNO_STRIMZI_IO_FORCE_REPLACE, "false"));
         }
 
-        caCertSecret = secretCertProvider.createSecret(namespace, caCertSecretName, certData, Util.mergeLabelsOrAnnotations(labels, additonalLabels),
-                Util.mergeLabelsOrAnnotations(certAnnotations, additonalAnnotations), ownerRef);
+        caCertSecret = secretCertProvider.createSecret(namespace, caCertSecretName, certData, Util.mergeLabelsOrAnnotations(labels, additionalLabels),
+                Util.mergeLabelsOrAnnotations(certAnnotations, additionalAnnotations), ownerRef);
 
         caKeySecret = secretCertProvider.createSecret(namespace, caKeySecretName, keyData, labels,
                 keyAnnotations, ownerRef);
@@ -725,7 +737,7 @@ public abstract class Ca {
     }
 
     /**
-     * True if the last call to {@link #createRenewOrReplace(String, String, Map, Map, Map, OwnerReference, boolean)}
+     * True if the last call to {@link #reconcileCaState(String, String, Map, Map, Map, OwnerReference, boolean)}
      * resulted in expired certificates being removed from the CA {@code Secret}.
      * @return Whether any expired certificates were removed.
      */
@@ -734,7 +746,7 @@ public abstract class Ca {
     }
 
     /**
-     * True if the last call to {@link #createRenewOrReplace(String, String, Map, Map, Map, OwnerReference, boolean)}
+     * True if the last call to {@link #reconcileCaState(String, String, Map, Map, Map, OwnerReference, boolean)}
      * resulted in a renewed CA certificate.
      * @return Whether the certificate was renewed.
      */
@@ -743,7 +755,7 @@ public abstract class Ca {
     }
 
     /**
-     * True if the last call to {@link #createRenewOrReplace(String, String, Map, Map, Map, OwnerReference, boolean)}
+     * True if the last call to {@link #reconcileCaState(String, String, Map, Map, Map, OwnerReference, boolean)}
      * resulted in a replaced CA key.
      * @return Whether the key was replaced.
      */

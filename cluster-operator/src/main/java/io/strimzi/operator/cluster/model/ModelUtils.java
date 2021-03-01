@@ -148,7 +148,7 @@ public class ModelUtils {
             log.debug("Certificate for pod {} need to be regenerated because: {}", keyCertName, String.join(", ", reasons));
 
             try {
-                certAndKey = clusterCa.generateSignedCert(commonName, Ca.IO_STRIMZI);
+                certAndKey = clusterCa.issueCertificate(commonName, Ca.IO_STRIMZI);
             } catch (IOException e) {
                 log.warn("Error while generating certificates", e);
             }

@@ -32,6 +32,10 @@ public class KafkaStatus extends Status {
     
     private String clusterId;
 
+    private List<CaCertStatus> clusterCa;
+
+    private List<CaCertStatus> clientsCa;
+
     @Description("Addresses of the internal and external listeners")
     public List<ListenerStatus> getListeners() {
         return listeners;
@@ -48,5 +52,23 @@ public class KafkaStatus extends Status {
 
     public void setClusterId(String clusterId) {
         this.clusterId = clusterId;
+    }
+
+    @Description("The state of CA certificates used for the \"Cluster CA\".")
+    public List<CaCertStatus> getClusterCa() {
+        return clusterCa;
+    }
+
+    public void setClusterCa(List<CaCertStatus> clusterCa) {
+        this.clusterCa = clusterCa;
+    }
+
+    @Description("The state of CA certificates used for the \"Clients CA\".")
+    public List<CaCertStatus> getClientsCa() {
+        return clientsCa;
+    }
+
+    public void setClientsCa(List<CaCertStatus> clientsCa) {
+        this.clientsCa = clientsCa;
     }
 }

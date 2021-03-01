@@ -41,8 +41,8 @@ public class CaRenewalTest {
             }
 
             @Override
-            protected CertAndKey generateSignedCert(Subject subject,
-                                                    File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
+            protected CertAndKey issueCertificate(Subject subject,
+                                                  File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
                 int index = invocationCount.getAndIncrement();
 
                 return new CertAndKey(
@@ -60,7 +60,7 @@ public class CaRenewalTest {
         Function<Integer, String> podNameFn = i -> "pod" + i;
         boolean isMaintenanceTimeWindowsSatisfied = true;
 
-        Map<String, CertAndKey> newCerts = mockedCa.maybeCopyOrGenerateCerts(replicas,
+        Map<String, CertAndKey> newCerts = mockedCa.maybeCopyOrIssueCerts(replicas,
                 subjectFn,
                 null,
                 podNameFn,
@@ -98,8 +98,8 @@ public class CaRenewalTest {
             }
 
             @Override
-            protected CertAndKey generateSignedCert(Subject subject,
-                                                    File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
+            protected CertAndKey issueCertificate(Subject subject,
+                                                  File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
                 int index = invocationCount.getAndIncrement();
 
                 return new CertAndKey(
@@ -135,7 +135,7 @@ public class CaRenewalTest {
         Function<Integer, String> podNameFn = i -> "pod" + i;
         boolean isMaintenanceTimeWindowsSatisfied = true;
 
-        Map<String, CertAndKey> newCerts = mockedCa.maybeCopyOrGenerateCerts(replicas,
+        Map<String, CertAndKey> newCerts = mockedCa.maybeCopyOrIssueCerts(replicas,
                 subjectFn,
                 initialSecret,
                 podNameFn,
@@ -183,8 +183,8 @@ public class CaRenewalTest {
             }
 
             @Override
-            protected CertAndKey generateSignedCert(Subject subject,
-                                                    File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
+            protected CertAndKey issueCertificate(Subject subject,
+                                                  File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
                 int index = invocationCount.getAndIncrement();
 
                 return new CertAndKey(
@@ -220,7 +220,7 @@ public class CaRenewalTest {
         Function<Integer, String> podNameFn = i -> "pod" + i;
         boolean isMaintenanceTimeWindowsSatisfied = true;
 
-        Map<String, CertAndKey> newCerts = mockedCa.maybeCopyOrGenerateCerts(replicas,
+        Map<String, CertAndKey> newCerts = mockedCa.maybeCopyOrIssueCerts(replicas,
                 subjectFn,
                 initialSecret,
                 podNameFn,
@@ -268,8 +268,8 @@ public class CaRenewalTest {
             }
 
             @Override
-            protected CertAndKey generateSignedCert(Subject subject,
-                                                    File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
+            protected CertAndKey issueCertificate(Subject subject,
+                                                  File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
                 int index = invocationCount.getAndIncrement();
 
                 return new CertAndKey(
@@ -305,7 +305,7 @@ public class CaRenewalTest {
         Function<Integer, String> podNameFn = i -> "pod" + i;
         boolean isMaintenanceTimeWindowsSatisfied = false;
 
-        Map<String, CertAndKey> newCerts = mockedCa.maybeCopyOrGenerateCerts(replicas,
+        Map<String, CertAndKey> newCerts = mockedCa.maybeCopyOrIssueCerts(replicas,
                 subjectFn,
                 initialSecret,
                 podNameFn,

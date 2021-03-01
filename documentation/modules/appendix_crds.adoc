@@ -1928,6 +1928,10 @@ Used in: xref:type-Kafka-{context}[`Kafka`]
 |integer
 |listeners           1.2+<.<|Addresses of the internal and external listeners.
 |xref:type-ListenerStatus-{context}[`ListenerStatus`] array
+|clientsCa           1.2+<.<|The state of CA certificates used for the "Clients CA".
+|xref:type-CaCertStatus-{context}[`CaCertStatus`] array
+|clusterCa           1.2+<.<|The state of CA certificates used for the "Cluster CA".
+|xref:type-CaCertStatus-{context}[`CaCertStatus`] array
 |clusterId           1.2+<.<|Kafka cluster Id.
 |string
 |====
@@ -1985,6 +1989,25 @@ Used in: xref:type-ListenerStatus-{context}[`ListenerStatus`]
 |string
 |port  1.2+<.<|The port of the Kafka bootstrap service.
 |integer
+|====
+
+[id='type-CaCertStatus-{context}']
+### `CaCertStatus` schema reference
+
+Used in: xref:type-KafkaStatus-{context}[`KafkaStatus`]
+
+
+[options="header"]
+|====
+|Property            |Description
+|fingerprint  1.2+<.<|The fingerprint of the CA certificate.
+|string
+|notBefore    1.2+<.<|The not-before date of this certificate.
+|string
+|notAfter     1.2+<.<|The not-after date of this certificate.
+|string
+|state        1.2+<.<|The state of this certificate.
+|string (one of [ZOMBIE, TRUSTED, UNTRUSTED, PHASE_OUT])
 |====
 
 [id='type-KafkaConnect-{context}']

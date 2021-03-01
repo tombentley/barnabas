@@ -5870,6 +5870,52 @@ spec:
                         verify the identity of the server when connecting to the given
                         listener. Set only for `tls` and `external` listeners.
                 description: Addresses of the internal and external listeners.
+              clientsCa:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    fingerprint:
+                      type: string
+                      description: The fingerprint of the CA certificate.
+                    notBefore:
+                      type: string
+                      description: The not-before date of this certificate.
+                    notAfter:
+                      type: string
+                      description: The not-after date of this certificate.
+                    state:
+                      type: string
+                      enum:
+                      - UNTRUSTED
+                      - TRUSTED
+                      - PHASE_OUT
+                      - ZOMBIE
+                      description: The state of this certificate.
+                description: The state of CA certificates used for the "Clients CA".
+              clusterCa:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    fingerprint:
+                      type: string
+                      description: The fingerprint of the CA certificate.
+                    notBefore:
+                      type: string
+                      description: The not-before date of this certificate.
+                    notAfter:
+                      type: string
+                      description: The not-after date of this certificate.
+                    state:
+                      type: string
+                      enum:
+                      - UNTRUSTED
+                      - TRUSTED
+                      - PHASE_OUT
+                      - ZOMBIE
+                      description: The state of this certificate.
+                description: The state of CA certificates used for the "Cluster CA".
               clusterId:
                 type: string
                 description: Kafka cluster Id.
@@ -14245,6 +14291,52 @@ spec:
                         verify the identity of the server when connecting to the given
                         listener. Set only for `tls` and `external` listeners.
                 description: Addresses of the internal and external listeners.
+              clientsCa:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    fingerprint:
+                      type: string
+                      description: The fingerprint of the CA certificate.
+                    notBefore:
+                      type: string
+                      description: The not-before date of this certificate.
+                    notAfter:
+                      type: string
+                      description: The not-after date of this certificate.
+                    state:
+                      type: string
+                      enum:
+                      - UNTRUSTED
+                      - TRUSTED
+                      - PHASE_OUT
+                      - ZOMBIE
+                      description: The state of this certificate.
+                description: The state of CA certificates used for the "Clients CA".
+              clusterCa:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    fingerprint:
+                      type: string
+                      description: The fingerprint of the CA certificate.
+                    notBefore:
+                      type: string
+                      description: The not-before date of this certificate.
+                    notAfter:
+                      type: string
+                      description: The not-after date of this certificate.
+                    state:
+                      type: string
+                      enum:
+                      - UNTRUSTED
+                      - TRUSTED
+                      - PHASE_OUT
+                      - ZOMBIE
+                      description: The state of this certificate.
+                description: The state of CA certificates used for the "Cluster CA".
               clusterId:
                 type: string
                 description: Kafka cluster Id.
@@ -22620,6 +22712,52 @@ spec:
                         verify the identity of the server when connecting to the given
                         listener. Set only for `tls` and `external` listeners.
                 description: Addresses of the internal and external listeners.
+              clientsCa:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    fingerprint:
+                      type: string
+                      description: The fingerprint of the CA certificate.
+                    notBefore:
+                      type: string
+                      description: The not-before date of this certificate.
+                    notAfter:
+                      type: string
+                      description: The not-after date of this certificate.
+                    state:
+                      type: string
+                      enum:
+                      - UNTRUSTED
+                      - TRUSTED
+                      - PHASE_OUT
+                      - ZOMBIE
+                      description: The state of this certificate.
+                description: The state of CA certificates used for the "Clients CA".
+              clusterCa:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    fingerprint:
+                      type: string
+                      description: The fingerprint of the CA certificate.
+                    notBefore:
+                      type: string
+                      description: The not-before date of this certificate.
+                    notAfter:
+                      type: string
+                      description: The not-after date of this certificate.
+                    state:
+                      type: string
+                      enum:
+                      - UNTRUSTED
+                      - TRUSTED
+                      - PHASE_OUT
+                      - ZOMBIE
+                      description: The state of this certificate.
+                description: The state of CA certificates used for the "Cluster CA".
               clusterId:
                 type: string
                 description: Kafka cluster Id.

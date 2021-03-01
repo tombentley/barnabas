@@ -239,7 +239,7 @@ public class KafkaUserModel {
             }
 
             try {
-                this.userCertAndKey = clientsCa.generateSignedCert(name);
+                this.userCertAndKey = clientsCa.issueCertificate(name);
             } catch (IOException e) {
                 log.error("Error generating signed certificate for user {}", name, e);
             }
