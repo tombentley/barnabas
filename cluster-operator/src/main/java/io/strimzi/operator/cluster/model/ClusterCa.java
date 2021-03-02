@@ -79,6 +79,10 @@ public class ClusterCa extends Ca {
         return "cluster-ca";
     }
 
+    /**
+     * Record the initial secrets prior to updating during a reconciliation.
+     * @param secrets Secrets
+     */
     @SuppressWarnings("deprecation")
     public void initCaSecrets(List<Secret> secrets) {
         for (Secret secret: secrets) {
@@ -115,7 +119,7 @@ public class ClusterCa extends Ca {
         return cruiseControlSecret;
     }
 
-    public Map<String, CertAndKey> generateZkCerts(Kafka kafka, boolean isMaintenanceTimeWindowsSatisfied) throws IOException {
+    public Map<String, CertAndKey> issueZkCerts(Kafka kafka, boolean isMaintenanceTimeWindowsSatisfied) throws IOException {
         String cluster = kafka.getMetadata().getName();
         String namespace = kafka.getMetadata().getNamespace();
 

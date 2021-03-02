@@ -492,10 +492,10 @@ public class ZookeeperCluster extends AbstractModel {
      * @param isMaintenanceTimeWindowsSatisfied Indicates whether we are in the maintenance window or not.
      *                                          This is used for certificate renewals
      */
-    public void generateCertificates(Kafka kafka, ClusterCa clusterCa, boolean isMaintenanceTimeWindowsSatisfied) {
+    public void issueCertificates(Kafka kafka, ClusterCa clusterCa, boolean isMaintenanceTimeWindowsSatisfied) {
         log.debug("Generating certificates");
         try {
-            nodeCerts = clusterCa.generateZkCerts(kafka, isMaintenanceTimeWindowsSatisfied);
+            nodeCerts = clusterCa.issueZkCerts(kafka, isMaintenanceTimeWindowsSatisfied);
         } catch (IOException e) {
             log.warn("Error while generating certificates", e);
         }

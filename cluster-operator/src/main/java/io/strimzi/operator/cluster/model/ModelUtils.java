@@ -131,21 +131,21 @@ public class ModelUtils {
             String commonName, String keyCertName, Labels labels, OwnerReference ownerReference, boolean isMaintenanceTimeWindowsSatisfied) {
         Map<String, String> data = new HashMap<>(4);
         CertAndKey certAndKey = null;
-        boolean shouldBeRegenerated = false;
+        boolean shouldBeIssued = false;
         List<String> reasons = new ArrayList<>(2);
 
         if (secret == null) {
             reasons.add("certificate doesn't exist yet");
-            shouldBeRegenerated = true;
+            shouldBeIssued = true;
         } else {
             if (clusterCa.keyCreated() || clusterCa.certRenewed() || (isMaintenanceTimeWindowsSatisfied && clusterCa.isExpiring(secret, keyCertName + ".crt"))) {
                 reasons.add("certificate needs to be renewed");
-                shouldBeRegenerated = true;
+                shouldBeIssued = true;
             }
         }
 
-        if (shouldBeRegenerated) {
-            log.debug("Certificate for pod {} need to be regenerated because: {}", keyCertName, String.join(", ", reasons));
+        if (shouldBeIssued) {
+            log.debug("A certificate for pod {} need to be issued because: {}", keyCertName, String.join(", ", reasons));
 
             try {
                 certAndKey = clusterCa.issueCertificate(commonName, Ca.IO_STRIMZI);

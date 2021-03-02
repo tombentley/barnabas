@@ -358,7 +358,7 @@ public class ZookeeperClusterTest {
         ClusterCa clusterCa = new ClusterCa(new OpenSslCertManager(), new PasswordGenerator(10, "a", "a"), cluster, null, null);
         clusterCa.reconcileCaState(namespace, cluster, emptyMap(), emptyMap(), emptyMap(), null, true);
 
-        zc.generateCertificates(ka, clusterCa, true);
+        zc.issueCertificates(ka, clusterCa, true);
         return zc.generateNodesSecret();
     }
 

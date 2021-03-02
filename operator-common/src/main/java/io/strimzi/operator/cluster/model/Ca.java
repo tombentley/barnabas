@@ -8,6 +8,9 @@ import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
+import io.strimzi.api.kafka.model.status.CaCertState;
+import io.strimzi.api.kafka.model.status.CaCertStatus;
+import io.strimzi.api.kafka.model.status.CaCertStatusBuilder;
 import io.strimzi.certs.CertAndKey;
 import io.strimzi.certs.CertManager;
 import io.strimzi.certs.SecretCertProvider;
@@ -19,14 +22,19 @@ import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.KeyStoreException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.Certificate;
+import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
@@ -514,19 +522,22 @@ public abstract class Ca {
      * @param additionalAnnotations The additional annotations of the {@code Secrets} created.
      * @param ownerRef The owner of the {@code Secrets} created.
      * @param maintenanceWindowSatisfied Flag indicating whether we are in the maintenance window
+     * @return The cert status for any newly created CA certificate.
      */
-    public void reconcileCaState(String namespace, String clusterName, Map<String, String> labels,
-                                 Map<String, String> additionalLabels, Map<String, String> additionalAnnotations,
-                                 OwnerReference ownerRef, boolean maintenanceWindowSatisfied) {
+    public CaCertStatus reconcileCaState(String namespace, String clusterName, Map<String, String> labels,
+                                         Map<String, String> additionalLabels, Map<String, String> additionalAnnotations,
+                                         OwnerReference ownerRef, boolean maintenanceWindowSatisfied) {
         X509Certificate currentCert = cert(caCertSecret, CA_CRT);
         Map<String, String> certData;
         Map<String, String> keyData;
+        CaCertStatus result = null;
         int caCertGeneration = caCertSecret != null ? Annotations.intAnnotation(caCertSecret, ANNO_STRIMZI_IO_CA_CERT_GENERATION, INIT_GENERATION) : INIT_GENERATION;
         int caKeyGeneration = caKeySecret != null ? Annotations.intAnnotation(caKeySecret, ANNO_STRIMZI_IO_CA_KEY_GENERATION, INIT_GENERATION) : INIT_GENERATION;
         if (!generateCa) {
             certData = caCertSecret != null ? caCertSecret.getData() : emptyMap();
             keyData = caKeySecret != null ? singletonMap(CA_KEY, caKeySecret.getData().get(CA_KEY)) : emptyMap();
             caCertsRemoved = false;
+            result = null;
         } else {
             this.renewalType = shouldCreateOrRenew(currentCert, namespace, clusterName, maintenanceWindowSatisfied);
             log.debug("{} renewalType {}", this, renewalType);
@@ -534,7 +545,7 @@ public abstract class Ca {
                 case CREATE:
                     keyData = new HashMap<>(1);
                     certData = new HashMap<>(3);
-                    generateCaKeyAndCert(nextCaSubject(caKeyGeneration), keyData, certData);
+                    result = generateCaKeyAndCert(nextCaSubject(caKeyGeneration), keyData, certData);
                     break;
                 case REPLACE_KEY:
                     keyData = new HashMap<>(1);
@@ -545,13 +556,13 @@ public abstract class Ca {
                         certData.put("ca-" + notAfterDate + ".crt", certData.remove(CA_CRT));
                     }
                     ++caCertGeneration;
-                    generateCaKeyAndCert(nextCaSubject(++caKeyGeneration), keyData, certData);
+                    result = generateCaKeyAndCert(nextCaSubject(++caKeyGeneration), keyData, certData);
                     break;
                 case RENEW_CERT:
                     keyData = caKeySecret.getData();
                     certData = new HashMap<>(3);
                     ++caCertGeneration;
-                    renewCaCert(nextCaSubject(caKeyGeneration), certData);
+                    result = renewCaCert(nextCaSubject(caKeyGeneration), certData);
                     break;
                 default:
                     keyData = caKeySecret.getData();
@@ -560,6 +571,7 @@ public abstract class Ca {
                     if (!certData.containsKey(CA_STORE)) {
                         addCertCaToTrustStore(CA_CRT, certData);
                     }
+                    result = null;
             }
             this.caCertsRemoved = removeExpiredCerts(certData) > 0;
         }
@@ -596,6 +608,7 @@ public abstract class Ca {
 
         caKeySecret = secretCertProvider.createSecret(namespace, caKeySecretName, keyData, labels,
                 keyAnnotations, ownerRef);
+        return result;
     }
 
     private Subject nextCaSubject(int version) {
@@ -903,7 +916,14 @@ public abstract class Ca {
         }
     }
 
-    private void generateCaKeyAndCert(Subject subject, Map<String, String> keyData, Map<String, String> certData) {
+    /**
+     * Generate a CA certificate and key, updating the given keyData and certData and returning the certificate fingerprint.
+     * @param subject The subject.
+     * @param keyData The key data to update.
+     * @param certData The cert data to update.
+     * @return The generated certificate fingerprint.
+     */
+    private CaCertStatus generateCaKeyAndCert(Subject subject, Map<String, String> keyData, Map<String, String> certData) {
         try {
             log.debug("Generating CA with subject={}", subject);
             File keyFile = File.createTempFile("tls", subject.commonName() + "-key");
@@ -928,10 +948,12 @@ public abstract class Ca {
                                 Files.readAllBytes(trustStoreFile.toPath()),
                                 null,
                                 trustStorePassword);
+                        CaCertStatus caCertStatus = certInfo(certFile, CaCertState.UNTRUSTED);
                         certData.put(CA_CRT, ca.certAsBase64String());
                         keyData.put(CA_KEY, ca.keyAsBase64String());
                         certData.put(CA_STORE, ca.trustStoreAsBase64String());
                         certData.put(CA_STORE_PASSWORD, ca.storePasswordAsBase64String());
+                        return caCertStatus;
                     } finally {
                         delete(trustStoreFile);
                     }
@@ -946,7 +968,39 @@ public abstract class Ca {
         }
     }
 
-    private void renewCaCert(Subject subject, Map<String, String> certData) {
+    private CaCertStatus certInfo(File certFile, CaCertState state) throws IOException, CertificateException {
+        X509Certificate cert;
+        try (InputStream is = new BufferedInputStream(new FileInputStream(certFile))) {
+            cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(is);
+        }
+        return new CaCertStatusBuilder()
+                .withNewFingerprint(fingerprint(cert))
+                .withNotAfter(DATE_TIME_FORMATTER.withZone(ZoneId.of("UTC")).format(cert.getNotAfter().toInstant()))
+                .withNotBefore(DATE_TIME_FORMATTER.withZone(ZoneId.of("UTC")).format(cert.getNotBefore().toInstant()))
+                .withState(state)
+                .build();
+    }
+
+    private String fingerprint(X509Certificate cert) throws CertificateEncodingException {
+        try {
+            return hex(MessageDigest.getInstance("SHA1").digest(cert.getEncoded()));
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e); // SHA1 should always exist
+        }
+    }
+
+    private String hex(byte[] bytes) {
+        char[] hexChars = "0123456789ABCDEF".toCharArray();
+        char[] resultChars = new char[bytes.length * 2];
+        for (int i = 0; i < bytes.length; i += 2) {
+            int v = bytes[i] & 0xFF;
+            resultChars[i] = hexChars[v >>> 4];
+            resultChars[i + 1] = hexChars[v & 0x0F];
+        }
+        return new String(resultChars);
+    }
+
+    private CaCertStatus renewCaCert(Subject subject, Map<String, String> certData) {
         try {
             log.debug("Renewing CA with subject={}, org={}", subject);
 
@@ -971,6 +1025,7 @@ public abstract class Ca {
                         certData.put(CA_CRT, ca.certAsBase64String());
                         certData.put(CA_STORE, ca.trustStoreAsBase64String());
                         certData.put(CA_STORE_PASSWORD, ca.storePasswordAsBase64String());
+                        return certInfo(certFile, CaCertState.UNTRUSTED);
                     } finally {
                         delete(trustStoreFile);
                     }

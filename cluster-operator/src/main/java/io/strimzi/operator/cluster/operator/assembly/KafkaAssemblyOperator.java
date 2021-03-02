@@ -29,11 +29,14 @@ import io.strimzi.api.kafka.model.CertificateAuthority;
 import io.strimzi.api.kafka.model.Constants;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
+import io.strimzi.api.kafka.model.KafkaFluent;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.api.kafka.model.KafkaSpec;
 import io.strimzi.api.kafka.model.listener.NodeAddressType;
 import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListener;
 import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerConfigurationBroker;
+import io.strimzi.api.kafka.model.status.CaCertState;
+import io.strimzi.api.kafka.model.status.CaCertStatus;
 import io.strimzi.api.kafka.model.status.Condition;
 import io.strimzi.api.kafka.model.status.ConditionBuilder;
 import io.strimzi.api.kafka.model.status.KafkaStatus;
@@ -123,6 +126,8 @@ import java.security.cert.X509Certificate;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -635,7 +640,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                 ModelUtils.getRenewalDays(clusterCaConfig),
                                 clusterCaConfig == null || clusterCaConfig.isGenerateCertificateAuthority(),
                                 clusterCaConfig != null ? clusterCaConfig.getCertificateExpirationPolicy() : null);
-                        clusterCa.reconcileCaState(
+                        CaCertStatus clusterCaStatus = clusterCa.reconcileCaState(
                                 reconciliation.namespace(), reconciliation.name(), caLabels.toMap(),
                                 clusterCaCertLabels, clusterCaCertAnnotations,
                                 clusterCaConfig != null && !clusterCaConfig.isGenerateSecretOwnerReference() ? null : ownerRef,
@@ -655,7 +660,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                 ModelUtils.getRenewalDays(clientsCaConfig),
                                 clientsCaConfig == null || clientsCaConfig.isGenerateCertificateAuthority(),
                                 clientsCaConfig != null ? clientsCaConfig.getCertificateExpirationPolicy() : null);
-                        clientsCa.reconcileCaState(reconciliation.namespace(), reconciliation.name(),
+                        CaCertStatus clientsCaStatus = clientsCa.reconcileCaState(reconciliation.namespace(), reconciliation.name(),
                                 caLabels.toMap(), emptyMap(), emptyMap(),
                                 clientsCaConfig != null && !clientsCaConfig.isGenerateSecretOwnerReference() ? null : ownerRef,
                                 isMaintenanceTimeWindowsSatisfied(dateSupplier));
@@ -674,6 +679,22 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             secretReconciliations.add(clientsSecretReconciliation);
                         }
 
+                        KafkaFluent.StatusNested<KafkaBuilder> statusBuilder = new KafkaBuilder(kafkaAssembly).editOrNewStatus();
+                        if (clusterCaStatus != null) {
+                            statusBuilder.addToClusterCa(clusterCaStatus);
+                        }
+                        if (clusterCaStatus != null) {
+                            statusBuilder.addToClientsCa(clientsCaStatus);
+                        }
+                        Kafka build = statusBuilder.endStatus().build();
+                        if (build.getStatus().getClusterCa() != null) {
+                            Collections.sort(build.getStatus().getClusterCa(), certStatusComparator());
+                        }
+                        if (build.getStatus().getClientsCa() != null) {
+                            Collections.sort(build.getStatus().getClientsCa(), certStatusComparator());
+                        }
+                        crdOperator.updateStatusAsync(build);
+
                         CompositeFuture.join(secretReconciliations).onComplete(res -> {
                             if (res.succeeded())    {
                                 future.complete(this);
@@ -688,6 +709,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 resultPromise
             );
             return resultPromise.future();
+        }
+
+        private Comparator<CaCertStatus> certStatusComparator() {
+            return Comparator.comparing(CaCertStatus::getNotBefore).thenComparing(CaCertStatus::getFingerprint);
         }
 
         /**
@@ -714,6 +739,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          */
         Future<ReconciliationState> rollingUpdateForNewCaKey() {
             List<String> reason = new ArrayList<>(4);
+            // TODO is it really correct that this is only needed for new keys? What about expiring certs in the certpath?
             if (this.clusterCa.keyReplaced()) {
                 reason.add("trust new cluster CA certificate signed by new key");
             }
@@ -743,10 +769,35 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                         .compose(i -> rollDeploymentIfExists(EntityOperator.entityOperatorName(name), reason.toString()))
                         .compose(i -> rollDeploymentIfExists(KafkaExporter.kafkaExporterName(name), reason.toString()))
                         .compose(i -> rollDeploymentIfExists(CruiseControl.cruiseControlName(name), reason.toString()))
-                        .map(i -> this);
+                        .compose(i -> {
+                            KafkaBuilder kafkaBuilder = new KafkaBuilder(kafkaAssembly);
+                            if (this.clusterCa.keyReplaced()) {
+                                List<CaCertStatus> clusterCa = kafkaStatus.getClusterCa();
+                                kafkaBuilder.editStatus()
+                                        .withClusterCa(changeCaCertState(clusterCa, CaCertState.UNTRUSTED, CaCertState.TRUSTED)).endStatus();
+                            }
+                            if (clientsCa.keyReplaced()) {
+                                List<CaCertStatus> clientsCa = kafkaStatus.getClientsCa();
+                                kafkaBuilder.editStatus()
+                                        .withClientsCa(changeCaCertState(clientsCa, CaCertState.UNTRUSTED, CaCertState.TRUSTED)).endStatus();
+                            }
+                            return crdOperator.updateStatusAsync(kafkaBuilder.build());
+                        })
+                        .map(this);
             } else {
                 return Future.succeededFuture(this);
             }
+        }
+
+        private List<CaCertStatus> changeCaCertState(List<CaCertStatus> clusterCa, CaCertState from, CaCertState to) {
+            return clusterCa.stream()
+                    .peek(s -> {
+                        if (s.getState() == from) {
+                            s.setState(to);
+                        }
+                    })
+                    .sorted(certStatusComparator())
+                    .collect(Collectors.toList());
         }
 
         /**
@@ -1416,7 +1467,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             vertx.createSharedWorkerExecutor("kubernetes-ops-pool").<ReconciliationState>executeBlocking(
                 future -> {
                     try {
-                        zkCluster.generateCertificates(kafkaAssembly, clusterCa, isMaintenanceTimeWindowsSatisfied(dateSupplier));
+                        zkCluster.issueCertificates(kafkaAssembly, clusterCa, isMaintenanceTimeWindowsSatisfied(dateSupplier));
                         future.complete(this);
                     } catch (Throwable e) {
                         future.fail(e);
@@ -3486,6 +3537,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION;
         }
 
+        /**
+         * Records any existing CO secret.
+         * Updates the Secret with a new cert & key if needed.
+         * Reconciles the Secret.
+         * @param dateSupplier The current time.
+         * @return this
+         */
         Future<ReconciliationState> clusterOperatorSecret(Supplier<Date> dateSupplier) {
             oldCoSecret = clusterCa.clusterOperatorSecret();
 
