@@ -524,20 +524,19 @@ public abstract class Ca {
      * @param maintenanceWindowSatisfied Flag indicating whether we are in the maintenance window
      * @return The cert status for any newly created CA certificate.
      */
-    public CaCertStatus reconcileCaState(String namespace, String clusterName, Map<String, String> labels,
+    public List<CaCertStatus> reconcileCaState(String namespace, String clusterName, Map<String, String> labels,
                                          Map<String, String> additionalLabels, Map<String, String> additionalAnnotations,
                                          OwnerReference ownerRef, boolean maintenanceWindowSatisfied) {
         X509Certificate currentCert = cert(caCertSecret, CA_CRT);
         Map<String, String> certData;
         Map<String, String> keyData;
-        CaCertStatus result = null;
+        final List<CaCertStatus> result = new ArrayList<>();
         int caCertGeneration = caCertSecret != null ? Annotations.intAnnotation(caCertSecret, ANNO_STRIMZI_IO_CA_CERT_GENERATION, INIT_GENERATION) : INIT_GENERATION;
         int caKeyGeneration = caKeySecret != null ? Annotations.intAnnotation(caKeySecret, ANNO_STRIMZI_IO_CA_KEY_GENERATION, INIT_GENERATION) : INIT_GENERATION;
         if (!generateCa) {
             certData = caCertSecret != null ? caCertSecret.getData() : emptyMap();
             keyData = caKeySecret != null ? singletonMap(CA_KEY, caKeySecret.getData().get(CA_KEY)) : emptyMap();
             caCertsRemoved = false;
-            result = null;
         } else {
             this.renewalType = shouldCreateOrRenew(currentCert, namespace, clusterName, maintenanceWindowSatisfied);
             log.debug("{} renewalType {}", this, renewalType);
@@ -545,24 +544,25 @@ public abstract class Ca {
                 case CREATE:
                     keyData = new HashMap<>(1);
                     certData = new HashMap<>(3);
-                    result = generateCaKeyAndCert(nextCaSubject(caKeyGeneration), keyData, certData);
+                    result.add(generateCaKeyAndCert(nextCaSubject(caKeyGeneration), keyData, certData));
                     break;
                 case REPLACE_KEY:
                     keyData = new HashMap<>(1);
                     certData = new HashMap<>(caCertSecret.getData());
                     if (certData.containsKey(CA_CRT)) {
-                        String notAfterDate = DATE_TIME_FORMATTER.format(currentCert.getNotAfter().toInstant().atZone(ZoneId.of("Z")));
+                        String notAfterDate = formatDate(currentCert.getNotAfter());
+                        result.add(certInfo(currentCert, CaCertState.PHASE_OUT));
                         addCertCaToTrustStore("ca-" + notAfterDate + ".crt", certData);
                         certData.put("ca-" + notAfterDate + ".crt", certData.remove(CA_CRT));
                     }
                     ++caCertGeneration;
-                    result = generateCaKeyAndCert(nextCaSubject(++caKeyGeneration), keyData, certData);
+                    result.add(generateCaKeyAndCert(nextCaSubject(++caKeyGeneration), keyData, certData));
                     break;
                 case RENEW_CERT:
                     keyData = caKeySecret.getData();
                     certData = new HashMap<>(3);
                     ++caCertGeneration;
-                    result = renewCaCert(nextCaSubject(caKeyGeneration), certData);
+                    result.add(renewCaCert(nextCaSubject(caKeyGeneration), certData));
                     break;
                 default:
                     keyData = caKeySecret.getData();
@@ -571,7 +571,6 @@ public abstract class Ca {
                     if (!certData.containsKey(CA_STORE)) {
                         addCertCaToTrustStore(CA_CRT, certData);
                     }
-                    result = null;
             }
             this.caCertsRemoved = removeExpiredCerts(certData) > 0;
         }
@@ -609,6 +608,10 @@ public abstract class Ca {
         caKeySecret = secretCertProvider.createSecret(namespace, caKeySecretName, keyData, labels,
                 keyAnnotations, ownerRef);
         return result;
+    }
+
+    public String phaseout(X509Certificate currentCert) throws CertificateEncodingException {
+        return fingerprint(currentCert);
     }
 
     private Subject nextCaSubject(int version) {
@@ -973,12 +976,24 @@ public abstract class Ca {
         try (InputStream is = new BufferedInputStream(new FileInputStream(certFile))) {
             cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(is);
         }
-        return new CaCertStatusBuilder()
-                .withNewFingerprint(fingerprint(cert))
-                .withNotAfter(DATE_TIME_FORMATTER.withZone(ZoneId.of("UTC")).format(cert.getNotAfter().toInstant()))
-                .withNotBefore(DATE_TIME_FORMATTER.withZone(ZoneId.of("UTC")).format(cert.getNotBefore().toInstant()))
-                .withState(state)
-                .build();
+        return certInfo(cert, state);
+    }
+
+    private CaCertStatus certInfo(X509Certificate cert, CaCertState state) {
+        try {
+            return new CaCertStatusBuilder()
+                    .withNewFingerprint(fingerprint(cert))
+                    .withNotAfter(formatDate(cert.getNotAfter()))
+                    .withNotBefore(formatDate(cert.getNotBefore()))
+                    .withState(state)
+                    .build();
+        } catch (CertificateEncodingException e) {
+            throw new RuntimeException(e); // TODO what should we do here?
+        }
+    }
+
+    private String formatDate(Date notAfter) {
+        return DATE_TIME_FORMATTER.format(notAfter.toInstant().atZone(ZoneId.of("Z")));
     }
 
     private String fingerprint(X509Certificate cert) throws CertificateEncodingException {

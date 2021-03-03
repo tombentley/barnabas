@@ -640,7 +640,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                 ModelUtils.getRenewalDays(clusterCaConfig),
                                 clusterCaConfig == null || clusterCaConfig.isGenerateCertificateAuthority(),
                                 clusterCaConfig != null ? clusterCaConfig.getCertificateExpirationPolicy() : null);
-                        CaCertStatus clusterCaStatus = clusterCa.reconcileCaState(
+                        List<CaCertStatus> clusterCaStatus = clusterCa.reconcileCaState(
                                 reconciliation.namespace(), reconciliation.name(), caLabels.toMap(),
                                 clusterCaCertLabels, clusterCaCertAnnotations,
                                 clusterCaConfig != null && !clusterCaConfig.isGenerateSecretOwnerReference() ? null : ownerRef,
@@ -660,7 +660,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                 ModelUtils.getRenewalDays(clientsCaConfig),
                                 clientsCaConfig == null || clientsCaConfig.isGenerateCertificateAuthority(),
                                 clientsCaConfig != null ? clientsCaConfig.getCertificateExpirationPolicy() : null);
-                        CaCertStatus clientsCaStatus = clientsCa.reconcileCaState(reconciliation.namespace(), reconciliation.name(),
+                        List<CaCertStatus> clientsCaStatus = clientsCa.reconcileCaState(reconciliation.namespace(), reconciliation.name(),
                                 caLabels.toMap(), emptyMap(), emptyMap(),
                                 clientsCaConfig != null && !clientsCaConfig.isGenerateSecretOwnerReference() ? null : ownerRef,
                                 isMaintenanceTimeWindowsSatisfied(dateSupplier));
@@ -681,10 +681,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
                         KafkaFluent.StatusNested<KafkaBuilder> statusBuilder = new KafkaBuilder(kafkaAssembly).editOrNewStatus();
                         if (clusterCaStatus != null) {
-                            statusBuilder.addToClusterCa(clusterCaStatus);
+                            statusBuilder.withClusterCa(clusterCaStatus);
                         }
                         if (clusterCaStatus != null) {
-                            statusBuilder.addToClientsCa(clientsCaStatus);
+                            statusBuilder.withClientsCa(clientsCaStatus);
                         }
                         Kafka build = statusBuilder.endStatus().build();
                         if (build.getStatus().getClusterCa() != null) {

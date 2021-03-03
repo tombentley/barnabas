@@ -11,7 +11,8 @@ public enum CaCertState {
     /**
      * <p>This is the start state.
      * The certificate is not yet trusted everywhere it needs to be (it may be trusted in some components, but not all).
-     * It may not be used to sign certificates.</p>
+     * It may not be used to sign certificates.
+     *
      * <p>Transitions to:</p>
      * <ul>
      * <li>{@link #TRUSTED} once all the pods have been restarted (cluster CA or clients CA).</li>
@@ -23,16 +24,24 @@ public enum CaCertState {
     /**
      * <p>The certificate is trusted everywhere it needs to be.
      * It may be used to sign certificates.
-     * </p><p>Transitions to:</p>
+     * A certificate transitions to this state when
+     * all the pods which will observe client certificates signed by this certificate
+     * have been restarted (cluster CA or clients CA).</p>
+     *
+     * <p>Transitions to:</p>
      * <ul>
-     * <li>{@link #PHASE_OUT} when any renewable certificate in the chain to the trust root will expire within the renewal period, or it is marked for renewal.</li>
+     * <li>{@link #PHASE_OUT} when any renewable certificate in the chain to the trust root will
+     * expire within the renewal period, or it is marked for renewal.</li>
      * </ul>
      */
     TRUSTED,
 
     /**
      * <p>The certificate is trusted everywhere it needs to be and is still relied upon in cert paths.
-     * It may not be used to sign certificates.</p>
+     * It may not be used to sign certificates.
+     * A certificate transitions to this state when
+     * any renewable certificate in the chain to the trust root will
+     * expire within the renewal period, or it is marked for renewal.</p>
      *
      * <p>Transitions to:</p>
      * <ul>
@@ -45,7 +54,9 @@ public enum CaCertState {
 
     /**
      * <p>The cert is still trusted by at least some components, but is not relied on by clients.
-     * Zombie certificates can be removed from truststores.</p>
+     * Zombie certificates can be removed from truststores.
+     * A certificate transitions to this state when no certificate signed by this CA certificate is in active use.
+     * </p>
      *
      * <p>Transitions to:</p>
      * <ul>
