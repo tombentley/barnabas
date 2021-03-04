@@ -610,10 +610,6 @@ public abstract class Ca {
         return result;
     }
 
-    public String phaseout(X509Certificate currentCert) throws CertificateEncodingException {
-        return fingerprint(currentCert);
-    }
-
     private Subject nextCaSubject(int version) {
         Subject result = new Subject();
         // Key replacements does not work if both old and new CA certs have the same subject DN, so include the
