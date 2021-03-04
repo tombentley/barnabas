@@ -551,7 +551,7 @@ public abstract class Ca {
                     certData = new HashMap<>(caCertSecret.getData());
                     if (certData.containsKey(CA_CRT)) {
                         String notAfterDate = formatDate(currentCert.getNotAfter());
-                        result.add(certInfo(currentCert, CaCertState.PHASE_OUT));
+                        result.add(createCaCertStatus(currentCert, CaCertState.PHASE_OUT));
                         addCertCaToTrustStore("ca-" + notAfterDate + ".crt", certData);
                         certData.put("ca-" + notAfterDate + ".crt", certData.remove(CA_CRT));
                     }
@@ -947,7 +947,7 @@ public abstract class Ca {
                                 Files.readAllBytes(trustStoreFile.toPath()),
                                 null,
                                 trustStorePassword);
-                        CaCertStatus caCertStatus = certInfo(certFile, CaCertState.UNTRUSTED);
+                        CaCertStatus caCertStatus = createCaCertStatus(certFile, CaCertState.UNTRUSTED);
                         certData.put(CA_CRT, ca.certAsBase64String());
                         keyData.put(CA_KEY, ca.keyAsBase64String());
                         certData.put(CA_STORE, ca.trustStoreAsBase64String());
@@ -967,15 +967,21 @@ public abstract class Ca {
         }
     }
 
-    private CaCertStatus certInfo(File certFile, CaCertState state) throws IOException, CertificateException {
+    /**
+     * Creates a CaCertStatus with the given {@code state} for the certificate in the given {@code certFile}.
+     */
+    private CaCertStatus createCaCertStatus(File certFile, CaCertState state) throws IOException, CertificateException {
         X509Certificate cert;
         try (InputStream is = new BufferedInputStream(new FileInputStream(certFile))) {
             cert = (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(is);
         }
-        return certInfo(cert, state);
+        return createCaCertStatus(cert, state);
     }
 
-    private CaCertStatus certInfo(X509Certificate cert, CaCertState state) {
+    /**
+     * Creates a CaCertStatus with the given {@code state} for the given {@code cert}.
+     */
+    private CaCertStatus createCaCertStatus(X509Certificate cert, CaCertState state) {
         try {
             return new CaCertStatusBuilder()
                     .withNewFingerprint(fingerprint(cert))
@@ -1036,7 +1042,7 @@ public abstract class Ca {
                         certData.put(CA_CRT, ca.certAsBase64String());
                         certData.put(CA_STORE, ca.trustStoreAsBase64String());
                         certData.put(CA_STORE_PASSWORD, ca.storePasswordAsBase64String());
-                        return certInfo(certFile, CaCertState.UNTRUSTED);
+                        return createCaCertStatus(certFile, CaCertState.UNTRUSTED);
                     } finally {
                         delete(trustStoreFile);
                     }
