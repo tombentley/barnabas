@@ -19,6 +19,10 @@ import lombok.ToString;
 
 import static java.util.Collections.emptyMap;
 
+/**
+ * The status of a particular CA certificate identified by its
+ * fingerprint (defined as {@code (hex(sha1(DER_encoded_cert))}).
+ */
 @Buildable(
         editableEnabled = false,
         builderPackage = Constants.FABRIC8_KUBERNETES_API

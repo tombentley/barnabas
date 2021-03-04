@@ -54,7 +54,7 @@ public class KafkaStatus extends Status {
         this.clusterId = clusterId;
     }
 
-    @Description("The state of CA certificates used for the \"Cluster CA\".")
+    @Description("The status of each trusted \"Cluster CA\" CA certificate.")
     public List<CaCertStatus> getClusterCa() {
         return clusterCa;
     }
@@ -63,7 +63,7 @@ public class KafkaStatus extends Status {
         this.clusterCa = clusterCa;
     }
 
-    @Description("The state of CA certificates used for the \"Clients CA\".")
+    @Description("The status of each trusted \"Clients CA\" CA certificate.")
     public List<CaCertStatus> getClientsCa() {
         return clientsCa;
     }
