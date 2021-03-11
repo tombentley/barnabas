@@ -22,13 +22,12 @@ import io.strimzi.api.kafka.model.status.CaCertStatus;
 import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.certs.Subject;
 import io.strimzi.operator.cluster.model.pki.TrustManager.CaState;
-import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.test.mockkube.MockKube;
-import io.vertx.core.Vertx;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 
 
 class ClusterPkiTest {
@@ -36,17 +35,13 @@ class ClusterPkiTest {
     public static final String NAMESPACE = "namespace";
     public static final String CLUSTER = "my-cluster";
     private KubernetesClient client;
-    private Vertx vertx;
-    private CrdOperator<KubernetesClient, Kafka, KafkaList> kafkaOperator;
     private Subject subject;
     private Kafka cr;
     private Resource<Kafka> kafkaRef;
 
     @BeforeEach
     public void before() {
-        vertx = Vertx.vertx();
         client = new MockKube().withCustomResourceDefinition(Crds.kafka(), Kafka.class, KafkaList.class, Kafka::getStatus, Kafka::setStatus).end().build();
-        kafkaOperator = new CrdOperator<>(vertx, client, Kafka.class, KafkaList.class, Crds.kafka());
         subject = new Subject();
         subject.setCommonName("foo");
         subject.setOrganizationName("bar");
@@ -151,8 +146,44 @@ class ClusterPkiTest {
         // Do a subsequent reconcile
         trustManager = pki.loadTrust(kafkaRef.get());
         // TODO need to assert that certs not regenerated on 2nd reconcile
+        // Can we do this using mocks?
         doBothRconcilePhases(trustManager, pki);
+    }
 
+    @Test
+    public void testRecoverFromDeletedBrokerSecret() throws CertificateException {
+        // TODO
+        fail("TODO");
+    }
+
+    @Test
+    public void testRecoverFromDeletedCaSecret() throws CertificateException {
+        // TODO
+        fail("TODO");
+    }
+
+    @Test
+    public void testRecoverFromDeletedCertSecret() throws CertificateException {
+        // TODO
+        fail("TODO");
+    }
+
+    @Test
+    public void testLeafCertWillExpire() throws CertificateException {
+        // TODO
+        fail("TODO");
+    }
+
+    @Test
+    public void testIntermediateCaCertWillExpire() throws CertificateException {
+        // TODO
+        fail("TODO");
+    }
+
+    @Test
+    public void testRootCaCertWillExpire() throws CertificateException {
+        // TODO
+        fail("TODO");
     }
 
     void assertCaSecret(TrustManager trustManager) {
