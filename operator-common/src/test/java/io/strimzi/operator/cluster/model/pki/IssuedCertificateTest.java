@@ -1,10 +1,13 @@
+/*
+ * Copyright Strimzi authors.
+ * License: Apache License 2.0 (see the file LICENSE or http://apache.org/licenses/LICENSE-2.0.html).
+ */
 package io.strimzi.operator.cluster.model.pki;
 
 import java.io.IOException;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableEntryException;
-import java.security.UnrecoverableKeyException;
 import java.security.cert.CertificateException;
 import java.security.spec.InvalidKeySpecException;
 
@@ -12,12 +15,10 @@ import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.certs.Subject;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
-/*
- * Copyright Strimzi authors.
- * License: Apache License 2.0 (see the file LICENSE or http://apache.org/licenses/LICENSE-2.0.html).
- */
+
 class IssuedCertificateTest {
 
     @Test
