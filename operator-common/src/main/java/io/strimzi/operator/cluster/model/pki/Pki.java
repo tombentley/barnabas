@@ -16,13 +16,17 @@ import java.security.cert.CertPathValidatorException;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
+import java.security.cert.CertificateParsingException;
+import java.security.cert.PKIXCertPathValidatorResult;
 import java.security.cert.PKIXParameters;
 import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
 import java.security.spec.InvalidKeySpecException;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -76,52 +80,6 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         return client.secrets().inNamespace(namespace).withName(caSecretName);
     }
 
-    // TODO load the trust manager from the trust secret state
-    public boolean reconcile(Cr cr, TrustManager trustManager) throws CertificateException {
-        // Look at CR to decide which certs we need
-        // TODO we should recognise the .tmp in the secret and reuse them, rather than generating new certs
-        long t0 = System.nanoTime();
-        List<RequiredCertificate> requiredCertificates = requiredCertificates(cr).collect(Collectors.toList());
-        logger.debug("Required certificates: {}", requiredCertificates);
-        // Look at secrets to decide which certs we have
-        List<RequiredCertificate> missingCertificates = requiredCertificates.stream().filter(requiredCertificate -> {
-            // TODO When scaling down, who deletes unneeded certs?
-            Secret secret = client.secrets().inNamespace(namespace).withName(requiredCertificate.getSecretName()).get();
-            if (secret == null || secret.getData().isEmpty()) {
-                logger.debug("Secret missing for required certificate: {}", requiredCertificate);
-                return true;
-            } else {
-                // Check those certs are valid to decide which certs we need to issue/reissue
-                String certChain = secret.getData().get(requiredCertificate.getCertChainEntryName());
-                if (certChain == null) {
-                    logger.debug("Secret entry missing for required certificate chain: {}", requiredCertificate);
-                    return true;
-                } else {
-                    // do cert path validation (and logging)
-                    try {
-                        List<X509Certificate> chain = Pem.parseCertChain(new String(Base64.getDecoder().decode(certChain)));
-                        int renewalDays = ca(cr).getRenewalDays();
-                        return !validateCertificate(chain, trustManager.trustStore(EnumSet.of(CaCertState.TRUSTED, CaCertState.PHASE_OUT)),
-                                renewalDays);
-                    } catch (CertificateException e) {
-                        logger.debug("Secret entry cannot be read as a certificate: {}", requiredCertificate);
-                        return true;
-                    }
-
-                }
-            }
-        }).collect(Collectors.toList());
-        logger.debug("missing certificates: {}", requiredCertificates);
-
-        // Issue those certs
-        boolean restartRequired = false;
-        for (RequiredCertificate requiredCertificate : missingCertificates) {
-            restartRequired |= issueClientCertificate(cr, trustManager, requiredCertificate, ca(cr).getValidityDays());
-        }
-        // TODO Maybe do some restarts to establish trust (what do I do with the issued certs until then? Add them to what secret?
-        // wherever it is they'd need to be findable again from the RequiredCertificates stuff
-        return restartRequired;
-    }
 
     /**
      * @param cr The custom resource.
@@ -134,75 +92,114 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     protected abstract List<CaCertStatus> status(Cr cr);
 
     /**
-     * The 2nd half of the reconciliation.
-     *
-     * Preconditions:
-     *
-     * 1. That the 1st half has already run.
-     * 2. That any pod restarts have been done.
-     * @param cr
-     * @param trustManager
-     * @throws CertificateException
+     * Update the CR status with the state of the trust manager
      */
-    public void reconcile2(Cr cr, TrustManager trustManager) throws CertificateException {
-        // TODO somehow we need to pass the requiredcerts to this method.
-        // Either we persist that state somewhere or, because we assume reconcile1 always runs first
-        // we just pass it out reconcile1 and into reconcile2
+    protected abstract Cr updateStatus(Cr cr, List<CaCertStatus> statusList);
 
-        // If we got this far we can transition the trust manager to TRUSTED
-        trustManager.entries().stream()
-                .filter(p ->
-                        p.state() == CaCertState.UNKNOWN || p.state() == CaCertState.UNTRUSTED)
-                .forEach(p -> trustManager.transitionToTrusted(p.fingerprint()));
-
-        // TODO Add the issued certs to the secrets
-        // basically copy the .tmp to .crt, .key etc
-
-        // Let the normal reconciliation restart brokers with new certs
-
-        // TODO what about the transition to PHASE_OUT?
-        // TODO what about the transition to ZOMBIE?
-    }
-
-    /**
-     * Validate the given certificate chain against the given set of trust anchors.
-     * To be "valid" there must be a valid cert path now and at the end of the window.
-     * @param chain
-     * @param trustAnchors
-     * @param renewalDays
-     * @throws CertificateException
-     * @throws NoSuchAlgorithmException
-     * @throws InvalidAlgorithmParameterException
-     * @throws CertPathValidatorException
-     */
-    private boolean validateCertificate(List<X509Certificate> chain, Set<TrustAnchor> trustAnchors, int renewalDays) throws CertificateException {
+    // TODO load the trust manager from the trust secret state
+    public boolean reconcile(Cr cr, TrustManager trustManager) throws CertificateException {
+        // Look at CR to decide which certs we need
+        // TODO we should recognise the .tmp in the secret and reuse them, rather than generating new certs
+        List<RequiredCertificate> requiredCertificates = requiredCertificates(cr).collect(Collectors.toList());
+        logger.debug("Required certificates: {}", requiredCertificates);
+        // Look at secrets to decide which certs we have
+        Set<TrustAnchor> possibleTrustAnchors = trustManager.trustStore(EnumSet.of(CaCertState.TRUSTED, CaCertState.PHASE_OUT));
+        CertificateFactory certificateFactory;
+        CertPathValidator validator;
+        PKIXParameters pkixParameters;
         try {
-            CertificateFactory cf = CertificateFactory.getInstance("X.509");
-            CertPath certPath = cf.generateCertPath(chain);
-
-            CertPathValidator validator = CertPathValidator.getInstance("PKIX");
-            PKIXParameters parameters = new PKIXParameters(trustAnchors);
-            parameters.setRevocationEnabled(false);
-            try {
-                validator.validate(certPath, parameters);
-                logger.debug("Cert path is valid currently");
-            } catch (CertPathValidatorException e) {
-                return false;
-            }
-            try {
-                // TODO this isn't right
-                parameters.setDate(new Date(chain.get(0).getNotBefore().getTime() + renewalDays * 1000L * 60 * 60 * 24));
-                validator.validate(certPath, parameters);
-                logger.debug("Cert path is still valid at the end of the renewal period");
-            } catch (CertPathValidatorException e) {
-                return false;
-            }
-            return true;
+            certificateFactory = CertificateFactory.getInstance("X.509");
+            validator = CertPathValidator.getInstance("PKIX");
+            pkixParameters = new PKIXParameters(possibleTrustAnchors);
         } catch (NoSuchAlgorithmException | InvalidAlgorithmParameterException e) {
             throw new RuntimeException(e);
         }
-    }
+        pkixParameters.setRevocationEnabled(false);
+        Date now = new Date();
 
+        List<RequiredCertificate> certsToIssue = new ArrayList<>();
+        Set<TrustAnchor> requiredTrustAnchors = new HashSet<>();
+        for (RequiredCertificate requiredCertificate : requiredCertificates) {
+            // TODO When scaling down, who deletes unneeded certs?
+            Secret secret = client.secrets().inNamespace(namespace).withName(requiredCertificate.getSecretName()).get();
+            if (secret == null || secret.getData().isEmpty()) {
+                logger.debug("Secret missing for required certificate: {}", requiredCertificate);
+                certsToIssue.add(requiredCertificate);
+            } else {
+                // Check those certs are valid to decide which certs we need to issue/reissue
+                String certChain = secret.getData().get(requiredCertificate.getCertChainEntryName());
+                if (certChain == null) {
+                    logger.debug("Secret entry missing for required certificate chain: {}", requiredCertificate);
+                    certsToIssue.add(requiredCertificate);
+                } else {
+                    // do cert path validation (and logging)
+                    try {
+                        List<X509Certificate> chain = Pem.parseCertChain(new String(Base64.getDecoder().decode(certChain)));
+
+                        try {
+                            CertPath certPath = certificateFactory.generateCertPath(chain);
+
+                            try {
+                                pkixParameters.setDate(now);
+                                TrustAnchor trustAnchor = ((PKIXCertPathValidatorResult) validator.validate(certPath, pkixParameters)).getTrustAnchor();
+                                requiredTrustAnchors.add(trustAnchor);
+                                logger.debug("Valid cert path exists currently: cert: {}, trustAnchor: {}", requiredCertificate, trustAnchor);
+                            } catch (CertPathValidatorException e) {
+                                logger.debug("No valid cert path exists currently: cert: {}, problem: {}", requiredCertificate, e);
+                                certsToIssue.add(requiredCertificate);
+                            }
+
+                            // TODO this isn't right
+                            Date date = new Date(chain.get(0).getNotBefore().getTime() + ca(cr).getRenewalDays() * 1000L * 60 * 60 * 24);
+                            try {
+                                pkixParameters.setDate(date);
+                                TrustAnchor trustAnchor = ((PKIXCertPathValidatorResult) validator.validate(certPath, pkixParameters)).getTrustAnchor();
+                                requiredTrustAnchors.add(trustAnchor);
+                                logger.debug("Valid cert path exists in future: date: {}, cert: {}, trustAnchor{}", date, requiredCertificate, trustAnchor);
+                            } catch (CertPathValidatorException e) {
+                                logger.debug("No valid cert path exists in future: date: {}, cert: {}, problem: {}", date, requiredCertificate, e);
+                                CertPathValidatorException.Reason reason = e.getReason();
+                                if (reason == CertPathValidatorException.BasicReason.EXPIRED) {
+                                    certsToIssue.add(requiredCertificate);
+                                    if (e.getIndex() == 0) {
+                                        // if the leaf cert itself is the problem then we just need to reissue
+                                    } else {
+                                        // TODO it's a root or intermediary: transition to phase out as well
+                                    }
+                                } else {
+                                    // TODO it's some other reason: transition to phase out as well
+                                }
+                            }
+                        } catch (InvalidAlgorithmParameterException e) {
+                            throw new RuntimeException(e);
+                        }
+                    } catch (CertificateException e) {
+                        logger.debug("Secret entry cannot be read as a certificate: {}", requiredCertificate);
+                        certsToIssue.add(requiredCertificate);
+                    }
+                }
+            }
+        }
+        logger.debug("missing certificates: {}", requiredCertificates);
+        logger.debug("required trust anchors: {}", requiredTrustAnchors);
+        Set<TrustAnchor> unneededTrustAnchors = new HashSet<>(possibleTrustAnchors);
+        unneededTrustAnchors.removeAll(requiredTrustAnchors);
+        logger.debug("unneeded trust anchors: {}", unneededTrustAnchors);
+        // TODO this isn't quite right. We certs which are currently valid but not in the future needs to transition to PHASE_OUT
+        // TODO and the ones which aren't used at all can transition to ZOMBIE
+        for (TrustAnchor ta : unneededTrustAnchors) {
+            trustManager.transitionToPhaseOut(fingerprint(ta.getTrustedCert()));
+        }
+
+        // Issue those certs
+        boolean restartRequired = false;
+        for (RequiredCertificate requiredCertificate : certsToIssue) {
+            restartRequired |= issueClientCertificate(cr, trustManager, requiredCertificate, ca(cr).getValidityDays());
+        }
+        // TODO Maybe do some restarts to establish trust (what do I do with the issued certs until then? Add them to what secret?
+        // wherever it is they'd need to be findable again from the RequiredCertificates stuff
+        return restartRequired;
+    }
 
 
     /**
@@ -233,8 +230,6 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         }
         return trustManager;
     }
-
-
 
 //    void loadFromBoth(TrustManager trustManager, List<CaCertStatus> clusterCa, Map<String, String> data) throws CertificateException {
 //        // load certs from the Secret values
@@ -279,15 +274,15 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         // convert
         SecretBuilder sb = new SecretBuilder();
         for (Map.Entry<String, String> entry : data.entrySet()) {
-            Fingerprint fp;
+            Fingerprint fingerprint;
             if (entry.getKey().equals("ca.crt")) {
-                fp = trustManager.load(entry.getValue(), CaCertState.TRUSTED);
+                fingerprint = trustManager.load(entry.getValue(), CaCertState.TRUSTED);
             } else if (entry.getKey().endsWith(".crt")) {
-                fp = trustManager.load(entry.getValue(), CaCertState.PHASE_OUT);
+                fingerprint = trustManager.load(entry.getValue(), CaCertState.PHASE_OUT);
             } else {
                 continue;
             }
-            sb.addToData(fp.toString(), entry.getValue());
+            sb.addToData(fingerprint.toString(), entry.getValue());
         }
         client.secrets().createOrReplace(sb.build());
 
@@ -298,7 +293,12 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         return trustManager;
     }
 
-    /** Issues a client (i.e. leaf) certificate and key, storing the key and cert chain in the relevant secret as .tmp files for consumption by the 2nd half. */
+    /**
+     * Issues a client (i.e. leaf) certificate and key, storing the key and cert chain
+     * in the relevant secret as .tmp files for consumption by the 2nd half.
+     * @return true iff a an untrusted root certificate was used, so that relying parties need to have their trust
+     * stores updated before being exposed to the newly issued certificate.
+     */
     public boolean issueClientCertificate(Cr cr, TrustManager trustManager,
                                           RequiredCertificate requiredCertificate, int requestedValidity)
             throws CertificateException {
@@ -307,14 +307,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         // Issue a certificate
         Subject subject = requiredCertificate.getSubject();
         IssuedCertificate issuedCert = issuer.issue(subject, requestedValidity);
-        X509Certificate issuedCertificate = issuedCert.issuedCertificate();
-        if (!issuedCertificate.getSubjectX500Principal().equals(new X500Principal("CN=" + subject.commonName() + ", O=" + subject.organizationName()))) {
-            throw new IllegalStateException("Requested certificate for " + subject.toString() + " but was issued a certificate for " + issuedCertificate.getSubjectDN());
-        }
-//        issuedCert.getIssuedCertificate().getSubjectX500Principal().getName(X500Principal.CANONICAL)
-        if (issuedCertificate.getSubjectAlternativeNames().equals(subject.subjectAltNames().values())) {
-            throw new IllegalStateException("Requested certificate with subject alternative names" + subject.subjectAltNames().values() + " but was issued a certificate with " + issuedCertificate.getSubjectAlternativeNames());
-        }
+        validateIssuedCertificate(subject, issuedCert);
 
         // TODO We need to store the key and cert chain somewhere (in the CA state Secret?)
         switch (maybeEstablishTrust(cr, trustManager, requiredCertificate, issuedCert)) {
@@ -336,6 +329,22 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         // TODO We can now update the client Secret and roll to trigger stuff to use it.
 
         // TODO is this actually two methods? Or a single method which results in 3 successive reconciliations?
+    }
+
+    /** Validate a newly issued certificate */
+    void validateIssuedCertificate(Subject subject, IssuedCertificate issuedCert) throws CertificateParsingException {
+        X509Certificate issuedCertificate = issuedCert.issuedCertificate();
+        if (!issuedCertificate.getSubjectX500Principal().equals(new X500Principal("CN=" + subject.commonName() + ", O=" + subject.organizationName()))) {
+            throw new IllegalStateException("Requested certificate for " + subject.toString() + " but was issued a certificate for " + issuedCertificate.getSubjectDN());
+        }
+        if (issuedCertificate.getSubjectAlternativeNames().equals(subject.subjectAltNames().values())) {
+            throw new IllegalStateException("Requested certificate with subject alternative names" + subject.subjectAltNames().values() + " but was issued a certificate with " + issuedCertificate.getSubjectAlternativeNames());
+        }
+        // TODO do cert path validation too (with UNTRUSTED+TRUSTED certs as trust roots)
+        // That way we can verify that new certs are actually fix problems
+        // E.g. what if the problem is in an intermediate certificate? It's possible that a newly issued cert has the same problem
+        // Detecting it here allows use to fail the reconciliation, rather than loop pointlessly
+        // creating new invalid certificates.
     }
 
     CaCertState maybeEstablishTrust(Cr cr, TrustManager trustManager, RequiredCertificate requiredCertificate,
@@ -487,7 +496,33 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     }
 
     /**
-     * Update the CR status with the state of the trust manager
+     * The 2nd half of the reconciliation.
+     *
+     * Preconditions:
+     *
+     * 1. That the 1st half has already run.
+     * 2. That any pod restarts have been done.
+     * @param cr
+     * @param trustManager
+     * @throws CertificateException
      */
-    protected abstract Cr updateStatus(Cr cr, List<CaCertStatus> statusList);
+    public void reconcile2(Cr cr, TrustManager trustManager) throws CertificateException {
+        // TODO somehow we need to pass the requiredcerts to this method.
+        // Either we persist that state somewhere or, because we assume reconcile1 always runs first
+        // we just pass it out reconcile1 and into reconcile2
+
+        // If we got this far we can transition the trust manager to TRUSTED
+        trustManager.entries().stream()
+                .filter(p ->
+                        p.state() == CaCertState.UNKNOWN || p.state() == CaCertState.UNTRUSTED)
+                .forEach(p -> trustManager.transitionToTrusted(p.fingerprint()));
+
+        // TODO Add the issued certs to the secrets
+        // basically copy the .tmp to .crt, .key etc
+
+        // Let the normal reconciliation restart brokers with new certs
+
+        // TODO what about the transition to PHASE_OUT?
+        // TODO what about the transition to ZOMBIE?
+    }
 }
