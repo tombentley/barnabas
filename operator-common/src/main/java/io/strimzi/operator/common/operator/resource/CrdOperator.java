@@ -101,6 +101,10 @@ public class CrdOperator<C extends KubernetesClient,
     }
 
     public Future<T> updateStatusAsync(T resource) {
+        return updateStatusAsync(resource, null);
+    }
+
+    public Future<T> updateStatusAsync(T resource, String withResourceVersion) {
         Promise<T> blockingPromise = Promise.promise();
 
         vertx.createSharedWorkerExecutor("kubernetes-ops-pool").executeBlocking(future -> {
@@ -108,8 +112,14 @@ public class CrdOperator<C extends KubernetesClient,
             String name = resource.getMetadata().getName();
 
             try {
-                T result = operation().inNamespace(namespace).withName(name).updateStatus(resource);
-                log.info("Status of {} {} in namespace {} has been updated", resourceKind, name, namespace);
+                Resource<T> tResource = operation().inNamespace(namespace).withName(name);
+                T result;
+                if (withResourceVersion != null) {
+                    result = ((Resource<T>) tResource.withResourceVersion(withResourceVersion)).updateStatus(resource);
+                } else {
+                    result = tResource.updateStatus(resource);
+                }
+                log.debug("Status of {} {} in namespace {} has been updated", resourceKind, name, namespace);
                 future.complete(result);
             } catch (Exception e) {
                 log.debug("Caught exception while updating status of {} {} in namespace {}", resourceKind, name, namespace, e);

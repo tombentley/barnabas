@@ -231,7 +231,8 @@ public class MockKube {
     @SuppressWarnings("unchecked")
     public <T extends CustomResource, L extends KubernetesResourceList<T>, S> MockedCrd<T, L, S>
         withCustomResourceDefinition(CustomResourceDefinition crd, Class<T> instanceClass, Class<L> instanceListClass) {
-        return withCustomResourceDefinition(crd, instanceClass, instanceListClass, t -> (S) t.getStatus(), T::setStatus);
+        // TODO now that CustomResource declares a getStatus and setStatus we can remove this confusing constructor
+        return withCustomResourceDefinition(crd, instanceClass, instanceListClass, null, null);
     }
 
     private final Map<Class<? extends HasMetadata>, MockBuilder<?, ?, ?>> mockBuilders = new HashMap<>();

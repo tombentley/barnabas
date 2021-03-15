@@ -30,7 +30,7 @@ import static java.util.Collections.emptyMap;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonPropertyOrder({ "fingerprint", "notBefore", "notAfter", "state"})
 @EqualsAndHashCode
-@ToString(callSuper = true)
+@ToString
 public class CaCertStatus implements UnknownPropertyPreserving, Serializable {
     private String fingerprint;
     private CaCertState state;

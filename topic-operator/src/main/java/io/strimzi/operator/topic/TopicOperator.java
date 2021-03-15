@@ -1048,6 +1048,7 @@ class TopicOperator {
                 new Reconciliation("onResourceEvent", false) {
                     @Override
                     public Future<Void> execute() {
+
                         return k8s.getFromName(new ResourceName(modifiedTopic))
                             .compose(mt ->  {
                                 final Topic k8sTopic;
