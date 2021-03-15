@@ -33,7 +33,7 @@ class Fingerprint {
             throw new IllegalArgumentException("Wrong number of characters in hex fingerprint: " + hex.length());
         }
         byte[] bytes = new byte[20];
-        for (int i = 0; i < 40; i+=2) {
+        for (int i = 0; i < 40; i += 2) {
             int s1 = readHex(hex.charAt(i));
             int s2 = readHex(hex.charAt(i + 1));
             bytes[i / 2] = (byte) (s1 << 4 | s2);
@@ -62,8 +62,8 @@ class Fingerprint {
     private static String hex(byte[] bytes) {
         char[] hexChars = "0123456789ABCDEF".toCharArray();
         char[] resultChars = new char[bytes.length * 2];
-        for (int i = 0; i < resultChars.length; i+=2) {
-            int v = bytes[i/2] & 0xFF;
+        for (int i = 0; i < resultChars.length; i += 2) {
+            int v = bytes[i / 2] & 0xFF;
             resultChars[i] = hexChars[v >>> 4];
             resultChars[i + 1] = hexChars[v & 0x0F];
         }

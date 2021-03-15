@@ -5887,12 +5887,13 @@ spec:
                     state:
                       type: string
                       enum:
-                      - UNTRUSTED
-                      - TRUSTED
-                      - PHASE_OUT
                       - ZOMBIE
+                      - PHASE_OUT
+                      - TRUSTED
+                      - UNTRUSTED
+                      - UNKNOWN
                       description: The state of this certificate.
-                description: The state of CA certificates used for the "Clients CA".
+                description: The status of each trusted "Clients CA" CA certificate.
               clusterCa:
                 type: array
                 items:
@@ -5910,12 +5911,13 @@ spec:
                     state:
                       type: string
                       enum:
-                      - UNTRUSTED
-                      - TRUSTED
-                      - PHASE_OUT
                       - ZOMBIE
+                      - PHASE_OUT
+                      - TRUSTED
+                      - UNTRUSTED
+                      - UNKNOWN
                       description: The state of this certificate.
-                description: The state of CA certificates used for the "Cluster CA".
+                description: The status of each trusted "Cluster CA" CA certificate.
               clusterId:
                 type: string
                 description: Kafka cluster Id.
@@ -14308,12 +14310,13 @@ spec:
                     state:
                       type: string
                       enum:
-                      - UNTRUSTED
-                      - TRUSTED
-                      - PHASE_OUT
                       - ZOMBIE
+                      - PHASE_OUT
+                      - TRUSTED
+                      - UNTRUSTED
+                      - UNKNOWN
                       description: The state of this certificate.
-                description: The state of CA certificates used for the "Clients CA".
+                description: The status of each trusted "Clients CA" CA certificate.
               clusterCa:
                 type: array
                 items:
@@ -14331,12 +14334,13 @@ spec:
                     state:
                       type: string
                       enum:
-                      - UNTRUSTED
-                      - TRUSTED
-                      - PHASE_OUT
                       - ZOMBIE
+                      - PHASE_OUT
+                      - TRUSTED
+                      - UNTRUSTED
+                      - UNKNOWN
                       description: The state of this certificate.
-                description: The state of CA certificates used for the "Cluster CA".
+                description: The status of each trusted "Cluster CA" CA certificate.
               clusterId:
                 type: string
                 description: Kafka cluster Id.
@@ -22729,12 +22733,13 @@ spec:
                     state:
                       type: string
                       enum:
-                      - UNTRUSTED
-                      - TRUSTED
-                      - PHASE_OUT
                       - ZOMBIE
+                      - PHASE_OUT
+                      - TRUSTED
+                      - UNTRUSTED
+                      - UNKNOWN
                       description: The state of this certificate.
-                description: The state of CA certificates used for the "Clients CA".
+                description: The status of each trusted "Clients CA" CA certificate.
               clusterCa:
                 type: array
                 items:
@@ -22752,12 +22757,13 @@ spec:
                     state:
                       type: string
                       enum:
-                      - UNTRUSTED
-                      - TRUSTED
-                      - PHASE_OUT
                       - ZOMBIE
+                      - PHASE_OUT
+                      - TRUSTED
+                      - UNTRUSTED
+                      - UNKNOWN
                       description: The state of this certificate.
-                description: The state of CA certificates used for the "Cluster CA".
+                description: The status of each trusted "Cluster CA" CA certificate.
               clusterId:
                 type: string
                 description: Kafka cluster Id.

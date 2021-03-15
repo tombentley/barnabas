@@ -31,7 +31,7 @@ import io.strimzi.operator.cluster.model.ZookeeperCluster;
 
 public class ClusterPki extends Pki<Kafka, KafkaSpec, KafkaStatus> {
 
-    private static final Pattern ipv4Address = Pattern.compile("[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}");
+    private static final Pattern IPV4_ADDRESS = Pattern.compile("[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}");
 
     public ClusterPki(CertManager certManager, KubernetesClient client, String namespace, String cluster) {
         super(certManager, client, namespace, cluster,
@@ -99,8 +99,8 @@ public class ClusterPki extends Pki<Kafka, KafkaSpec, KafkaStatus> {
     Stream<RequiredCertificate> requiredBrokerCertificates(KafkaClusterSpec kafkaSpec) {
         return IntStream.range(0, kafkaSpec.getReplicas()).boxed()
                 .map(podNum -> {
-                    Set<String> externalBootstrapAddresses = null;// TODO
-                    Map<Integer, Set<String>> externalAddresses = null;// TODO
+                    Set<String> externalBootstrapAddresses = null; // TODO
+                    Map<Integer, Set<String>> externalAddresses = null; // TODO
 
                     DnsNameGenerator kafkaDnsGenerator = DnsNameGenerator.of(namespace, KafkaCluster.serviceName(cluster));
                     DnsNameGenerator kafkaHeadlessDnsGenerator = DnsNameGenerator.of(namespace, KafkaCluster.headlessServiceName(cluster));
@@ -121,7 +121,7 @@ public class ClusterPki extends Pki<Kafka, KafkaSpec, KafkaStatus> {
 
                     if (externalBootstrapAddresses != null)   {
                         for (String dnsName : externalBootstrapAddresses) {
-                            String sna = !ipv4Address.matcher(dnsName).matches() ?
+                            String sna = !IPV4_ADDRESS.matcher(dnsName).matches() ?
                                     String.format("DNS.%d", nextDnsId++) :
                                     String.format("IP.%d", nextIpId++);
 
@@ -131,7 +131,7 @@ public class ClusterPki extends Pki<Kafka, KafkaSpec, KafkaStatus> {
 
                     if (externalAddresses != null && externalAddresses.get(podNum) != null)   {
                         for (String dnsName : externalAddresses.get(podNum)) {
-                            String sna = !ipv4Address.matcher(dnsName).matches() ?
+                            String sna = !IPV4_ADDRESS.matcher(dnsName).matches() ?
                                     String.format("DNS.%d", nextDnsId++) :
                                     String.format("IP.%d", nextIpId++);
 

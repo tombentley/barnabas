@@ -34,7 +34,7 @@ import static io.strimzi.operator.common.Util.delete;
 
 public class StrimziCertificateIssuer implements CertificateIssuer {
 
-    private static final Logger logger = LogManager.getLogger(StrimziCertificateIssuer.class);
+    private static final Logger LOGGER = LogManager.getLogger(StrimziCertificateIssuer.class);
 
     private final CertManager certManager;
     // CA cert and key for the issuing CA
@@ -45,13 +45,14 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
     // the trust root
     private X509Certificate trustRoot;
 
+    @SuppressWarnings("unchecked")
     StrimziCertificateIssuer(CertManager certManager, CertAndKey issuingCaCertAndKey, List<X509Certificate> pathToRoot) {
         this.certManager = certManager;
         this.issuingCertAndKey = issuingCaCertAndKey;
 
         // This is probably not needed if we do full cert path validation.
         X509Certificate prev = null;
-        for (int i = pathToRoot.size() - 1; i >=0; i--) {
+        for (int i = pathToRoot.size() - 1; i >= 0; i--) {
             X509Certificate current = pathToRoot.get(i);
             if (current.getBasicConstraints() == -1) {
                 throw new IllegalArgumentException("The chain of CA certificate contains a non-CA certificate: " + current.getSubjectDN());
@@ -106,9 +107,14 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
 
     /**
      * Create a new root CA cert and key using the given {@code certManager}.
+     * @param certManager The cert manager to use.
+     * @param subject The subject for the root CA certificate.
+     * @param days The validity period for the root CA certificate.
+     * @return An issuer instance.
+     * @throws CertificateException cert problem.
      */
     public static StrimziCertificateIssuer createRootIssuer(CertManager certManager, Subject subject, int days) throws CertificateException {
-        logger.debug("Creating StrimziCertificateIssuer with CA subject {} and root cert validity {}", subject, days);
+        LOGGER.debug("Creating StrimziCertificateIssuer with CA subject {} and root cert validity {}", subject, days);
         Path keyPath = null;
         Path certPath = null;
         byte[] key;
@@ -138,7 +144,7 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
     public IssuedCertificate issue(Subject subject, int requestedValidity) throws CertificateIssuanceException {
         try {
             int actualValidity = adjustValidity(requestedValidity);
-            logger.debug("Issuing certificate: subject: {}, requestedValidity: {}, actualValidity: {}", subject, requestedValidity, actualValidity);
+            LOGGER.debug("Issuing certificate: subject: {}, requestedValidity: {}, actualValidity: {}", subject, requestedValidity, actualValidity);
 
             byte[] issuedKey;
             Path csrPath = Files.createTempFile(null, ".csr");

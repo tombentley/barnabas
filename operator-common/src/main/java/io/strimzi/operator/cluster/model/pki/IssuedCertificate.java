@@ -61,7 +61,7 @@ public class IssuedCertificate {
      * The certificate chain for all the intermediate CA certificates between the
      * {@linkplain #issuedCertificate() issued certificate} and the
      * {@linkplain #rootCaCertificate()} root CA certificate
-     * @return
+     * @return The certificate chain for all the intermediate CA certificates.
      */
     public List<X509Certificate> intermediateChain() {
         return intermediateChain;
@@ -92,12 +92,12 @@ public class IssuedCertificate {
      * Persist the issued key, certificate and intermediate chain as PKCS12 and return the bytes.
      * Does not persist the root certificate.
      * @param password The password for protecting the both the key and the whole PKCS12 data.
-     * @return The PKCS12 bytes
-     * @throws KeyStoreException
-     * @throws IOException
-     * @throws NoSuchAlgorithmException
-     * @throws CertificateException
-     * @throws InvalidKeySpecException
+     * @return The PKCS12 bytes.
+     * @throws KeyStoreException If the keystore could not be constructed.
+     * @throws IOException IO problems.
+     * @throws NoSuchAlgorithmException If an unsupported algorithm was used.
+     * @throws CertificateException Something wrong with the certificate.
+     * @throws InvalidKeySpecException Bad keyspec.
      */
     public byte[] toPkcs12(char[] password) throws KeyStoreException, IOException, NoSuchAlgorithmException, CertificateException, InvalidKeySpecException {
         IssuedCertificate issuedCert = this;
@@ -127,11 +127,11 @@ public class IssuedCertificate {
      * @param bytes The PKCS12 bytes.
      * @param password The password used when storing.
      * @return The IssuedCertificate, with a null root CA certificate.
-     * @throws IOException
-     * @throws CertificateException
-     * @throws NoSuchAlgorithmException
-     * @throws KeyStoreException
-     * @throws UnrecoverableEntryException
+     * @throws KeyStoreException If the keystore could not be constructed.
+     * @throws IOException IO problems.
+     * @throws NoSuchAlgorithmException If an unsupported algorithm was used.
+     * @throws CertificateException Something wrong with the certificate.
+     * @throws UnrecoverableEntryException If the entry could not be read.
      */
     public static IssuedCertificate fromPkcs12(byte[] bytes, char[] password) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, UnrecoverableEntryException {
         KeyStore ks = KeyStore.getInstance("PKCS12");
@@ -152,6 +152,7 @@ public class IssuedCertificate {
 
         if (entry instanceof KeyStore.PrivateKeyEntry) {
             KeyStore.PrivateKeyEntry pkentry = (KeyStore.PrivateKeyEntry) entry;
+            @SuppressWarnings("unchecked")
             List<X509Certificate> certificates = (List) Arrays.asList(pkentry.getCertificateChain());
             // TODO eugh
             byte[] encode = Base64.getEncoder().encode(pkentry.getPrivateKey().getEncoded());

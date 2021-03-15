@@ -54,7 +54,7 @@ import static io.strimzi.operator.cluster.model.pki.TrustManager.x509Certificate
 
 public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status> {
 
-    private static final Logger logger = LogManager.getLogger(Pki.class);
+    private static final Logger LOGGER = LogManager.getLogger(Pki.class);
 
     private final CertManager certManager;
     protected final KubernetesClient client;
@@ -101,7 +101,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         // Look at CR to decide which certs we need
         // TODO we should recognise the .tmp in the secret and reuse them, rather than generating new certs
         List<RequiredCertificate> requiredCertificates = requiredCertificates(cr).collect(Collectors.toList());
-        logger.debug("Required certificates: {}", requiredCertificates);
+        LOGGER.debug("Required certificates: {}", requiredCertificates);
         // Look at secrets to decide which certs we have
         Set<TrustAnchor> possibleTrustAnchors = trustManager.trustStore(EnumSet.of(CaCertState.TRUSTED, CaCertState.PHASE_OUT));
         CertificateFactory certificateFactory;
@@ -123,13 +123,13 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
             // TODO When scaling down, who deletes unneeded certs?
             Secret secret = client.secrets().inNamespace(namespace).withName(requiredCertificate.getSecretName()).get();
             if (secret == null || secret.getData().isEmpty()) {
-                logger.debug("Secret missing for required certificate: {}", requiredCertificate);
+                LOGGER.debug("Secret missing for required certificate: {}", requiredCertificate);
                 certsToIssue.add(requiredCertificate);
             } else {
                 // Check those certs are valid to decide which certs we need to issue/reissue
                 String certChain = secret.getData().get(requiredCertificate.getCertChainEntryName());
                 if (certChain == null) {
-                    logger.debug("Secret entry missing for required certificate chain: {}", requiredCertificate);
+                    LOGGER.debug("Secret entry missing for required certificate chain: {}", requiredCertificate);
                     certsToIssue.add(requiredCertificate);
                 } else {
                     // do cert path validation (and logging)
@@ -143,9 +143,9 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                                 pkixParameters.setDate(now);
                                 TrustAnchor trustAnchor = ((PKIXCertPathValidatorResult) validator.validate(certPath, pkixParameters)).getTrustAnchor();
                                 requiredTrustAnchors.add(trustAnchor);
-                                logger.debug("Valid cert path exists currently: cert: {}, trustAnchor: {}", requiredCertificate, trustAnchor);
+                                LOGGER.debug("Valid cert path exists currently: cert: {}, trustAnchor: {}", requiredCertificate, trustAnchor);
                             } catch (CertPathValidatorException e) {
-                                logger.debug("No valid cert path exists currently: cert: {}, problem: {}", requiredCertificate, e);
+                                LOGGER.debug("No valid cert path exists currently: cert: {}, problem: {}", requiredCertificate, e);
                                 certsToIssue.add(requiredCertificate);
                             }
 
@@ -155,9 +155,9 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                                 pkixParameters.setDate(date);
                                 TrustAnchor trustAnchor = ((PKIXCertPathValidatorResult) validator.validate(certPath, pkixParameters)).getTrustAnchor();
                                 requiredTrustAnchors.add(trustAnchor);
-                                logger.debug("Valid cert path exists in future: date: {}, cert: {}, trustAnchor{}", date, requiredCertificate, trustAnchor);
+                                LOGGER.debug("Valid cert path exists in future: date: {}, cert: {}, trustAnchor{}", date, requiredCertificate, trustAnchor);
                             } catch (CertPathValidatorException e) {
-                                logger.debug("No valid cert path exists in future: date: {}, cert: {}, problem: {}", date, requiredCertificate, e);
+                                LOGGER.debug("No valid cert path exists in future: date: {}, cert: {}, problem: {}", date, requiredCertificate, e);
                                 CertPathValidatorException.Reason reason = e.getReason();
                                 if (reason == CertPathValidatorException.BasicReason.EXPIRED) {
                                     certsToIssue.add(requiredCertificate);
@@ -174,17 +174,17 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                             throw new RuntimeException(e);
                         }
                     } catch (CertificateException e) {
-                        logger.debug("Secret entry cannot be read as a certificate: {}", requiredCertificate);
+                        LOGGER.debug("Secret entry cannot be read as a certificate: {}", requiredCertificate);
                         certsToIssue.add(requiredCertificate);
                     }
                 }
             }
         }
-        logger.debug("missing certificates: {}", requiredCertificates);
-        logger.debug("required trust anchors: {}", requiredTrustAnchors);
+        LOGGER.debug("missing certificates: {}", requiredCertificates);
+        LOGGER.debug("required trust anchors: {}", requiredTrustAnchors);
         Set<TrustAnchor> unneededTrustAnchors = new HashSet<>(possibleTrustAnchors);
         unneededTrustAnchors.removeAll(requiredTrustAnchors);
-        logger.debug("unneeded trust anchors: {}", unneededTrustAnchors);
+        LOGGER.debug("unneeded trust anchors: {}", unneededTrustAnchors);
         // TODO this isn't quite right. We certs which are currently valid but not in the future needs to transition to PHASE_OUT
         // TODO and the ones which aren't used at all can transition to ZOMBIE
         for (TrustAnchor ta : unneededTrustAnchors) {
@@ -203,8 +203,9 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
 
 
     /**
+     * @param cr The custom resource
      * @return a TrustManager with state loaded from the Secret for the given cluster.
-     * @throws CertificateException
+     * @throws CertificateException Cert problems
      */
     public TrustManager loadTrust(Cr cr) throws CertificateException {
         TrustManager trustManager;
@@ -296,8 +297,13 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     /**
      * Issues a client (i.e. leaf) certificate and key, storing the key and cert chain
      * in the relevant secret as .tmp files for consumption by the 2nd half.
+     * @param cr The custom resource.
+     * @param trustManager The trust manager.
+     * @param requiredCertificate The cert to issue.
+     * @param requestedValidity The requested validity period.
      * @return true iff a an untrusted root certificate was used, so that relying parties need to have their trust
      * stores updated before being exposed to the newly issued certificate.
+     * @throws CertificateException cert problem
      */
     public boolean issueClientCertificate(Cr cr, TrustManager trustManager,
                                           RequiredCertificate requiredCertificate, int requestedValidity)
@@ -416,7 +422,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
 
             Secret caSecret = caSecretRef().get();
             if (caSecret == null || caSecret.getData() == null || caSecret.getData().isEmpty()) {
-                logger.debug("Missing CA secret: {}", caSecretName);
+                LOGGER.debug("Missing CA secret: {}", caSecretName);
                 // Generate a new one
                 //   The Strimzi impl may, by side-effect, create a key pair if one doesn't exit
                 Subject subject = new Subject();
@@ -429,7 +435,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
 
                 Fingerprint fingerprint = fingerprint(x509Certificate(sissuer.issuingCert()));
 
-                logger.debug("Creating CA Secret: {}", caSecretName);
+                LOGGER.debug("Creating CA Secret: {}", caSecretName);
                 caSecret = new SecretBuilder().withNewMetadata()
                             .withName(caSecretName)
                             .withNamespace(namespace)
@@ -439,7 +445,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                 caSecretRef().createOrReplace(caSecret);
                 issuer = sissuer;
             } else {
-                logger.debug("Using existing CA secret: {}", caSecretName);
+                LOGGER.debug("Using existing CA secret: {}", caSecretName);
                 // TODO which certificate should I use??? obviously the trusted one, if there is one
                 Secret trustSecret = trustSecretRef().get();
                 issuer = findIssuer(trustSecret, caSecret, ".TRUSTED.crt");
@@ -502,9 +508,9 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
      *
      * 1. That the 1st half has already run.
      * 2. That any pod restarts have been done.
-     * @param cr
-     * @param trustManager
-     * @throws CertificateException
+     * @param cr The CR
+     * @param trustManager The trust manager
+     * @throws CertificateException Cert problem
      */
     public void reconcile2(Cr cr, TrustManager trustManager) throws CertificateException {
         // TODO somehow we need to pass the requiredcerts to this method.

@@ -21,7 +21,7 @@ public enum CaCertState {
      *     <dd>the client certificate signed by a cluster CA certificate are all internal to Strimzi, so the client
      *     certificate replacement can be done automatically by the operator once a CA certificate enters the
      *     PHASE_OUT state and once all those newly issued certificates are in use the transition to ZOMBIE can be
-     *     done automatically.</pp>
+     *     done automatically.</dd>
      *
      *     <dt>clients CA</dt>
      *     <dd>We don't know that all extant client certificates signed with a clients CA certificate are created by the
@@ -45,7 +45,7 @@ public enum CaCertState {
      * <dl>
      *     <dt>cluster CA</dt>
      *     <dd>the client certificate signed by a cluster CA certificate are all internal to Strimzi, so the client
-     *     certificate replacement can be done automatically, by the operator.</pp>
+     *     certificate replacement can be done automatically, by the operator.</dd>
      *     <dt>clients CA</dt>
      *     <dd>We don't know that all the client certificates signed with a clients CA certificate are created by the
      *     User Operator, so we have to be told by the user.

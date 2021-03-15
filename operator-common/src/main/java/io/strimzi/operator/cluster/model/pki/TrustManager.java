@@ -193,9 +193,9 @@ public class TrustManager {
     }
 
     /**
-     * Find the CA certificate
-     * @param state
-     * @return
+     * Find the CA certificate.
+     * @param state The state.
+     * @return The result.
      */
     public Optional<CaState> findCa(CaCertState state) {
         return certs.entrySet().stream()

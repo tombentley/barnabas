@@ -1928,9 +1928,9 @@ Used in: xref:type-Kafka-{context}[`Kafka`]
 |integer
 |listeners           1.2+<.<|Addresses of the internal and external listeners.
 |xref:type-ListenerStatus-{context}[`ListenerStatus`] array
-|clientsCa           1.2+<.<|The state of CA certificates used for the "Clients CA".
+|clientsCa           1.2+<.<|The status of each trusted "Clients CA" CA certificate.
 |xref:type-CaCertStatus-{context}[`CaCertStatus`] array
-|clusterCa           1.2+<.<|The state of CA certificates used for the "Cluster CA".
+|clusterCa           1.2+<.<|The status of each trusted "Cluster CA" CA certificate.
 |xref:type-CaCertStatus-{context}[`CaCertStatus`] array
 |clusterId           1.2+<.<|Kafka cluster Id.
 |string
@@ -2007,7 +2007,7 @@ Used in: xref:type-KafkaStatus-{context}[`KafkaStatus`]
 |notAfter     1.2+<.<|The not-after date of this certificate.
 |string
 |state        1.2+<.<|The state of this certificate.
-|string (one of [ZOMBIE, TRUSTED, UNTRUSTED, PHASE_OUT])
+|string (one of [ZOMBIE, TRUSTED, UNKNOWN, UNTRUSTED, PHASE_OUT])
 |====
 
 [id='type-KafkaConnect-{context}']
