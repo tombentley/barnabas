@@ -92,7 +92,9 @@ public class ClusterPki extends Pki<Kafka, KafkaSpec, KafkaStatus> {
 //                    data.put(ZookeeperCluster.zookeeperPodName(cluster, i) + ".p12", cert.keyStoreAsBase64String());
 //                    data.put(ZookeeperCluster.zookeeperPodName(cluster, i) + ".password", cert.storePasswordAsBase64String());
 
-                    return new RequiredCertificate(subject, ZookeeperCluster.nodesSecretName(cluster), ZookeeperCluster.zookeeperPodName(cluster, podNum) + ".crt");
+                    return new RequiredCertificate(subject,
+                            ZookeeperCluster.nodesSecretName(cluster),
+                            zookeeperNodeCertSecretEntry(cluster, podNum));
                 });
     }
 
@@ -148,8 +150,18 @@ public class ClusterPki extends Pki<Kafka, KafkaSpec, KafkaStatus> {
 //                    data.put(KafkaCluster.kafkaPodName(cluster, i) + ".crt", cert.certAsBase64String());
 //                    data.put(KafkaCluster.kafkaPodName(cluster, i) + ".p12", cert.keyStoreAsBase64String());
 //                    data.put(KafkaCluster.kafkaPodName(cluster, i) + ".password", cert.storePasswordAsBase64String());
-                    return new RequiredCertificate(subject, KafkaCluster.brokersSecretName(cluster), KafkaCluster.kafkaPodName(cluster, podNum) + ".crt");
+                    return new RequiredCertificate(subject,
+                            KafkaCluster.brokersSecretName(cluster),
+                            brokerCertSecretEntry(cluster, podNum));
                 });
+    }
+
+    static String brokerCertSecretEntry(String cluster, Integer podNum) {
+        return KafkaCluster.kafkaPodName(cluster, podNum) + ".crt";
+    }
+
+    static String zookeeperNodeCertSecretEntry(String cluster, Integer podNum) {
+        return ZookeeperCluster.zookeeperPodName(cluster, podNum) + ".crt";
     }
 
 }

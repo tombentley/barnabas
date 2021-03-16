@@ -14,7 +14,7 @@ import java.util.Set;
  */
 public class Subject {
 
-    static class Builder {
+    public static class Builder {
         private String organizationName;
         private String commonName;
         private Map<String, Set<String>> subjectAltNames;

@@ -133,7 +133,8 @@ public class IssuedCertificate {
      * @throws CertificateException Something wrong with the certificate.
      * @throws UnrecoverableEntryException If the entry could not be read.
      */
-    public static IssuedCertificate fromPkcs12(byte[] bytes, char[] password) throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, UnrecoverableEntryException {
+    public static IssuedCertificate fromPkcs12(byte[] bytes, char[] password)
+            throws IOException, CertificateException, NoSuchAlgorithmException, KeyStoreException, UnrecoverableEntryException {
         KeyStore ks = KeyStore.getInstance("PKCS12");
         try (InputStream is = new ByteArrayInputStream(bytes)) {
             ks.load(is, password);

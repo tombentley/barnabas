@@ -11,6 +11,7 @@ import io.strimzi.certs.Subject;
  * For example this could be a certificate for a given broker.
  */
 public class RequiredCertificate {
+    public static final String PENDING_SUFFIX = ".pending";
     private final Subject subject;
     private final String secretName;
     private final String entryName;
@@ -40,6 +41,10 @@ public class RequiredCertificate {
      */
     public String getCertChainEntryName() {
         return entryName;
+    }
+
+    public String getPendingCertChainEntryName() {
+        return getCertChainEntryName() + PENDING_SUFFIX;
     }
 
     @Override
