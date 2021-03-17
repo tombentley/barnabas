@@ -223,15 +223,15 @@ public class OpenSslCertManagerTest {
 
         File leafKey = File.createTempFile("key-", ".key");
         File csr = File.createTempFile("csr-", ".csr");
-        Subject sbj = new Subject.Builder().withCommonName("MyCommonName").withOrganizationName("MyOrganization").build();
-        Map<String, String> subjectAltNames = new HashMap<>();
-        subjectAltNames.put("DNS.1", "example1.com");
-        subjectAltNames.put("DNS.2", "example2.com");
-        sbj.setSubjectAltNames(subjectAltNames);
+        Subject subject = new Subject.Builder()
+                .withCommonName("MyCommonName")
+                .withOrganizationName("MyOrganization")
+                .addDnsName("example1.com")
+                .addDnsName("example2.com").build();
 
         File leafCert = File.createTempFile("crt-", ".crt");
 
-        doGenerateSignedCert(intermediateKey, intermediateCert, intermediateSubject, leafKey, csr, leafCert, null, "123456", sbj);
+        doGenerateSignedCert(intermediateKey, intermediateCert, intermediateSubject, leafKey, csr, leafCert, null, "123456", subject);
 
         // Validate that when the root cert is trusted and the cert chain includes the leaf+intermediate,
         // that the leaf is considered valid by PKIX validation
@@ -296,16 +296,16 @@ public class OpenSslCertManagerTest {
 
         File key = File.createTempFile("key-", ".key");
         File csr = File.createTempFile("csr-", ".csr");
-        Subject sbj = new Subject.Builder().withCommonName("MyCommonName").withOrganizationName("MyOrganization").build();
-        Map<String, String> subjectAltNames = new HashMap<>();
-        subjectAltNames.put("DNS.1", "example1.com");
-        subjectAltNames.put("DNS.2", "example2.com");
-        sbj.setSubjectAltNames(subjectAltNames);
+        Subject subject = new Subject.Builder()
+                .withCommonName("MyCommonName")
+                .withOrganizationName("MyOrganization")
+                .addDnsName("example1.com")
+                .addDnsName("example2.com").build();
 
         File cert = File.createTempFile("crt-", ".crt");
 
         ssl.generateSelfSignedCert(caKey, caCert, caSbj, 365);
-        doGenerateSignedCert(caKey, caCert, caSbj, key, csr, cert, store, "123456", sbj);
+        doGenerateSignedCert(caKey, caCert, caSbj, key, csr, cert, store, "123456", subject);
 
         caKey.delete();
         caCert.delete();

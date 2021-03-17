@@ -553,7 +553,7 @@ public class OpenSslCertManager implements CertManager {
 
         public OpensslArgs optArg(String opt, Subject subject) {
             opt(opt);
-            pb.command().add(subject.toString());
+            pb.command().add(subject.opensslDn());
             return this;
         }
 

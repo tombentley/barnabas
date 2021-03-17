@@ -4,20 +4,27 @@
  */
 package io.strimzi.certs;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 /**
- * Represents the subject for a certificate
+ * Represents the subject for a certificate.
+ * Can be serialized as JSON.
  */
 public class Subject {
 
     public static class Builder {
         private String organizationName;
         private String commonName;
-        private Map<String, Set<String>> subjectAltNames;
+        private Set<String> dnsNames = null;
+        private Set<String> ipAddresses = null;
+
         public Builder withCommonName(String commonName) {
             this.commonName = commonName;
             return this;
@@ -26,73 +33,80 @@ public class Subject {
             this.organizationName = organizationName;
             return this;
         }
-        public Builder withSubjectAlternativeName(String type, String san) {
-            if (subjectAltNames == null) {
-                subjectAltNames = new HashMap<>();
+        public Builder addDnsName(String dnsName) {
+            if (dnsNames == null) {
+                 dnsNames = new HashSet<>();
             }
-            subjectAltNames.computeIfAbsent(type, k -> new HashSet<>()).add(san);
+            dnsNames.add(dnsName);
             return this;
         }
-        public Builder addDnsName(String dnsName) {
-            return withSubjectAlternativeName("DNS", dnsName);
-        }
-        public Builder withIpName(String ip) {
-            return withSubjectAlternativeName("IP", ip);
+        public Builder addIpAddress(String ip) {
+            if (ipAddresses == null) {
+                ipAddresses = new HashSet<>();
+            }
+            ipAddresses.add(ip);
+            return this;
         }
         public Subject build() {
-            Map<String, String> san = new HashMap<>();
-            if (subjectAltNames != null) {
-                for (Map.Entry<String, Set<String>> entry : subjectAltNames.entrySet()) {
-                    int i = 0;
-                    for (String n : entry.getValue()) {
-                        san.put(entry.getKey() + "." + (i++), n);
-                    }
-                }
-            }
-            return new Subject(commonName, organizationName, san);
+            return new Subject(commonName, organizationName, dnsNames, ipAddresses);
         }
 
     }
 
-    private String organizationName;
-    private String commonName;
-    private Map<String, String> subjectAltNames;
+    private final String organizationName;
+    private final String commonName;
+    private final Set<String> dnsNames;
+    private final Set<String> ipAddresses;
 
-    public Subject() {
-    }
-
-    private Subject(String commonName, String organizationName, Map<String, String> subjectAltNames) {
+    @JsonCreator
+    private Subject(
+            @JsonProperty String commonName,
+            @JsonProperty String organizationName,
+            @JsonProperty Set<String> dnsNames,
+            @JsonProperty Set<String> ipAddresses) {
         this.organizationName = organizationName;
         this.commonName = commonName;
-        this.subjectAltNames = subjectAltNames;
+        this.dnsNames = Collections.unmodifiableSet(dnsNames);
+        this.ipAddresses = Collections.unmodifiableSet(ipAddresses);
     }
 
+    @JsonProperty
     public String organizationName() {
         return organizationName;
     }
 
-    public void setOrganizationName(String organizationName) {
-        this.organizationName = organizationName;
-    }
-
+    @JsonProperty
     public String commonName() {
         return commonName;
     }
 
-    public void setCommonName(String commonName) {
-        this.commonName = commonName;
+    @JsonProperty
+    public Set<String> dnsNames() {
+        return dnsNames;
+    }
+
+    @JsonProperty
+    public Set<String> ipAddresses() {
+        return ipAddresses;
     }
 
     public Map<String, String> subjectAltNames() {
-        return subjectAltNames;
+        Map<String, String> san = new HashMap<>();
+        int i = 0;
+        for (String name : dnsNames()) {
+            san.put("DNS." + (i++), name);
+        }
+        i = 0;
+        for (String ip : ipAddresses()) {
+            san.put("IP." + (i++), ip);
+        }
+        return san;
     }
 
-    public void setSubjectAltNames(Map<String, String> subjectAltNames) {
-        this.subjectAltNames = subjectAltNames;
-    }
-
-    @Override
-    public String toString() {
+    /**
+     * @return The DN in the format understood by {@code openssl}.
+     */
+    public String opensslDn() {
         StringBuilder bldr = new StringBuilder();
 
         if (organizationName != null)   {

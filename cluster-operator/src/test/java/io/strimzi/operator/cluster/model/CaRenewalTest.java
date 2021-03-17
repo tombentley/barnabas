@@ -56,7 +56,7 @@ public class CaRenewalTest {
         };
 
         int replicas = 3;
-        Function<Integer, Subject> subjectFn = i -> new Subject();
+        Function<Integer, Subject> subjectFn = i -> new Subject.Builder().build();
         Function<Integer, String> podNameFn = i -> "pod" + i;
         boolean isMaintenanceTimeWindowsSatisfied = true;
 
@@ -131,7 +131,7 @@ public class CaRenewalTest {
                 .build();
 
         int replicas = 3;
-        Function<Integer, Subject> subjectFn = i -> new Subject();
+        Function<Integer, Subject> subjectFn = i -> new Subject.Builder().build();
         Function<Integer, String> podNameFn = i -> "pod" + i;
         boolean isMaintenanceTimeWindowsSatisfied = true;
 
@@ -216,7 +216,7 @@ public class CaRenewalTest {
                 .build();
 
         int replicas = 3;
-        Function<Integer, Subject> subjectFn = i -> new Subject();
+        Function<Integer, Subject> subjectFn = i -> new Subject.Builder().build();
         Function<Integer, String> podNameFn = i -> "pod" + i;
         boolean isMaintenanceTimeWindowsSatisfied = true;
 
@@ -301,7 +301,7 @@ public class CaRenewalTest {
                 .build();
 
         int replicas = 3;
-        Function<Integer, Subject> subjectFn = i -> new Subject();
+        Function<Integer, Subject> subjectFn = i -> new Subject.Builder().build();
         Function<Integer, String> podNameFn = i -> "pod" + i;
         boolean isMaintenanceTimeWindowsSatisfied = false;
 

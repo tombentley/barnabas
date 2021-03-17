@@ -12,17 +12,17 @@ import static org.hamcrest.MatcherAssert.assertThat;
 public class SubjectTests {
     @Test
     public void testSubjectToString()   {
-        Subject sbj = new Subject();
-        sbj.setCommonName("joe");
-        assertThat(sbj.toString(), is("/CN=joe"));
+        Subject.Builder sbj = new Subject.Builder()
+            .withCommonName("joe");
+        assertThat(sbj.build().opensslDn(), is("/CN=joe"));
 
-        sbj = new Subject();
-        sbj.setOrganizationName("MyOrg");
-        assertThat(sbj.toString(), is("/O=MyOrg"));
+        sbj = new Subject.Builder()
+            .withOrganizationName("MyOrg");
+        assertThat(sbj.build().opensslDn(), is("/O=MyOrg"));
 
-        sbj = new Subject();
-        sbj.setCommonName("joe");
-        sbj.setOrganizationName("MyOrg");
-        assertThat(sbj.toString(), is("/O=MyOrg/CN=joe"));
+        sbj = new Subject.Builder()
+            .withCommonName("joe")
+            .withOrganizationName("MyOrg");
+        assertThat(sbj.build().opensslDn(), is("/O=MyOrg/CN=joe"));
     }
 }
