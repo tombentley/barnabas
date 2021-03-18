@@ -5,12 +5,9 @@
 package io.strimzi.operator.cluster.model.pki;
 
 import javax.security.auth.x500.X500Principal;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidAlgorithmParameterException;
-import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
-import java.security.UnrecoverableEntryException;
 import java.security.cert.CertPath;
 import java.security.cert.CertPathValidator;
 import java.security.cert.CertPathValidatorException;
@@ -29,7 +26,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
 import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -56,13 +52,10 @@ import org.apache.logging.log4j.Logger;
 
 import static io.strimzi.operator.cluster.model.pki.PkiUtils.fingerprint;
 import static io.strimzi.operator.cluster.model.pki.PkiUtils.x509Certificate;
-import static java.util.Arrays.asList;
 
 public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status> {
 
     private static final Logger LOGGER = LogManager.getLogger(Pki.class);
-    public static final String PENDING = "pending";
-
 
     private final CertManager certManager;
     protected final KubernetesClient client;
@@ -73,6 +66,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     private final CertificateFactory certificateFactory;
     private final CertPathValidator validator;
     private final Clock clock;
+    private PendingCertificateManager pendingCertificateManager;
 
     public Pki(Clock clock, CertManager certManager, KubernetesClient client, String namespace, String cluster,
                String caSecretName, String trustSecretName) {
@@ -93,14 +87,15 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
             throw new RuntimeException(e); // standard part of Java: should never happen
         }
         this.clock = clock;
+        this.pendingCertificateManager = new DefaultPendingCertificateManager(client, namespace, cluster, caSecretName);
     }
 
     Resource<Secret> trustSecretRef() {
-        return client.secrets().inNamespace(namespace).withName(trustSecretName);
+        return secretRef(trustSecretName);
     }
 
     Resource<Secret> caSecretRef() {
-        return client.secrets().inNamespace(namespace).withName(caSecretName);
+        return secretRef(caSecretName);
     }
 
 
@@ -119,8 +114,21 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
      */
     protected abstract Cr updateStatus(Cr cr, List<CaCertStatus> statusList);
 
+    /**
+     * <p>The first half of the reconciliation, which:</p>
+     * <ul>
+     *   <li>Discovers required certificate(s)</li>
+     *   <li>Issues those certificates, creating some pending certificates, which are stored for later use by {@link #reconcilePending(CustomResource, TrustManager)}</li>
+     *   <li>Figures out if any of the pending certificates would need new trust relationships to be established
+     *   prior to the pending certificates being used.</li>
+     * </ul>
+     * @param cr The CR.
+     * @param trustManager The trust manager.
+     * @return true if there are new trust anchors, requiring action before
+     * {@link #reconcilePending(CustomResource, TrustManager)} can be called.
+     */
     // TODO load the trust manager from the trust secret state
-    public boolean reconcile(Cr cr, TrustManager trustManager) {
+    public boolean reconcileTrust(Cr cr, TrustManager trustManager) {
         // Look at CR to decide which certs we need
         // TODO we should recognise the .tmp in the secret and reuse them, rather than generating new certs
         List<RequiredCertificate> requiredCertificates = requiredCertificates(cr).collect(Collectors.toList());
@@ -139,43 +147,40 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
 
         // Issue those certs
         boolean restartRequired = false;
-        Map<RequiredCertificate, IssuedCertificate> issued = new HashMap<>(vr.certsToIssue().size());
+        List<PendingCertificate> pending = new ArrayList<>(vr.certsToIssue().size());
         List<Exception> exceptions = new ArrayList<>(0);
         for (RequiredCertificate requiredCertificate : vr.certsToIssue()) {
-            Optional<IssuedCertificate> issuedCertificate;
+            Optional<PendingCertificate> pendingCertificateOpt;
             try {
-                issuedCertificate = issueClientCertificate(cr, requiredCertificate, ca(cr).getValidityDays());
+                pendingCertificateOpt = issueClientCertificate(cr, requiredCertificate, ca(cr).getValidityDays());
             } catch (CertificateException | CertificateIssuanceException e) {
                 exceptions.add(e);
                 continue;
             }
-            if (issuedCertificate.isPresent()) {
-                CaCertState state = maybeEstablishTrust(cr, trustManager, requiredCertificate, issuedCertificate.get());
+            if (pendingCertificateOpt.isPresent()) {
+                PendingCertificate pendingCertificate = pendingCertificateOpt.get();
+                CaCertState state = maybeEstablishTrust(cr, trustManager, requiredCertificate, pendingCertificate.issuedCertificate());
                 switch (state) {
                     case UNKNOWN:
                     case UNTRUSTED:
-                        issued.put(requiredCertificate, issuedCertificate.get());
+                        pending.add(pendingCertificate);
                         restartRequired = true;
                         break;
                     case TRUSTED:
-                        issued.put(requiredCertificate, issuedCertificate.get());
+                        pending.add(pendingCertificate);
                         break;
                     case PHASE_OUT:
                     case ZOMBIE:
                     default:
                         throw new RuntimeException();
                 }
+            } else {
+                // TODO what if the cert isn't issued yet?
             }
         }
-        var groupedBySecret = issued.entrySet().stream().collect(
-                Collectors.groupingBy(x -> x.getKey().getSecretName()));
-        for (var x : groupedBySecret.entrySet()) {
-            storePending(x.getKey(), x.getValue());
-        }
 
-        Secret instance = caSecretRef().get();
-        caSecretRef().createOrReplace((instance == null ? new SecretBuilder().withNewMetadata().withName(caSecretName).withName(namespace).endMetadata() : new SecretBuilder(instance)).addToData(PENDING,
-                vr.certsToIssue().stream().map(RequiredCertificate::getSecretName).distinct().collect(Collectors.joining(","))).build());
+        pendingCertificateManager.storePending(pending);
+
         // TODO Maybe do some restarts to establish trust (what do I do with the issued certs until then? Add them to what secret?
         // wherever it is they'd need to be findable again from the RequiredCertificates stuff
 
@@ -192,23 +197,23 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         ValidateResult vr = new ValidateResult();
         for (RequiredCertificate requiredCertificate : requiredCertificates) {
             // TODO When scaling down, who deletes unneeded certs?
-            Secret secret = client.secrets().inNamespace(namespace).withName(requiredCertificate.getSecretName()).get();
+            Secret secret = secretRef(requiredCertificate.secretName()).get();
             if (secret == null || secret.getData().isEmpty()) {
                 LOGGER.debug("Secret missing for required certificate: {}", requiredCertificate);
                 vr.addCertToIssue(requiredCertificate);
             } else {
                 // Check those certs are valid to decide which certs we need to issue/reissue
-                String certChain = secret.getData().get(requiredCertificate.getCertChainEntryName());
-                String pendingCertChain = secret.getData().get(requiredCertificate.getPendingCertChainEntryName());
+                String certChain = secret.getData().get(requiredCertificate.certChainEntryName());
+                String pendingCertChain = secret.getData().get(requiredCertificate.pendingCertChainEntryName());
                 if (certChain == null && pendingCertChain == null) {
                     LOGGER.debug("Secret entry missing for required certificate chain: {}", requiredCertificate);
                     vr.addCertToIssue(requiredCertificate);
                 } else if (pendingCertChain != null) {
                     // Validate that the pending certs are still good since they were issued
-                    vr.add(validate(cr, now, pkixParameters, requiredCertificate, pendingCertChain, requiredCertificate.getPendingCertChainEntryName()));
+                    vr.add(validate(cr, now, pkixParameters, requiredCertificate, pendingCertChain, requiredCertificate.pendingCertChainEntryName()));
                 } else {
                     // Validate that the existing certs are still good (the usual case)
-                    vr.add(validate(cr, now, pkixParameters, requiredCertificate, certChain, requiredCertificate.getCertChainEntryName()));
+                    vr.add(validate(cr, now, pkixParameters, requiredCertificate, certChain, requiredCertificate.certChainEntryName()));
                 }
             }
         }
@@ -444,25 +449,27 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
      * @throws CertificateIssuanceException the requested certificate could not be issued
      * @throws CertificateException problem while validating the issued certificate
      */
-    public Optional<IssuedCertificate> issueClientCertificate(Cr cr,
+    public Optional<PendingCertificate> issueClientCertificate(Cr cr,
                                           RequiredCertificate requiredCertificate, int requestedValidity)
             throws CertificateException, CertificateIssuanceException {
         CertificateIssuer issuer = getIssuer(cr);
 
         // Issue a certificate
-        Subject subject = requiredCertificate.getSubject();
+        Subject subject = requiredCertificate.subject();
         // TODO does ${subject}.requested already exist? If not issue it?
         byte[] token = issuer.requestCertificate(subject, requestedValidity);
         // TODO and persist the token in the broker's secret as ${subject}.requested
         // If ${subject}.requested does already exist then poll?
         Optional<IssuedCertificate> issuedCertificate = issuer.pollForRequestedCertificate(token);
-        if (issuedCertificate.isPresent()) {
-            validateIssuedCertificate(subject, issuedCertificate.get());
-        }
-        // Return from reconcile1
-        // Reconcile1.5 then looks for
-        //IssuedCertificate issuedCert = issuer.issue(subject, requestedValidity);
-        return issuedCertificate;
+        return issuedCertificate.map(issued -> {
+            try {
+                validateIssuedCertificate(subject, issuedCertificate.get());
+            } catch (CertificateParsingException e) {
+                throw new RuntimeException(e);
+            }
+            return new PendingCertificate(requiredCertificate, issued);
+        });
+
 
 
         // TODO We make the certificate TRUSTED in the trust manager and update the CR status
@@ -499,7 +506,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                     // TODO
                 } else {
                     // TODO
-                    secret.getData().put(requiredCertificate.getSubject() + "something", "some state");
+                    secret.getData().put(requiredCertificate.subject() + "something", "some state");
                     trustSecretRef().createOrReplace(secret);
                 }
 
@@ -522,37 +529,15 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         return state;
     }
 
-    /**
-     * Stores an {@link IssuedCertificate} in a ".pending" secret entry encoded as pkcs#12 until the trust
-     * relationship with the root CA certificate has been established.
-     * The data stored here is picked up during {@link #reconcile2(CustomResource, TrustManager)}.
-     * @param secretName The name of the secret to update
-     * @param entries The issued certificates to update the secret with.
-     */
-    private void storePending(String secretName, List<Map.Entry<RequiredCertificate, IssuedCertificate>> entries) {
-        Resource<Secret> secretResource = client.secrets().inNamespace(namespace).withName(secretName);
-        Secret instance = secretResource.get();
-        SecretBuilder secretBuilder = instance == null ? new SecretBuilder().withNewMetadata().withNamespace(namespace).withName(secretName).endMetadata() : new SecretBuilder(instance);
-        entries.forEach(entry -> {
-            IssuedCertificate issuedCertificate = entry.getValue();
-            byte[] p12bytes;
-            try {
-                p12bytes = issuedCertificate.toPkcs12(password());
-            } catch (RuntimeException e) {
-                throw e;
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-            secretBuilder.addToData(entry.getKey().getPendingCertChainEntryName(),
-                    Base64.getEncoder().encodeToString(p12bytes));
-            }
-        );
-        secretResource.createOrReplace(secretBuilder.build());
+
+    private void storePending(String secretName, List<PendingCertificate> pendingCertificates) {
+
     }
 
-    private char[] password() {
-        return ("hello " + cluster).toCharArray();
+    private Resource<Secret> secretRef(String secretName) {
+        return client.secrets().inNamespace(namespace).withName(secretName);
     }
+
 
     /** Instantiates a CertificateIssuer according to the spec in the given CR */
     CertificateIssuer getIssuer(Cr cr) throws CertificateException {
@@ -651,19 +636,19 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     }
 
     /**
-     * The 2nd half of the reconciliation.
+     * The 2nd half of the reconciliation, runs after {@link #reconcileTrust(CustomResource, TrustManager)}.
      *
      * Preconditions:
      *
-     * 1. That the 1st half has already run.
-     * 2. That any pod restarts have been done.
+     * 1. That {@link #reconcileTrust(CustomResource, TrustManager)} has already run.
+     * 2. That any pod restarts have been done and therefore that all the pending certificates will now be trusted.
      * @param cr The CR
      * @param trustManager The trust manager
-     * @throws CertificateException Cert problem
+     * @throws PendingCertificateManager.RestoreException The state could not be restored
      */
-    public void reconcile2(Cr cr, TrustManager trustManager) throws CertificateException, UnrecoverableEntryException, NoSuchAlgorithmException, KeyStoreException, IOException {
-        // TODO somehow we need to pass the requiredcerts to this method.
-        // Either we persist that state somewhere or, because we assume reconcile1 always runs first
+    public void reconcilePending(Cr cr, TrustManager trustManager) {
+        // TODO somehow we need to pass the pendingcerts to this method.
+        // Either we persist that state somewhere or, because we assume reconcileTrust always runs first
         // we just pass it out reconcile1 and into reconcile2
 
         // If we got this far we can transition the trust manager to TRUSTED
@@ -673,31 +658,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                 .forEach(p -> trustManager.transitionToTrusted(p.fingerprint()));
         storeTrustState(trustManager, cr);
 
-        String pendingList = caSecretRef().get().getData().get(PENDING);
-        if (!pendingList.isEmpty()) {
-            List<String> secrets = asList(pendingList.split(","));
-            // Add the issued certs to the secrets by copying the .pending to .crt, .key etc
-            for (String secretName : secrets) {
-                Resource<Secret> secretResource = client.secrets().inNamespace(namespace).withName(secretName);
-                // TODO here we just blindly copy. Perhaps the pending file should explictly the entries?
-                Secret secret = secretResource.get();
-                Map<String, String> data = secret.getData();
-                Map<String, String> data2 = new HashMap<>(data.size());
-                for (Map.Entry<String, String> entry : data.entrySet()) {
-                    String key = entry.getKey();
-                    if (key.endsWith(RequiredCertificate.PENDING_SUFFIX)) {
-                        byte[] p12bytes = Base64.getDecoder().decode(entry.getValue());
-                        IssuedCertificate issuedCertificate = IssuedCertificate.fromPkcs12(p12bytes, password());
-                        String crtEntryName = key.substring(0, key.length() - RequiredCertificate.PENDING_SUFFIX.length());
-                        data2.put(crtEntryName, certChainEntry(issuedCertificate));
-                        data2.put(crtEntryName.replaceAll("\\.crt$", ".key"), keyEntry(issuedCertificate));
-                    } else if (!data.containsKey(key + RequiredCertificate.PENDING_SUFFIX)) {
-                        data2.put(key, entry.getValue());
-                    }
-                }
-                secretResource.createOrReplace(new SecretBuilder(secret).withData(data2).build());
-            }
-        }
+        pendingCertificateManager.restore();
 
         // Let the normal reconciliation restart brokers with new certs
 
@@ -705,11 +666,4 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         // TODO what about the transition to ZOMBIE?
     }
 
-    static String keyEntry(IssuedCertificate issuedCertificate) {
-        return Base64.getEncoder().encodeToString(issuedCertificate.privateKey());
-    }
-
-    static String certChainEntry(IssuedCertificate issuedCertificate) throws CertificateEncodingException {
-        return Base64.getEncoder().encodeToString(PkiUtils.asPemCertChain(issuedCertificate.completeChain()).getBytes(StandardCharsets.ISO_8859_1));
-    }
 }

@@ -143,7 +143,7 @@ class ClusterPkiTest {
         CaState caState;
         // TODO EO, KafkaExporter, CO secret
 
-        pki.reconcile2(cr, trustManager);
+        pki.reconcilePending(cr, trustManager);
 
         // assert the Kafka status
         clusterCa = kafkaRef.get().getStatus().getClusterCa();
@@ -177,7 +177,7 @@ class ClusterPkiTest {
     }
 
     private void doPhase1(Kafka cr, TrustManager trustManager, Pki pki, CaCertState expectedState) throws CertificateException {
-        assertEquals(expectedState == CaCertState.UNTRUSTED, pki.reconcile(cr, trustManager),
+        assertEquals(expectedState == CaCertState.UNTRUSTED, pki.reconcileTrust(cr, trustManager),
                 "Expected reconcile1 to require a rolling deployment of new CA certs");
 
         List<CaCertStatus> clusterCa = kafkaRef.get().getStatus().getClusterCa();
@@ -300,9 +300,9 @@ class ClusterPkiTest {
         // Do a subsequent reconcile with with a clock that's now + 2 days, i.e. into the renewal period
 
         trustManager = pki.loadTrust(kafkaRef.get());
-        assertFalse(pki.reconcile(cr, trustManager),
+        assertFalse(pki.reconcileTrust(cr, trustManager),
                 "Expect that no restart would be required, because the root CA certs haven't changed");
-        pki.reconcile2(cr, trustManager);
+        pki.reconcilePending(cr, trustManager);
         // TODO need to assert that new certs were issued on 2nd reconcile
 
         // TODO similar test, but when the cert is already invalid.
@@ -344,7 +344,7 @@ class ClusterPkiTest {
     String issueCert(StrimziCertificateIssuer issuer, Subject subject, int requestedValidity) throws java.security.cert.CertificateEncodingException {
         byte[] bytes = issuer.requestCertificate(subject, requestedValidity);
         var issuedCertificate = issuer.pollForRequestedCertificate(bytes).get();
-        return Pki.certChainEntry(issuedCertificate);
+        return DefaultPendingCertificateManager.certChainEntry(issuedCertificate);
     }
 
 

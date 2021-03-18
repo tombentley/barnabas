@@ -4,6 +4,8 @@
  */
 package io.strimzi.operator.cluster.model.pki;
 
+import java.util.Objects;
+
 import io.strimzi.certs.Subject;
 
 /**
@@ -17,6 +19,9 @@ public class RequiredCertificate {
     private final String entryName;
 
     public RequiredCertificate(Subject subject, String secretName, String entryName) {
+        Objects.requireNonNull(subject);
+        Objects.requireNonNull(secretName);
+        Objects.requireNonNull(entryName);
         this.subject = subject;
         this.secretName = secretName;
         this.entryName = entryName;
@@ -25,26 +30,26 @@ public class RequiredCertificate {
     /**
      * @return The subject of the certificate
      */
-    public Subject getSubject() {
+    public Subject subject() {
         return subject;
     }
 
     /**
-     * @return The name of the Secret where the certificate should be stored
+     * @return The name of the Secret where the certificate should eventually be stored
      */
-    public String getSecretName() {
+    public String secretName() {
         return secretName;
     }
 
     /**
-     * @return The name of the entry in the Secret which contains the certificate chain.
+     * @return The name of the entry in the {@link #secretName()} Secret which contains the certificate chain.
      */
-    public String getCertChainEntryName() {
+    public String certChainEntryName() {
         return entryName;
     }
 
-    public String getPendingCertChainEntryName() {
-        return getCertChainEntryName() + PENDING_SUFFIX;
+    public String pendingCertChainEntryName() {
+        return certChainEntryName() + PENDING_SUFFIX;
     }
 
     @Override
