@@ -644,7 +644,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
      * 2. That any pod restarts have been done and therefore that all the pending certificates will now be trusted.
      * @param cr The CR
      * @param trustManager The trust manager
-     * @throws PendingCertificateManager.RestoreException The state could not be restored
+     * @throws RestoreException The state could not be restored
      */
     public void reconcilePending(Cr cr, TrustManager trustManager) {
         // TODO somehow we need to pass the pendingcerts to this method.

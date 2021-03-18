@@ -13,7 +13,7 @@ import io.strimzi.certs.Subject;
  * This abstractions supports asynchronous issuance because in general we don't know whether certificate will
  * be issued quickly or not.
  */
-public interface CertificateIssuer {
+interface CertificateIssuer {
 
     /**
      * Requests a certificate for the given subject with the given {@code validityPeriod}.
