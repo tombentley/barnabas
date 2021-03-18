@@ -4,25 +4,67 @@
  */
 package io.strimzi.certs;
 
+import java.util.Map;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class SubjectTests {
     @Test
-    public void testSubjectToString()   {
-        Subject.Builder sbj = new Subject.Builder()
+    public void testSubjectOpensslDn()   {
+        Subject.Builder subject = new Subject.Builder()
             .withCommonName("joe");
-        assertThat(sbj.build().opensslDn(), is("/CN=joe"));
+        assertThat(subject.build().opensslDn(), is("/CN=joe"));
 
-        sbj = new Subject.Builder()
+        subject = new Subject.Builder()
             .withOrganizationName("MyOrg");
-        assertThat(sbj.build().opensslDn(), is("/O=MyOrg"));
+        assertThat(subject.build().opensslDn(), is("/O=MyOrg"));
 
-        sbj = new Subject.Builder()
+        subject = new Subject.Builder()
             .withCommonName("joe")
             .withOrganizationName("MyOrg");
-        assertThat(sbj.build().opensslDn(), is("/O=MyOrg/CN=joe"));
+        assertThat(subject.build().opensslDn(), is("/O=MyOrg/CN=joe"));
+    }
+
+    @Test
+    public void testSubjectAlternativeNames()   {
+        Subject subject = new Subject.Builder()
+                .withCommonName("joe")
+                .withOrganizationName("MyOrg")
+                .addDnsName("example.com")
+                .addDnsName("example.org")
+                .addIpAddress("123.123.123.123")
+                .addIpAddress("127.0.0.1")
+                .build();
+        assertEquals(Map.of(
+                "IP.0", "123.123.123.123",
+                "IP.1", "127.0.0.1",
+                "DNS.0", "example.org",
+                "DNS.1", "example.com"),
+                subject.subjectAltNames());
+    }
+
+    @Test
+    public void testSerialization() throws JsonProcessingException {
+        Subject subject = new Subject.Builder()
+                .withCommonName("joe")
+                .withOrganizationName("MyOrg")
+                .addDnsName("example.com")
+                .addDnsName("example.org")
+                .addIpAddress("123.123.123.123")
+                .addIpAddress("127.0.0.1")
+                .build();
+        ObjectMapper mapper = new ObjectMapper();
+        String json = mapper.writeValueAsString(subject);
+        assertEquals(subject, mapper.readValue(json, Subject.class));
+        assertEquals("{\"commonName\":\"joe\"," +
+                "\"organizationName\":\"MyOrg\"," +
+                "\"dnsNames\":[\"example.org\",\"example.com\"]," +
+                "\"ipAddresses\":[\"123.123.123.123\",\"127.0.0.1\"]}", json);
     }
 }

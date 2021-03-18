@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
@@ -60,14 +61,14 @@ public class Subject {
 
     @JsonCreator
     private Subject(
-            @JsonProperty String commonName,
-            @JsonProperty String organizationName,
-            @JsonProperty Set<String> dnsNames,
-            @JsonProperty Set<String> ipAddresses) {
+            @JsonProperty("commonName") String commonName,
+            @JsonProperty("organizationName") String organizationName,
+            @JsonProperty("dnsNames") Set<String> dnsNames,
+            @JsonProperty("ipAddresses") Set<String> ipAddresses) {
         this.organizationName = organizationName;
         this.commonName = commonName;
-        this.dnsNames = Collections.unmodifiableSet(dnsNames);
-        this.ipAddresses = Collections.unmodifiableSet(ipAddresses);
+        this.dnsNames = dnsNames == null ? Set.of() : Collections.unmodifiableSet(dnsNames);
+        this.ipAddresses = ipAddresses == null ? Set.of() : Collections.unmodifiableSet(ipAddresses);
     }
 
     @JsonProperty
@@ -88,6 +89,32 @@ public class Subject {
     @JsonProperty
     public Set<String> ipAddresses() {
         return ipAddresses;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        Subject subject = (Subject) o;
+        return Objects.equals(organizationName, subject.organizationName) &&
+                Objects.equals(commonName, subject.commonName) &&
+                Objects.equals(dnsNames, subject.dnsNames) &&
+                Objects.equals(ipAddresses, subject.ipAddresses);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(organizationName, commonName, dnsNames, ipAddresses);
+    }
+
+    @Override
+    public String toString() {
+        return "Subject(" +
+                "organizationName='" + organizationName + '\'' +
+                ", commonName='" + commonName + '\'' +
+                ", dnsNames=" + dnsNames +
+                ", ipAddresses=" + ipAddresses +
+                ')';
     }
 
     public Map<String, String> subjectAltNames() {

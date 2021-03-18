@@ -548,10 +548,12 @@ public class Util {
     }
 
     public static void delete(Path key) {
-        try {
-            Files.deleteIfExists(key);
-        } catch (IOException e) {
-            e.printStackTrace();
+        if (key != null) {
+            try {
+                Files.deleteIfExists(key);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     }
 }
