@@ -10,6 +10,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableEntryException;
 import java.security.cert.CertificateException;
 import java.security.spec.InvalidKeySpecException;
+import java.time.Clock;
 
 import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.certs.Subject;
@@ -23,12 +24,13 @@ class IssuedCertificateTest {
 
     @Test
     void pkcs12RoundTrip() throws InvalidKeySpecException, CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, UnrecoverableEntryException {
-        Subject caSubject = new Subject();
-        caSubject.setCommonName("test ca");
-        StrimziCertificateIssuer rootIssuer = StrimziCertificateIssuer.createRootIssuer(new OpenSslCertManager(), caSubject, 10);
-        Subject leafSubject = new Subject();
-        leafSubject.setCommonName("leaf ca");
-        IssuedCertificate stored = rootIssuer.issue(leafSubject, 10);
+        Subject caSubject = new Subject.Builder()
+            .withCommonName("test ca").build();
+        StrimziCertificateIssuer rootIssuer = StrimziCertificateIssuer.createRootIssuer(Clock.systemUTC(), new OpenSslCertManager(), caSubject, 10);
+        Subject leafSubject = new Subject.Builder()
+            .withCommonName("leaf ca").build();
+        byte[] token = rootIssuer.requestCertificate(leafSubject, 10);
+        IssuedCertificate stored = rootIssuer.pollForRequestedCertificate(token).get();
         byte[] bytes = stored.toPkcs12("foo".toCharArray());
         IssuedCertificate loaded = IssuedCertificate.fromPkcs12(bytes, "foo".toCharArray());
         // TODO eugh

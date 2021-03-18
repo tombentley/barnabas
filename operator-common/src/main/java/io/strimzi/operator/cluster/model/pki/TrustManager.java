@@ -4,17 +4,11 @@
  */
 package io.strimzi.operator.cluster.model.pki;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.security.InvalidAlgorithmParameterException;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
-import java.security.cert.CertificateFactory;
-import java.security.cert.PKIXParameters;
 import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
@@ -64,7 +58,7 @@ public class TrustManager {
         private final X509Certificate x509;
 
         public CaState(byte[] cert, CaCertState state) throws CertificateException {
-            this.x509 = x509Certificate(cert);
+            this.x509 = PkiUtils.x509Certificate(cert);
             this.state = state;
         }
 
@@ -74,15 +68,11 @@ public class TrustManager {
         }
 
         public Fingerprint fingerprint() {
-            return TrustManager.fingerprint(x509());
+            return PkiUtils.fingerprint(x509());
         }
 
-        private X509Certificate x509() {
+        X509Certificate x509() {
             return x509;
-        }
-
-        String asPem() throws CertificateEncodingException {
-            return Pem.asPem(x509());
         }
 
         public CaCertState state() {
@@ -111,43 +101,12 @@ public class TrustManager {
         }
     }
 
-    public static Fingerprint fingerprint(X509Certificate x509Certificate) {
-        MessageDigest sha1;
-        try {
-            sha1 = MessageDigest.getInstance("SHA1");
-            return new Fingerprint(sha1.digest(x509Certificate.getEncoded()));
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e); // SHA1 should always be supported
-        } catch (CertificateEncodingException e) {
-            throw new RuntimeException(e); // Should never happen
-        }
-    }
-
-    public static X509Certificate x509Certificate(byte[] cert) throws CertificateException {
-        CertificateFactory certificateFactory;
-        try {
-            certificateFactory = CertificateFactory.getInstance("X509");
-        } catch (CertificateException e) {
-            throw new RuntimeException(e); // X509 should always be supported
-        }
-        X509Certificate x509 = (X509Certificate) certificateFactory.generateCertificate(new ByteArrayInputStream(cert));
-        return x509;
-    }
-
     private final Map<Fingerprint, CaCertState> certs;
     private final KeyStore trustStore;
-    private PKIXParameters getPkixParameters() throws InvalidAlgorithmParameterException {
-        try {
-            return new PKIXParameters(trustStore);
-        } catch (KeyStoreException e) {
-            throw new RuntimeException(e);
-        }
-    }
 
     public List<CaState> entries() {
-        return certs.entrySet().stream().map(e -> {
-            return getWithState(e.getValue(), e.getKey());
-        }).collect(Collectors.toList());
+        return certs.entrySet().stream().map(e ->
+                getWithState(e.getValue(), e.getKey())).collect(Collectors.toList());
     }
 
     public TrustManager() {
@@ -165,15 +124,15 @@ public class TrustManager {
     // If the CR had a status the ca.crt would be TRUSTED and all the others would be PHASE_OUT
     // We'd then update the CR status, then update the Secret contents
     // When the CR has a status we load the certs from the Secret, compute the fingerprint and look up the status
-    public Fingerprint load(String cert, CaCertState state) throws CertificateException {
-        return doLoad(new CaState(cert.getBytes(), state));
+    public Fingerprint put(String cert, CaCertState state) throws CertificateException {
+        return doPut(new CaState(cert.getBytes(), state));
     }
 
-    public Fingerprint load(X509Certificate cert, CaCertState state) throws CertificateException {
-        return doLoad(new CaState(cert, state));
+    public Fingerprint put(X509Certificate cert, CaCertState state) {
+        return doPut(new CaState(cert, state));
     }
 
-    private Fingerprint doLoad(CaState caState) {
+    private Fingerprint doPut(CaState caState) {
         Fingerprint fingerprint = caState.fingerprint();
         try {
             this.trustStore.setCertificateEntry(fingerprint.toString(), caState.x509());

@@ -22,6 +22,9 @@ import java.security.cert.PKIXCertPathValidatorResult;
 import java.security.cert.PKIXParameters;
 import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
@@ -31,6 +34,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,14 +49,13 @@ import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.model.CertificateAuthority;
 import io.strimzi.api.kafka.model.status.CaCertState;
 import io.strimzi.api.kafka.model.status.CaCertStatus;
-import io.strimzi.certs.CertAndKey;
 import io.strimzi.certs.CertManager;
 import io.strimzi.certs.Subject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import static io.strimzi.operator.cluster.model.pki.TrustManager.fingerprint;
-import static io.strimzi.operator.cluster.model.pki.TrustManager.x509Certificate;
+import static io.strimzi.operator.cluster.model.pki.PkiUtils.fingerprint;
+import static io.strimzi.operator.cluster.model.pki.PkiUtils.x509Certificate;
 import static java.util.Arrays.asList;
 
 public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status> {
@@ -69,8 +72,10 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     private final String trustSecretName;
     private final CertificateFactory certificateFactory;
     private final CertPathValidator validator;
+    private final Clock clock;
 
-    public Pki(CertManager certManager, KubernetesClient client, String namespace, String cluster, String caSecretName, String trustSecretName) {
+    public Pki(Clock clock, CertManager certManager, KubernetesClient client, String namespace, String cluster,
+               String caSecretName, String trustSecretName) {
         this.certManager = certManager;
         this.client = client;
         this.namespace = namespace;
@@ -87,6 +92,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException(e); // standard part of Java: should never happen
         }
+        this.clock = clock;
     }
 
     Resource<Secret> trustSecretRef() {
@@ -114,7 +120,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     protected abstract Cr updateStatus(Cr cr, List<CaCertStatus> statusList);
 
     // TODO load the trust manager from the trust secret state
-    public boolean reconcile(Cr cr, TrustManager trustManager) throws CertificateException {
+    public boolean reconcile(Cr cr, TrustManager trustManager) {
         // Look at CR to decide which certs we need
         // TODO we should recognise the .tmp in the secret and reuse them, rather than generating new certs
         List<RequiredCertificate> requiredCertificates = requiredCertificates(cr).collect(Collectors.toList());
@@ -122,42 +128,43 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         // Look at secrets to decide which certs we have
         Set<TrustAnchor> possibleTrustAnchors = trustManager.trustStore(EnumSet.of(CaCertState.TRUSTED, CaCertState.PHASE_OUT));
         ValidateResult vr = filter(cr, requiredCertificates, possibleTrustAnchors);
-        LOGGER.debug("required trust anchors: {}", vr.requiredTrustAnchors);
-        Set<TrustAnchor> unneededTrustAnchors = new HashSet<>(possibleTrustAnchors);
-        unneededTrustAnchors.removeAll(vr.requiredTrustAnchors);
-        LOGGER.debug("unneeded trust anchors: {}", unneededTrustAnchors);
+        LOGGER.debug("required trust anchors: {}", vr.requiredTrustAnchors());
         // TODO this isn't quite right. We certs which are currently valid but not in the future needs to transition to PHASE_OUT
         // TODO and the ones which aren't used at all can transition to ZOMBIE
-        for (TrustAnchor ta : unneededTrustAnchors) {
-            trustManager.transitionToPhaseOut(fingerprint(ta.getTrustedCert()));
+        for (TrustAnchor ta : vr.unneededTrustAnchors(possibleTrustAnchors)) {
+            Fingerprint fingerprint = fingerprint(ta.getTrustedCert());
+            LOGGER.debug("Transitioning trusted certificate to PHASE_OUT: fingerprint: {}", fingerprint);
+            trustManager.transitionToPhaseOut(fingerprint);
         }
 
         // Issue those certs
         boolean restartRequired = false;
-        Map<RequiredCertificate, IssuedCertificate> issued = new HashMap<>(vr.certsToIssue.size());
+        Map<RequiredCertificate, IssuedCertificate> issued = new HashMap<>(vr.certsToIssue().size());
         List<Exception> exceptions = new ArrayList<>(0);
-        for (RequiredCertificate requiredCertificate : vr.certsToIssue) {
-            IssuedCertificate issuedCertificate = null;
+        for (RequiredCertificate requiredCertificate : vr.certsToIssue()) {
+            Optional<IssuedCertificate> issuedCertificate;
             try {
-                issuedCertificate = issueClientCertificate(cr, trustManager, requiredCertificate, ca(cr).getValidityDays());
+                issuedCertificate = issueClientCertificate(cr, requiredCertificate, ca(cr).getValidityDays());
             } catch (CertificateException | CertificateIssuanceException e) {
                 exceptions.add(e);
                 continue;
             }
-            CaCertState state = maybeEstablishTrust(cr, trustManager, requiredCertificate, issuedCertificate);
-            switch (state) {
-                case UNKNOWN:
-                case UNTRUSTED:
-                    issued.put(requiredCertificate, issuedCertificate);
-                    restartRequired = true;
-                    break;
-                case TRUSTED:
-                    issued.put(requiredCertificate, issuedCertificate);
-                    break;
-                case PHASE_OUT:
-                case ZOMBIE:
-                default:
-                    throw new RuntimeException();
+            if (issuedCertificate.isPresent()) {
+                CaCertState state = maybeEstablishTrust(cr, trustManager, requiredCertificate, issuedCertificate.get());
+                switch (state) {
+                    case UNKNOWN:
+                    case UNTRUSTED:
+                        issued.put(requiredCertificate, issuedCertificate.get());
+                        restartRequired = true;
+                        break;
+                    case TRUSTED:
+                        issued.put(requiredCertificate, issuedCertificate.get());
+                        break;
+                    case PHASE_OUT:
+                    case ZOMBIE:
+                    default:
+                        throw new RuntimeException();
+                }
             }
         }
         var groupedBySecret = issued.entrySet().stream().collect(
@@ -168,7 +175,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
 
         Secret instance = caSecretRef().get();
         caSecretRef().createOrReplace((instance == null ? new SecretBuilder().withNewMetadata().withName(caSecretName).withName(namespace).endMetadata() : new SecretBuilder(instance)).addToData(PENDING,
-                vr.certsToIssue.stream().map(r -> r.getSecretName()).distinct().collect(Collectors.joining(","))).build());
+                vr.certsToIssue().stream().map(RequiredCertificate::getSecretName).distinct().collect(Collectors.joining(","))).build());
         // TODO Maybe do some restarts to establish trust (what do I do with the issued certs until then? Add them to what secret?
         // wherever it is they'd need to be findable again from the RequiredCertificates stuff
 
@@ -180,7 +187,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     }
 
     ValidateResult filter(Cr cr, List<RequiredCertificate> requiredCertificates, Set<TrustAnchor> possibleTrustAnchors) {
-        Date now = new Date();
+        Instant now = clock.instant();
         PKIXParameters pkixParameters = pkixParameters(possibleTrustAnchors);
         ValidateResult vr = new ValidateResult();
         for (RequiredCertificate requiredCertificate : requiredCertificates) {
@@ -188,14 +195,14 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
             Secret secret = client.secrets().inNamespace(namespace).withName(requiredCertificate.getSecretName()).get();
             if (secret == null || secret.getData().isEmpty()) {
                 LOGGER.debug("Secret missing for required certificate: {}", requiredCertificate);
-                vr.certsToIssue.add(requiredCertificate);
+                vr.addCertToIssue(requiredCertificate);
             } else {
                 // Check those certs are valid to decide which certs we need to issue/reissue
                 String certChain = secret.getData().get(requiredCertificate.getCertChainEntryName());
                 String pendingCertChain = secret.getData().get(requiredCertificate.getPendingCertChainEntryName());
                 if (certChain == null && pendingCertChain == null) {
                     LOGGER.debug("Secret entry missing for required certificate chain: {}", requiredCertificate);
-                    vr.certsToIssue.add(requiredCertificate);
+                    vr.addCertToIssue(requiredCertificate);
                 } else if (pendingCertChain != null) {
                     // Validate that the pending certs are still good since they were issued
                     vr.add(validate(cr, now, pkixParameters, requiredCertificate, pendingCertChain, requiredCertificate.getPendingCertChainEntryName()));
@@ -223,36 +230,60 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         }
 
         public void add(ValidateResult result) {
-            this.certsToIssue.addAll(result.certsToIssue);
-            this.requiredTrustAnchors.addAll(result.requiredTrustAnchors);
+            this.certsToIssue.addAll(result.certsToIssue());
+            this.requiredTrustAnchors.addAll(result.requiredTrustAnchors());
+        }
+
+        public void addCertToIssue(RequiredCertificate requiredCert) {
+            this.certsToIssue.add(requiredCert);
+        }
+
+        public List<RequiredCertificate> certsToIssue() {
+            return certsToIssue;
+        }
+
+        public void addRequiredTrustAnchor(TrustAnchor trustAnchor) {
+            this.requiredTrustAnchors.add(trustAnchor);
+        }
+
+        public Set<TrustAnchor> requiredTrustAnchors() {
+            return requiredTrustAnchors;
+        }
+
+        public Set<TrustAnchor> unneededTrustAnchors(Set<TrustAnchor> possibleTrustAnchors) {
+            Set<TrustAnchor> unneededTrustAnchors = new HashSet<>(possibleTrustAnchors);
+            unneededTrustAnchors.removeAll(requiredTrustAnchors());
+            return unneededTrustAnchors;
         }
     }
 
-    ValidateResult validate(Cr cr, Date now, PKIXParameters pkixParameters, RequiredCertificate requiredCertificate,
+    ValidateResult validate(Cr cr, Instant now, PKIXParameters pkixParameters, RequiredCertificate requiredCertificate,
                   String certChain, String secretEntry) {
         Objects.requireNonNull(pkixParameters);
 
         List<RequiredCertificate> certsToIssue = new ArrayList<>();
         Set<TrustAnchor> requiredTrustAnchors = new HashSet<>();
-        // do cert path validation (and logging)
         try {
-            List<X509Certificate> chain = Pem.parseCertChain(new String(Base64.getDecoder().decode(certChain)));
+            // Validate whether there's currently a valid cert path
+            List<X509Certificate> chain = PkiUtils.parsePemCertChain(Base64.getDecoder().decode(certChain));
             CertPath certPath = certificateFactory.generateCertPath(chain);
             try {
                 requiredTrustAnchors.add(pkixValidate(now, pkixParameters, requiredCertificate, certPath));
             } catch (CertPathValidatorException e) {
-                LOGGER.debug("No valid cert path: secret entry: {}, params: {}, cert: {}, problem: {}",
-                        secretEntry, pkixParameters, requiredCertificate, e);
+                // TODO improve logging of the reason
+                LOGGER.info("No valid cert path: secret entry: {}, params: {}, cert: {}, reason: {}",
+                        secretEntry, pkixParameters, requiredCertificate, describeCertPathFailure(e));
                 certsToIssue.add(requiredCertificate);
             }
 
-            // TODO this isn't right
-            Date date = new Date(chain.get(0).getNotBefore().getTime() + ca(cr).getRenewalDays() * 1000L * 60 * 60 * 24);
+            // Validate whether there will still be a valid cert path in $renewalPeriod days time
+            Instant date = now.plus(ca(cr).getRenewalDays(), ChronoUnit.DAYS);
             try {
                 requiredTrustAnchors.add(pkixValidate(date, pkixParameters, requiredCertificate, certPath));
             } catch (CertPathValidatorException e) {
-                LOGGER.debug("No valid cert path: secret entry: {}, params: {}, cert: {}, problem: {}",
-                        secretEntry, pkixParameters, requiredCertificate, e);
+                // TODO improve logging of the reason
+                LOGGER.info("No valid cert path: secret entry: {}, params: {}, cert: {}, reason: {}",
+                        secretEntry, pkixParameters, requiredCertificate, describeCertPathFailure(e));
                 CertPathValidatorException.Reason reason = e.getReason();
                 if (reason == CertPathValidatorException.BasicReason.EXPIRED) {
                     certsToIssue.add(requiredCertificate);
@@ -272,12 +303,22 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         return new ValidateResult(certsToIssue, requiredTrustAnchors);
     }
 
-    TrustAnchor pkixValidate(Date now, PKIXParameters pkixParameters, RequiredCertificate requiredCertificate, CertPath certPath)
+    private String describeCertPathFailure(CertPathValidatorException e) {
+        int index = e.getIndex();
+        if (index != -1) {
+            X509Certificate certificate = (X509Certificate) e.getCertPath().getCertificates().get(index);
+            return "The certificate at index " + index + " with fingerprint " + fingerprint(certificate) + " and subject " + certificate.getSubjectDN() + " has problem " + e.getReason();
+        } else {
+            return e.getReason().toString() + " (no certificate )";
+        }
+    }
+
+    TrustAnchor pkixValidate(Instant date, PKIXParameters pkixParameters, RequiredCertificate requiredCertificate, CertPath certPath)
             throws CertPathValidatorException {
         try {
-            pkixParameters.setDate(now);
+            pkixParameters.setDate(new Date(date.getEpochSecond() * 1000L));
             TrustAnchor trustAnchor = ((PKIXCertPathValidatorResult) validator.validate(certPath, pkixParameters)).getTrustAnchor();
-            LOGGER.debug("Valid cert path exists at {}: cert: {}, trustAnchor: {}", now, requiredCertificate, trustAnchor);
+            LOGGER.debug("Valid cert path exists at {}: cert: {}, trustAnchor: {}", date, requiredCertificate, trustAnchor);
             return trustAnchor;
         } catch (InvalidAlgorithmParameterException e) {
             throw new RuntimeException(e); // should never happen
@@ -354,7 +395,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
             Matcher matcher = pattern.matcher(e.getKey());
             if (matcher.matches()) {
                 CaCertState state = CaCertState.valueOf(matcher.group("state"));
-                Fingerprint loaded = trustManager.load(new String(Base64.getDecoder().decode(e.getValue())), state);
+                Fingerprint loaded = trustManager.put(new String(Base64.getDecoder().decode(e.getValue())), state);
                 Fingerprint fingerprint = new Fingerprint(matcher.group("fingerprint"));
                 if (!loaded.equals(fingerprint)) {
                     throw new IllegalStateException("Certificate in entry " + e.getKey() + " actually has fingerprint " + loaded);
@@ -375,9 +416,9 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         for (Map.Entry<String, String> entry : data.entrySet()) {
             Fingerprint fingerprint;
             if (entry.getKey().equals("ca.crt")) {
-                fingerprint = trustManager.load(entry.getValue(), CaCertState.TRUSTED);
+                fingerprint = trustManager.put(entry.getValue(), CaCertState.TRUSTED);
             } else if (entry.getKey().endsWith(".crt")) {
-                fingerprint = trustManager.load(entry.getValue(), CaCertState.PHASE_OUT);
+                fingerprint = trustManager.put(entry.getValue(), CaCertState.PHASE_OUT);
             } else {
                 continue;
             }
@@ -396,7 +437,6 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
      * Issues a client (i.e. leaf) certificate and key, storing the key and cert chain
      * in the relevant secret as .tmp files for consumption by the 2nd half.
      * @param cr The custom resource.
-     * @param trustManager The trust manager.
      * @param requiredCertificate The cert to issue.
      * @param requestedValidity The requested validity period.
      * @return true iff a an untrusted root certificate was used, so that relying parties need to have their trust
@@ -404,17 +444,25 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
      * @throws CertificateIssuanceException the requested certificate could not be issued
      * @throws CertificateException problem while validating the issued certificate
      */
-    public IssuedCertificate issueClientCertificate(Cr cr, TrustManager trustManager,
+    public Optional<IssuedCertificate> issueClientCertificate(Cr cr,
                                           RequiredCertificate requiredCertificate, int requestedValidity)
             throws CertificateException, CertificateIssuanceException {
         CertificateIssuer issuer = getIssuer(cr);
 
         // Issue a certificate
         Subject subject = requiredCertificate.getSubject();
-        IssuedCertificate issuedCert = issuer.issue(subject, requestedValidity);
-        validateIssuedCertificate(subject, issuedCert);
-
-        return issuedCert;
+        // TODO does ${subject}.requested already exist? If not issue it?
+        byte[] token = issuer.requestCertificate(subject, requestedValidity);
+        // TODO and persist the token in the broker's secret as ${subject}.requested
+        // If ${subject}.requested does already exist then poll?
+        Optional<IssuedCertificate> issuedCertificate = issuer.pollForRequestedCertificate(token);
+        if (issuedCertificate.isPresent()) {
+            validateIssuedCertificate(subject, issuedCertificate.get());
+        }
+        // Return from reconcile1
+        // Reconcile1.5 then looks for
+        //IssuedCertificate issuedCert = issuer.issue(subject, requestedValidity);
+        return issuedCertificate;
 
 
         // TODO We make the certificate TRUSTED in the trust manager and update the CR status
@@ -427,7 +475,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     void validateIssuedCertificate(Subject subject, IssuedCertificate issuedCert) throws CertificateParsingException {
         X509Certificate issuedCertificate = issuedCert.issuedCertificate();
         if (!issuedCertificate.getSubjectX500Principal().equals(new X500Principal("CN=" + subject.commonName() + ", O=" + subject.organizationName()))) {
-            throw new IllegalStateException("Requested certificate for " + subject.toString() + " but was issued a certificate for " + issuedCertificate.getSubjectDN());
+            throw new IllegalStateException("Requested certificate for " + subject.opensslDn() + " but was issued a certificate for " + issuedCertificate.getSubjectDN());
         }
         if (issuedCertificate.getSubjectAlternativeNames().equals(subject.subjectAltNames().values())) {
             throw new IllegalStateException("Requested certificate with subject alternative names" + subject.subjectAltNames().values() + " but was issued a certificate with " + issuedCertificate.getSubjectAlternativeNames());
@@ -440,7 +488,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     }
 
     CaCertState maybeEstablishTrust(Cr cr, TrustManager trustManager, RequiredCertificate requiredCertificate,
-                             IssuedCertificate issuedCert) throws CertificateException {
+                             IssuedCertificate issuedCert) {
         X509Certificate rootCaCertificate = issuedCert.rootCaCertificate();
         CaCertState state = trustManager.state(fingerprint(rootCaCertificate));
         switch (state) {
@@ -457,10 +505,9 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
 
                 // We add the certificate to trust to the trust store in the init state.
 
-                trustManager.load(rootCaCertificate, CaCertState.UNTRUSTED);
+                trustManager.put(rootCaCertificate, CaCertState.UNTRUSTED);
                 // TODO update CR status and the Secret
-                storeTrustState(trustManager);
-                updateStatus(cr, trustManager.asStatusList());
+                storeTrustState(trustManager, cr);
             case UNTRUSTED:
                 // Already untrusted, we can move on to updating the client Secrets
                 break;
@@ -508,45 +555,35 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     }
 
     /** Instantiates a CertificateIssuer according to the spec in the given CR */
-    private CertificateIssuer getIssuer(Cr cr) throws CertificateException {
+    CertificateIssuer getIssuer(Cr cr) throws CertificateException {
         // get the CA issuance options from the CR spec
         // Instantiate a corresponding impl
         CertificateIssuer issuer = null;
         if (ca(cr).isGenerateCertificateAuthority()) {
             Secret caSecret = caSecretRef().get();
             if (caSecret == null || caSecret.getData() == null || caSecret.getData().isEmpty()) {
-                LOGGER.debug("Missing CA secret: {}", caSecretName);
+                LOGGER.debug("Constructing new StrimziCertificateIssuer due to missing or empty Secret data: secret: {}", caSecretName);
                 // Generate a new one
                 //   The Strimzi impl may, by side-effect, create a key pair if one doesn't exit
                 int validityDays = ca(cr).getValidityDays();
                 StrimziCertificateIssuer strimziIssuer = StrimziCertificateIssuer.createRootIssuer(
+                        clock,
                         certManager,
                         new Subject.Builder()
                                 .withCommonName("cluster CA")
                                 .withOrganizationName("Strimzi")
                             .build(),
                         validityDays);
-                // TODO For the StrimziCert issuer we need to store the key in the secret
+                // For the StrimziCert issuer we need to store the key in the secret
                 // (the cert will be stored later)
-
-                Fingerprint fingerprint = fingerprint(x509Certificate(strimziIssuer.issuingCert()));
-
-                LOGGER.debug("Creating CA Secret: {}", caSecretName);
-                caSecret = new SecretBuilder().withNewMetadata()
-                            .withName(caSecretName)
-                            .withNamespace(namespace)
-                        .endMetadata()
-                        .addToData(fingerprint + ".key", Base64.getEncoder().encodeToString(strimziIssuer.issuingKey()))
-                        .build();
-                caSecretRef().createOrReplace(caSecret);
+                storeCaKey(strimziIssuer);
                 issuer = strimziIssuer;
             } else {
-                LOGGER.debug("Using existing CA secret: {}", caSecretName);
                 // TODO which certificate should I use??? obviously the trusted one, if there is one
                 Secret trustSecret = trustSecretRef().get();
-                issuer = findIssuer(trustSecret, caSecret, ".TRUSTED.crt");
+                issuer = findIssuer(trustSecret, caSecret, CaCertState.TRUSTED);
                 if (issuer == null) {
-                    issuer = findIssuer(trustSecret, caSecret, ".UNTRUSTED.crt");
+                    issuer = findIssuer(trustSecret, caSecret, CaCertState.UNTRUSTED);
                 }
                 if (issuer == null) {
                     throw new RuntimeException("No suitable issuer found");
@@ -559,16 +596,30 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         return issuer;
     }
 
-    private CertificateIssuer findIssuer(Secret trustSecret, Secret caSecret, String suffix) throws CertificateException {
-        for (Map.Entry<String, String> entry : trustSecret.getData().entrySet()) {
+    void storeCaKey(StrimziCertificateIssuer strimziIssuer) {
+        Fingerprint fingerprint = fingerprint(strimziIssuer.issuingCert());
+        Secret caSecret;
+        LOGGER.debug("Storing CA Secret: {}", caSecretName);
+        caSecret = new SecretBuilder().withNewMetadata()
+                    .withName(caSecretName)
+                    .withNamespace(namespace)
+                .endMetadata()
+                .addToData(fingerprint + ".key", Base64.getEncoder().encodeToString(strimziIssuer.issuingKey()))
+                .build();
+        caSecretRef().createOrReplace(caSecret);
+    }
 
+    private CertificateIssuer findIssuer(Secret trustSecret, Secret caSecret, CaCertState state) throws CertificateException {
+        for (Map.Entry<String, String> entry : trustSecret.getData().entrySet()) {
+            // TODO we're just picking the first item which ends with `.${state}.crt` at random
+            // Which should be pick if there's >1? Probably the one with the latest notAfter.
+            String suffix = "." + state + ".crt";
             if (entry.getKey().endsWith(suffix)) {
+                LOGGER.debug("Creating new StrimziCertificateIssuer using existing CA secret: secret: {}", caSecretName);
                 // Use the existing key
                 byte[] caKey = Base64.getDecoder().decode(caSecret.getData().get(entry.getKey().replace(suffix, "") + ".key"));
                 byte[] caCert = Base64.getDecoder().decode(entry.getValue());
-                return new StrimziCertificateIssuer(certManager, new CertAndKey(caKey, caCert), List.of(x509Certificate(caCert)));
-                // TODO validate that the key is a key for the issuing cert in the trust manager
-
+                return new StrimziCertificateIssuer(clock, certManager, caKey, x509Certificate(caCert), List.of(x509Certificate(caCert)));
             }
         }
         return null;
@@ -578,7 +629,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
      * Persist the state of the trust manager to the cert secret
      * @param trustManager
      */
-    private void storeTrustState(TrustManager trustManager) {
+    void storeTrustState(TrustManager trustManager, Cr cr) {
         SecretBuilder secretBuilder = new SecretBuilder()
                 .editOrNewMetadata()
                     .withName(trustSecretName)
@@ -588,7 +639,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         for (TrustManager.CaState state : trustManager.entries()) {
             try {
                 secretBuilder.addToData(state.fingerprint() + "." + state.state() + ".crt",
-                        Base64.getEncoder().encodeToString(state.asPem().getBytes(StandardCharsets.US_ASCII)));
+                        StandardCharsets.ISO_8859_1.decode(Base64.getEncoder().encode(PkiUtils.asPemBuffer(state.x509()))).toString());
             } catch (CertificateEncodingException e) {
                 throw new RuntimeException("Could not encode certificate: " + state.fingerprint(), e);
             }
@@ -596,6 +647,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
 
         Secret build = secretBuilder.build();
         trustSecretRef().createOrReplace(build);
+        updateStatus(cr, trustManager.asStatusList());
     }
 
     /**
@@ -619,8 +671,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                 .filter(p ->
                         p.state() == CaCertState.UNKNOWN || p.state() == CaCertState.UNTRUSTED)
                 .forEach(p -> trustManager.transitionToTrusted(p.fingerprint()));
-        storeTrustState(trustManager);
-        updateStatus(cr, trustManager.asStatusList());
+        storeTrustState(trustManager, cr);
 
         String pendingList = caSecretRef().get().getData().get(PENDING);
         if (!pendingList.isEmpty()) {
@@ -638,8 +689,8 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                         byte[] p12bytes = Base64.getDecoder().decode(entry.getValue());
                         IssuedCertificate issuedCertificate = IssuedCertificate.fromPkcs12(p12bytes, password());
                         String crtEntryName = key.substring(0, key.length() - RequiredCertificate.PENDING_SUFFIX.length());
-                        data2.put(crtEntryName, Base64.getEncoder().encodeToString(Pem.asPemCertChain(issuedCertificate.completeChain()).getBytes(StandardCharsets.ISO_8859_1)));
-                        data2.put(crtEntryName.replaceAll("\\.crt$", ".key"), Base64.getEncoder().encodeToString(issuedCertificate.privateKey()));
+                        data2.put(crtEntryName, certChainEntry(issuedCertificate));
+                        data2.put(crtEntryName.replaceAll("\\.crt$", ".key"), keyEntry(issuedCertificate));
                     } else if (!data.containsKey(key + RequiredCertificate.PENDING_SUFFIX)) {
                         data2.put(key, entry.getValue());
                     }
@@ -652,5 +703,13 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
 
         // TODO what about the transition to PHASE_OUT?
         // TODO what about the transition to ZOMBIE?
+    }
+
+    static String keyEntry(IssuedCertificate issuedCertificate) {
+        return Base64.getEncoder().encodeToString(issuedCertificate.privateKey());
+    }
+
+    static String certChainEntry(IssuedCertificate issuedCertificate) throws CertificateEncodingException {
+        return Base64.getEncoder().encodeToString(PkiUtils.asPemCertChain(issuedCertificate.completeChain()).getBytes(StandardCharsets.ISO_8859_1));
     }
 }

@@ -25,7 +25,7 @@ import java.util.Base64;
 import java.util.Enumeration;
 import java.util.List;
 
-import static io.strimzi.operator.cluster.model.pki.TrustManager.fingerprint;
+import static io.strimzi.operator.cluster.model.pki.PkiUtils.fingerprint;
 
 public class IssuedCertificate {
     private final byte[] key;

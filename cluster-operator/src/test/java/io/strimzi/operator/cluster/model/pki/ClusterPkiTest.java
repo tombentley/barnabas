@@ -9,13 +9,16 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableEntryException;
 import java.security.cert.CertificateException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.Crds;
@@ -38,9 +41,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.fail;
-
 
 class ClusterPkiTest {
 
@@ -54,10 +56,6 @@ class ClusterPkiTest {
     @BeforeEach
     public void before() {
         client = new MockKube().withCustomResourceDefinition(Crds.kafka(), Kafka.class, KafkaList.class, Kafka::getStatus, Kafka::setStatus).end().build();
-        Subject subject = new Subject();
-        subject.setCommonName("foo");
-        subject.setOrganizationName("bar");
-        subject.setSubjectAltNames(Map.of("DNS.1", "gee"));
         kafkaRef = Crds.kafkaOperation(client).inNamespace(NAMESPACE).withName(CLUSTER);
     }
 
@@ -102,6 +100,7 @@ class ClusterPkiTest {
                 new CertificateAuthorityBuilder()
                     .withGenerateCertificateAuthority(true)
                     .withValidityDays(10)
+                    .withRenewalDays(5)
 //                , TODO cover all the things
 //                new CertificateAuthorityBuilder()
 //                    .withGenerateCertificateAuthority(true)
@@ -129,7 +128,7 @@ class ClusterPkiTest {
     @MethodSource("crs")
     public void testBootstrapReconcile(Kafka cr) throws CertificateException, UnrecoverableEntryException, NoSuchAlgorithmException, KeyStoreException, IOException {
         kafkaRef.create(cr);
-        ClusterPki pki = new ClusterPki(new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
+        ClusterPki pki = new ClusterPki(Clock.systemUTC(), new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
         TrustManager trustManager = pki.loadTrust(cr);
         doBothReconcilePhases(cr, trustManager, pki, CaCertState.UNTRUSTED);
     }
@@ -225,7 +224,7 @@ class ClusterPkiTest {
         kafkaRef.create(cr);
         // Do an initial reconcile
         TrustManager trustManager = new TrustManager();
-        ClusterPki pki = new ClusterPki(new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
+        ClusterPki pki = new ClusterPki(Clock.systemUTC(), new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
         doBothReconcilePhases(cr, trustManager, pki, CaCertState.UNTRUSTED);
 
         // Do a subsequent reconcile
@@ -236,23 +235,119 @@ class ClusterPkiTest {
     }
 
     @Test
-    public void testLeafCertWillExpire() throws CertificateException {
-        // TODO create all the secrets just right
-        // TODO do a reconcile
-        fail("TODO");
-    }
-
-    @Test
     public void testIntermediateCaCertWillExpire() throws CertificateException {
         // TODO
         fail("TODO");
     }
 
     @Test
-    public void testRootCaCertWillExpire() throws CertificateException {
+    public void testRecoveryWhenClientCertsAreInPendingState() throws CertificateException {
         // TODO
         fail("TODO");
     }
+
+    @ParameterizedTest
+    @MethodSource("crs")
+    public void testRootCaCertWillExpire(Kafka cr) throws CertificateException, NoSuchAlgorithmException, UnrecoverableEntryException, KeyStoreException, IOException {
+        Clock twoDaysHence = Clock.offset(Clock.systemUTC(), Duration.of(2, ChronoUnit.DAYS));
+        doTestLeafCertExpiry(cr, 5, 10, twoDaysHence);
+    }
+
+    @ParameterizedTest
+    @MethodSource("crs")
+    public void testRootCaCertAlreadyExpired(Kafka cr) throws CertificateException, NoSuchAlgorithmException, UnrecoverableEntryException, KeyStoreException, IOException {
+        Clock twoDaysHence = Clock.offset(Clock.systemUTC(), Duration.of(7, ChronoUnit.DAYS));
+        doTestLeafCertExpiry(cr, 5, 10, twoDaysHence);
+    }
+
+    @ParameterizedTest
+    @MethodSource("crs")
+    public void testLeafCertWillExpire(Kafka cr) throws CertificateException, UnrecoverableEntryException, NoSuchAlgorithmException, KeyStoreException, IOException {
+        Clock twoDaysHence = Clock.offset(Clock.systemUTC(), Duration.of(2, ChronoUnit.DAYS));
+        doTestLeafCertExpiry(cr, 10, 5, twoDaysHence);
+    }
+
+    @ParameterizedTest
+    @MethodSource("crs")
+    public void testLeafCertHasAlreadyExpired(Kafka cr) throws CertificateException, UnrecoverableEntryException, NoSuchAlgorithmException, KeyStoreException, IOException {
+        Clock twoDaysHence = Clock.offset(Clock.systemUTC(), Duration.of(7, ChronoUnit.DAYS));
+        doTestLeafCertExpiry(cr, 10, 5, twoDaysHence);
+    }
+
+    private void doTestLeafCertExpiry(Kafka cr, int rootCertValidity, int clientCertValidity, Clock reconciliation) throws CertificateException, UnrecoverableEntryException, NoSuchAlgorithmException, KeyStoreException, IOException {
+
+        kafkaRef.create(cr);
+        OpenSslCertManager openSslCertManager = new OpenSslCertManager();
+        ClusterPki pki = new ClusterPki(
+                reconciliation,
+                openSslCertManager, client, NAMESPACE, CLUSTER);
+
+        StrimziCertificateIssuer issuer = StrimziCertificateIssuer.createRootIssuer(
+                Clock.systemUTC(),
+                openSslCertManager,
+                new Subject.Builder().withCommonName("Test").build(),
+                rootCertValidity);
+
+        // create all the secrets just right
+        pki.storeCaKey(issuer);
+        TrustManager trustManager = new TrustManager();
+        trustManager.put(issuer.issuingCert(), CaCertState.TRUSTED);
+        pki.storeTrustState(trustManager, cr);
+        prepareBrokerSecret(cr, issuer, clientCertValidity);
+        prepareZookeeperSecret(cr, issuer, clientCertValidity);
+        // The state should now be as if we've done a successful reconcile before.
+
+        // Do a subsequent reconcile with with a clock that's now + 2 days, i.e. into the renewal period
+
+        trustManager = pki.loadTrust(kafkaRef.get());
+        assertFalse(pki.reconcile(cr, trustManager),
+                "Expect that no restart would be required, because the root CA certs haven't changed");
+        pki.reconcile2(cr, trustManager);
+        // TODO need to assert that new certs were issued on 2nd reconcile
+
+        // TODO similar test, but when the cert is already invalid.
+        // TODO similar test with with a reason other than EXPIRED
+    }
+
+    void prepareZookeeperSecret(Kafka cr, StrimziCertificateIssuer issuer, int requestedValidity) throws java.security.cert.CertificateEncodingException {
+        SecretBuilder secretBuilder = new SecretBuilder()
+                .withNewMetadata()
+                .withName(KafkaCluster.brokersSecretName(CLUSTER))
+                .endMetadata();
+        for (int i = 0; i < cr.getSpec().getZookeeper().getReplicas(); i++) {
+            secretBuilder.addToData(
+                    ClusterPki.zookeeperNodeCertSecretEntry(CLUSTER, i),
+                    issueCert(
+                            issuer,
+                            new Subject.Builder().withCommonName("Zookeeper " + (i + 1)).build(),
+                            requestedValidity));
+        }
+        client.secrets().inNamespace(NAMESPACE).withName(ZookeeperCluster.nodesSecretName(CLUSTER)).create(secretBuilder.build());
+    }
+
+    void prepareBrokerSecret(Kafka cr, StrimziCertificateIssuer issuer, int requestedValidity) throws java.security.cert.CertificateEncodingException {
+        SecretBuilder secretBuilder = new SecretBuilder()
+                .withNewMetadata()
+                .withName(KafkaCluster.brokersSecretName(CLUSTER))
+                .endMetadata();
+        for (int i = 0; i < cr.getSpec().getKafka().getReplicas(); i++) {
+            secretBuilder.addToData(
+                    ClusterPki.brokerCertSecretEntry(CLUSTER, i),
+                    issueCert(
+                            issuer,
+                            new Subject.Builder().withCommonName("Broker " + i).build(),
+                            requestedValidity));
+        }
+        client.secrets().inNamespace(NAMESPACE).withName(KafkaCluster.brokersSecretName(CLUSTER)).create(secretBuilder.build());
+    }
+
+    String issueCert(StrimziCertificateIssuer issuer, Subject subject, int requestedValidity) throws java.security.cert.CertificateEncodingException {
+        byte[] bytes = issuer.requestCertificate(subject, requestedValidity);
+        var issuedCertificate = issuer.pollForRequestedCertificate(bytes).get();
+        return Pki.certChainEntry(issuedCertificate);
+    }
+
+
 
     /** Test what happens if the broker's Secret get deleted */
     @ParameterizedTest
@@ -261,7 +356,7 @@ class ClusterPkiTest {
         kafkaRef.create(cr);
         // Do an initial reconcile
         TrustManager trustManager = new TrustManager();
-        ClusterPki pki = new ClusterPki(new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
+        ClusterPki pki = new ClusterPki(Clock.systemUTC(), new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
         doBothReconcilePhases(cr, trustManager, pki, CaCertState.UNTRUSTED);
 
         // Now delete the secret
@@ -279,7 +374,7 @@ class ClusterPkiTest {
         kafkaRef.create(cr);
         // Do an initial reconcile
         TrustManager trustManager = new TrustManager();
-        ClusterPki pki = new ClusterPki(new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
+        ClusterPki pki = new ClusterPki(Clock.systemUTC(), new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
         doBothReconcilePhases(cr, trustManager, pki, CaCertState.UNTRUSTED);
 
         // Now delete the secret
@@ -298,7 +393,7 @@ class ClusterPkiTest {
         kafkaRef.create(cr);
         // Do an initial reconcile
         TrustManager trustManager = new TrustManager();
-        ClusterPki pki = new ClusterPki(new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
+        ClusterPki pki = new ClusterPki(Clock.systemUTC(), new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
         doBothReconcilePhases(cr, trustManager, pki, CaCertState.UNTRUSTED);
 
         // Now delete the secret
@@ -317,7 +412,7 @@ class ClusterPkiTest {
         kafkaRef.create(cr);
         // Do an initial reconcile
         TrustManager trustManager = new TrustManager();
-        ClusterPki pki = new ClusterPki(new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
+        ClusterPki pki = new ClusterPki(Clock.systemUTC(), new OpenSslCertManager(), client, NAMESPACE, CLUSTER);
         doBothReconcilePhases(cr, trustManager, pki, CaCertState.UNTRUSTED);
 
         // Now delete the secret

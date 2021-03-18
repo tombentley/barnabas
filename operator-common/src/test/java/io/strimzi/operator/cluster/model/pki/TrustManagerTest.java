@@ -7,9 +7,6 @@ package io.strimzi.operator.cluster.model.pki;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.util.EnumSet;
 import java.util.List;
 
@@ -34,18 +31,6 @@ class TrustManagerTest {
         trustManager = new TrustManager();
     }
 
-    @Test
-    void x509Certificate() throws CertificateException, IOException {
-        byte[] buffer = certBytes();
-        X509Certificate x509Certificate = TrustManager.x509Certificate(buffer);
-        assertEquals("CN=cluster-ca, O=Default Company Ltd, L=Default City, C=XX", x509Certificate.getIssuerDN().toString());
-        assertNotEquals(-1, x509Certificate.getBasicConstraints(),
-                "expected a certificate with CA:true");
-        assertEquals(ZonedDateTime.of(2018, 8, 23, 16, 19, 54, 0, ZoneId.of("UTC")).toInstant(), x509Certificate.getNotBefore().toInstant());
-        assertEquals(ZonedDateTime.of(2118, 7, 30, 16, 19, 54, 0, ZoneId.of("UTC")).toInstant(), x509Certificate.getNotAfter().toInstant());
-
-    }
-
     private byte[] certBytes() throws IOException {
         InputStream resourceAsStream = TrustManagerTest.class.getResourceAsStream("/CLUSTER_CERT.pem");
         return resourceAsStream.readAllBytes();
@@ -54,7 +39,7 @@ class TrustManagerTest {
     @Test
     void load() throws IOException, CertificateException {
         assertEquals(new Fingerprint(EXPECTED_FINGERPRINT),
-                trustManager.load(new String(certBytes()), CaCertState.UNTRUSTED));
+                trustManager.put(new String(certBytes()), CaCertState.UNTRUSTED));
     }
 
     @Test
