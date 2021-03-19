@@ -7,10 +7,12 @@ package io.strimzi.operator.cluster.model.pki;
 import java.util.Arrays;
 
 class Fingerprint {
+    static final int BYTE_LENGTH = 20;
+    static final int HEX_LENGTH = 40;
     private final byte[] bytes;
 
     Fingerprint(byte[] bytes) {
-        if (bytes.length != 20) {
+        if (bytes.length != BYTE_LENGTH) {
             throw new IllegalArgumentException("Wrong length: " + bytes.length);
         }
         this.bytes = bytes;
@@ -29,11 +31,11 @@ class Fingerprint {
     }
 
     Fingerprint(String hex) {
-        if (hex.length() != 40) {
+        if (hex.length() != HEX_LENGTH) {
             throw new IllegalArgumentException("Wrong number of characters in hex fingerprint: " + hex.length());
         }
-        byte[] bytes = new byte[20];
-        for (int i = 0; i < 40; i += 2) {
+        byte[] bytes = new byte[BYTE_LENGTH];
+        for (int i = 0; i < HEX_LENGTH; i += 2) {
             int s1 = readHex(hex.charAt(i));
             int s2 = readHex(hex.charAt(i + 1));
             bytes[i / 2] = (byte) (s1 << 4 | s2);

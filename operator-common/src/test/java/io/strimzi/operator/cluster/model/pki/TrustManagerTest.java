@@ -39,7 +39,7 @@ class TrustManagerTest {
     @Test
     void load() throws IOException, CertificateException {
         assertEquals(new Fingerprint(EXPECTED_FINGERPRINT),
-                trustManager.put(new String(certBytes()), CaCertState.UNTRUSTED));
+                trustManager.put(certBytes(), CaCertState.UNTRUSTED));
     }
 
     @Test

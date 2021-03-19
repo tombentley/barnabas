@@ -41,82 +41,51 @@ public class TrustManager {
             .append(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
             .appendOffsetId().toFormatter();
 
-    public Set<TrustAnchor> trustStore(EnumSet<CaCertState> trusted) {
-        return certs.entrySet().stream()
-                .filter(entry -> trusted.contains(entry.getValue()))
-                .map(entry -> {
-                    try {
-                        return new TrustAnchor((X509Certificate) this.trustStore.getCertificate(entry.getKey().toString()), null);
-                    } catch (KeyStoreException keyStoreException) {
-                        throw new RuntimeException(keyStoreException);
-                    }
-                }).collect(Collectors.toSet());
+    static interface TrustRootListener {
+        void onTransition(TrustRoot trustRoot);
     }
 
-    static class CaState {
-        private final CaCertState state;
-        private final X509Certificate x509;
+    private final TrustRootListener listener;
 
-        public CaState(byte[] cert, CaCertState state) throws CertificateException {
-            this.x509 = PkiUtils.x509Certificate(cert);
-            this.state = state;
-        }
-
-        public CaState(X509Certificate x509, CaCertState state) {
-            this.state = state;
-            this.x509 = x509;
-        }
-
-        public Fingerprint fingerprint() {
-            return PkiUtils.fingerprint(x509());
-        }
-
-        X509Certificate x509() {
-            return x509;
-        }
-
-        public CaCertState state() {
-            return state;
-        }
-
-        public Instant notBefore() {
-            return x509().getNotBefore().toInstant();
-        }
-
-        public Instant notAfter() {
-            return x509().getNotAfter().toInstant();
-        }
-
-        public boolean isValidAt(Instant time) {
-            return time.isAfter(notBefore()) && time.isBefore(notAfter());
-        }
-
-        private CaCertStatus asStatus() {
-            ZoneId utc = ZoneId.of("UTC");
-            return new CaCertStatusBuilder().withFingerprint(fingerprint().toString())
-                    .withState(state())
-                    .withNotBefore(DATE_TIME_FORMATTER.format(notBefore().atZone(utc)))
-                    .withNotAfter(DATE_TIME_FORMATTER.format(notAfter().atZone(utc)))
-                    .build();
-        }
-    }
-
-    private final Map<Fingerprint, CaCertState> certs;
+    private final Map<Fingerprint, CaCertState> states;
     private final KeyStore trustStore;
 
-    public List<CaState> entries() {
-        return certs.entrySet().stream().map(e ->
-                getWithState(e.getValue(), e.getKey())).collect(Collectors.toList());
-    }
-
     public TrustManager() {
-        this.certs = new HashMap<>();
+        this(null);
+    }
+    public TrustManager(TrustRootListener listener) {
+        this.states = new HashMap<>();
         try {
             this.trustStore = KeyStore.getInstance("PKCS12");
             trustStore.load(null, null);
         } catch (KeyStoreException | IOException | NoSuchAlgorithmException | CertificateException e) {
             throw new RuntimeException(e); // PKCS12 should be supported on all modern JVMs.
         }
+        this.listener = listener;
+    }
+
+
+    public List<TrustRoot> entries() {
+        return states.entrySet().stream().map(e ->
+                getWithState(e.getValue(), e.getKey())).collect(Collectors.toList());
+    }
+
+    /**
+     * Convert the trust roots in this manager which have a state in the given set of {@code states}
+     * to a set of {@link TrustAnchor TrustAnchors} for use in PKIX certificate validation.
+     * @param states The states for selecting the trust roots to include.
+     * @return The trust anchors.
+     */
+    public Set<TrustAnchor> toTrustAnchors(EnumSet<CaCertState> states) {
+        return this.states.entrySet().stream()
+                .filter(entry -> states.contains(entry.getValue()))
+                .map(entry -> {
+                    try {
+                        return new TrustAnchor((X509Certificate) this.trustStore.getCertificate(entry.getKey().toString()), null);
+                    } catch (KeyStoreException keyStoreException) {
+                        throw new RuntimeException(keyStoreException);
+                    }
+                }).collect(Collectors.toUnmodifiableSet());
     }
 
     // TODO we need methods to load the state from Kube Secrets
@@ -124,57 +93,69 @@ public class TrustManager {
     // If the CR had a status the ca.crt would be TRUSTED and all the others would be PHASE_OUT
     // We'd then update the CR status, then update the Secret contents
     // When the CR has a status we load the certs from the Secret, compute the fingerprint and look up the status
-    public Fingerprint put(String cert, CaCertState state) throws CertificateException {
-        return doPut(new CaState(cert.getBytes(), state));
+
+
+    public Fingerprint put(byte[] cert, CaCertState state) throws CertificateException {
+        return doPut(new TrustRoot(PkiUtils.x509Certificate(cert), state));
     }
 
     public Fingerprint put(X509Certificate cert, CaCertState state) {
-        return doPut(new CaState(cert, state));
+        return doPut(new TrustRoot(cert, state));
     }
 
-    private Fingerprint doPut(CaState caState) {
-        Fingerprint fingerprint = caState.fingerprint();
+    private Fingerprint doPut(TrustRoot trustRoot) {
+        Fingerprint fingerprint = trustRoot.fingerprint();
+        CaCertState caCertState = states.get(fingerprint);
+        if (caCertState != null && !trustRoot.state().equals(caCertState)) {
+            throw new IllegalStateException("CA certificate " + fingerprint + " is in state" + caCertState + " so cannot be loaded in state " + trustRoot.state());
+        }
         try {
-            this.trustStore.setCertificateEntry(fingerprint.toString(), caState.x509());
+            this.trustStore.setCertificateEntry(fingerprint.toString(), trustRoot.x509());
         } catch (KeyStoreException e) {
             throw new RuntimeException(e);
         }
-        if (!certs.containsKey(fingerprint)) {
-            certs.put(fingerprint, caState.state());
-        } else {
-            throw new IllegalStateException("CA certificate " + fingerprint + " is in state" + certs.get(fingerprint) + " so cannot be loaded in state " + caState.state);
-        }
+        states.put(fingerprint, trustRoot.state());
+        fireListener(fingerprint);
         return fingerprint;
     }
 
-    public CaCertState state(Fingerprint fingerprint) {
-        return certs.getOrDefault(fingerprint, CaCertState.UNKNOWN);
+    private void fireListener(Fingerprint fingerprint) {
+        if (listener != null) {
+            listener.onTransition(getWithState(states.get(fingerprint), fingerprint));
+        }
     }
 
     /**
-     * Find the CA certificate.
+     * @return the state of the Trust root with the given fingerprint, or UNKNOWN if the not certificate with that fingerprint is known.
+     */
+    public CaCertState state(Fingerprint fingerprint) {
+        return states.getOrDefault(fingerprint, CaCertState.UNKNOWN);
+    }
+
+    /**
+     * Find a certificate in the given state.
      * @param state The state.
      * @return The result.
      */
-    public Optional<CaState> findCa(CaCertState state) {
-        return certs.entrySet().stream()
+    public Optional<TrustRoot> findCa(CaCertState state) {
+        return states.entrySet().stream()
             .filter(entry -> entry.getValue() == state)
             .map(entry -> {
                 Fingerprint key = entry.getKey();
                 return getWithState(entry.getValue(), key);
             })
             .filter(c -> c.isValidAt(Instant.now()))
-            .max(Comparator.comparing(CaState::notAfter));
+            .max(Comparator.comparing(TrustRoot::notAfter));
     }
 
-    private CaState getWithState(CaCertState state, Fingerprint key) {
+    private TrustRoot getWithState(CaCertState state, Fingerprint key) {
         X509Certificate certificate;
         try {
             certificate = (X509Certificate) trustStore.getCertificate(key.toString());
         } catch (KeyStoreException keyStoreException) {
             throw new RuntimeException(keyStoreException);
         }
-        return new CaState(certificate, state);
+        return new TrustRoot(certificate, state);
     }
 
     /**
@@ -202,18 +183,19 @@ public class TrustManager {
     }
 
     private void transition(Fingerprint fingerprint, CaCertState targetState) {
-        CaCertState caState = certs.get(fingerprint);
+        CaCertState caState = states.get(fingerprint);
         if (caState == null) {
             throw new UnknownCertificateException();
         }
         if (!caState.outward.contains(targetState)) {
             throw new IllegalStateException("CA certificate " + fingerprint + " is in state" + caState + " so cannot transition to " + targetState);
         }
-        certs.put(fingerprint, targetState);
+        states.put(fingerprint, targetState);
+        fireListener(fingerprint);
     }
 
     public List<CaCertStatus> asStatusList() {
-        return certs.entrySet().stream()
+        return states.entrySet().stream()
                 .map(entry -> {
                     X509Certificate certificate;
                     try {
@@ -221,9 +203,18 @@ public class TrustManager {
                     } catch (KeyStoreException keyStoreException) {
                         throw new RuntimeException(keyStoreException);
                     }
-                    return new CaState(certificate, entry.getValue()).asStatus();
+                    return asStatus(new TrustRoot(certificate, entry.getValue()));
                 })
                 .collect(Collectors.toList());
+    }
+
+    private CaCertStatus asStatus(TrustRoot trustRoot) {
+        ZoneId utc = ZoneId.of("UTC");
+        return new CaCertStatusBuilder().withFingerprint(trustRoot.fingerprint().toString())
+                .withState(trustRoot.state())
+                .withNotBefore(DATE_TIME_FORMATTER.format(trustRoot.notBefore().atZone(utc)))
+                .withNotAfter(DATE_TIME_FORMATTER.format(trustRoot.notAfter().atZone(utc)))
+                .build();
     }
 
 }

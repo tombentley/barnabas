@@ -28,29 +28,36 @@ public class RequiredCertificate {
     }
 
     /**
-     * @return The subject of the certificate
+     * @return The subject and SAN of the certificate.
      */
-    public Subject subject() {
+    public Subject subjectAndSan() {
         return subject;
     }
 
     /**
-     * @return The name of the Secret where the certificate should eventually be stored
+     * @return The subject's DN.
      */
-    public String secretName() {
-        return secretName;
+    public SubjectIdentity subjectIdentity() {
+        return subject.opensslDn();
     }
-
-    /**
-     * @return The name of the entry in the {@link #secretName()} Secret which contains the certificate chain.
-     */
-    public String certChainEntryName() {
-        return entryName;
-    }
-
-    public String pendingCertChainEntryName() {
-        return certChainEntryName() + PENDING_SUFFIX;
-    }
+//
+//    /**
+//     * @return The name of the Secret where the certificate should eventually be stored.
+//     */
+//    public String secretName() {
+//        return secretName;
+//    }
+//
+//    /**
+//     * @return The name of the entry in the {@link #secretName()} Secret which contains the certificate chain.
+//     */
+//    public String certChainEntryName() {
+//        return entryName;
+//    }
+//
+//    public String pendingCertChainEntryName() {
+//        return certChainEntryName() + PENDING_SUFFIX;
+//    }
 
     @Override
     public String toString() {

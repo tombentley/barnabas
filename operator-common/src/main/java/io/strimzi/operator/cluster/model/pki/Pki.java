@@ -130,16 +130,15 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     // TODO load the trust manager from the trust secret state
     public boolean reconcileTrust(Cr cr, TrustManager trustManager) {
         // Look at CR to decide which certs we need
-        // TODO we should recognise the .tmp in the secret and reuse them, rather than generating new certs
+        // TODO we should recognise the .pending in the secret and reuse them, rather than generating new certs
         List<RequiredCertificate> requiredCertificates = requiredCertificates(cr).collect(Collectors.toList());
         LOGGER.debug("Required certificates: {}", requiredCertificates);
         // Look at secrets to decide which certs we have
-        Set<TrustAnchor> possibleTrustAnchors = trustManager.trustStore(EnumSet.of(CaCertState.TRUSTED, CaCertState.PHASE_OUT));
-        ValidateResult vr = filter(cr, requiredCertificates, possibleTrustAnchors);
+        ValidateResult vr = filter(cr, trustManager, requiredCertificates);
         LOGGER.debug("required trust anchors: {}", vr.requiredTrustAnchors());
         // TODO this isn't quite right. We certs which are currently valid but not in the future needs to transition to PHASE_OUT
         // TODO and the ones which aren't used at all can transition to ZOMBIE
-        for (TrustAnchor ta : vr.unneededTrustAnchors(possibleTrustAnchors)) {
+        for (TrustAnchor ta : vr.unneededTrustAnchors()) {
             Fingerprint fingerprint = fingerprint(ta.getTrustedCert());
             LOGGER.debug("Transitioning trusted certificate to PHASE_OUT: fingerprint: {}", fingerprint);
             trustManager.transitionToPhaseOut(fingerprint);
@@ -191,10 +190,11 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         return restartRequired;
     }
 
-    ValidateResult filter(Cr cr, List<RequiredCertificate> requiredCertificates, Set<TrustAnchor> possibleTrustAnchors) {
-        Instant now = clock.instant();
+    ValidateResult filter(Cr cr, TrustManager trustManager, List<RequiredCertificate> requiredCertificates) {
+        Set<TrustAnchor> possibleTrustAnchors = trustManager.toTrustAnchors(EnumSet.of(CaCertState.TRUSTED, CaCertState.PHASE_OUT));
         PKIXParameters pkixParameters = pkixParameters(possibleTrustAnchors);
-        ValidateResult vr = new ValidateResult();
+        ValidateResult vr = new ValidateResult(possibleTrustAnchors);
+        Instant now = clock.instant();
         for (RequiredCertificate requiredCertificate : requiredCertificates) {
             // TODO When scaling down, who deletes unneeded certs?
             Secret secret = secretRef(requiredCertificate.secretName()).get();
@@ -223,13 +223,16 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
     static class ValidateResult {
         private final List<RequiredCertificate> certsToIssue;
         private final Set<TrustAnchor> requiredTrustAnchors;
+        private final Set<TrustAnchor> possibleTrustAnchors;
 
-        public ValidateResult() {
+        public ValidateResult(Set<TrustAnchor> possibleTrustAnchors) {
+            this.possibleTrustAnchors = possibleTrustAnchors;
             this.certsToIssue = new ArrayList<>();
             this.requiredTrustAnchors = new HashSet<>();
         }
 
         public ValidateResult(List<RequiredCertificate> certsToIssue, Set<TrustAnchor> requiredTrustAnchors) {
+            this.possibleTrustAnchors = null;
             this.certsToIssue = certsToIssue;
             this.requiredTrustAnchors = requiredTrustAnchors;
         }
@@ -255,15 +258,18 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
             return requiredTrustAnchors;
         }
 
-        public Set<TrustAnchor> unneededTrustAnchors(Set<TrustAnchor> possibleTrustAnchors) {
+        public Set<TrustAnchor> unneededTrustAnchors() {
             Set<TrustAnchor> unneededTrustAnchors = new HashSet<>(possibleTrustAnchors);
             unneededTrustAnchors.removeAll(requiredTrustAnchors());
             return unneededTrustAnchors;
         }
     }
 
-    ValidateResult validate(Cr cr, Instant now, PKIXParameters pkixParameters, RequiredCertificate requiredCertificate,
-                  String certChain, String secretEntry) {
+    ValidateResult validate(Cr cr,
+                            Instant now,
+                            PKIXParameters pkixParameters,
+                            RequiredCertificate requiredCertificate,
+                            String certChain, String secretEntry) {
         Objects.requireNonNull(pkixParameters);
 
         List<RequiredCertificate> certsToIssue = new ArrayList<>();
@@ -376,22 +382,6 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         return trustManager;
     }
 
-//    void loadFromBoth(TrustManager trustManager, List<CaCertStatus> clusterCa, Map<String, String> data) throws CertificateException {
-//        // load certs from the Secret values
-//        Map<Fingerprint, String> collect = data.values().stream().collect(Collectors.toMap(s -> {
-//            try {
-//                return TrustManager.fingerprint(x509Certificate(Base64.getDecoder().decode(s)));
-//            } catch (CertificateException e) {
-//                throw new RuntimeException(e);
-//            }
-//        }, s -> s));
-//        // get the state from the CR status
-//        for (CaCertStatus caCertStatus : clusterCa) {
-//            String s = collect.get(new Fingerprint(caCertStatus.getFingerprint()));
-//            trustManager.load(s, caCertStatus.getState());
-//        }
-//    }
-
     TrustManager loadFromSecret(Map<String, String> data) throws CertificateException {
         TrustManager trustManager = new TrustManager();
         Pattern pattern = Pattern.compile("(?<fingerprint>[0-9A-Z]{40})\\.(?<state>ZOMBIE|PHASE_OUT|TRUSTED|UNTRUSTED)\\.crt", Pattern.CASE_INSENSITIVE);
@@ -400,7 +390,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
             Matcher matcher = pattern.matcher(e.getKey());
             if (matcher.matches()) {
                 CaCertState state = CaCertState.valueOf(matcher.group("state"));
-                Fingerprint loaded = trustManager.put(new String(Base64.getDecoder().decode(e.getValue())), state);
+                Fingerprint loaded = trustManager.put(Base64.getDecoder().decode(e.getValue()), state);
                 Fingerprint fingerprint = new Fingerprint(matcher.group("fingerprint"));
                 if (!loaded.equals(fingerprint)) {
                     throw new IllegalStateException("Certificate in entry " + e.getKey() + " actually has fingerprint " + loaded);
@@ -416,25 +406,21 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
      */
     private TrustManager convertCertsSecret(Cr cr, Map<String, String> data) throws CertificateException {
         TrustManager trustManager = new TrustManager();
-        // convert
-        SecretBuilder sb = new SecretBuilder();
+        Base64.Decoder decoder = Base64.getDecoder();
         for (Map.Entry<String, String> entry : data.entrySet()) {
-            Fingerprint fingerprint;
             if (entry.getKey().equals("ca.crt")) {
-                fingerprint = trustManager.put(entry.getValue(), CaCertState.TRUSTED);
+                trustManager.put(decoder.decode(entry.getValue()), CaCertState.TRUSTED);
             } else if (entry.getKey().endsWith(".crt")) {
-                fingerprint = trustManager.put(entry.getValue(), CaCertState.PHASE_OUT);
+                trustManager.put(decoder.decode(entry.getValue()), CaCertState.PHASE_OUT);
             } else {
                 continue;
             }
-            sb.addToData(fingerprint.toString(), entry.getValue());
         }
-        client.secrets().createOrReplace(sb.build());
 
         // TODO check that we don't need to need to update the p12? Or maybe we should just regenerate it.
 
         // update the status
-        updateStatus(cr, trustManager.asStatusList());
+        storeTrustState(trustManager, cr);
         return trustManager;
     }
 
@@ -455,7 +441,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
         CertificateIssuer issuer = getIssuer(cr);
 
         // Issue a certificate
-        Subject subject = requiredCertificate.subject();
+        Subject subject = requiredCertificate.subjectAndSan();
         // TODO does ${subject}.requested already exist? If not issue it?
         byte[] token = issuer.requestCertificate(subject, requestedValidity);
         // TODO and persist the token in the broker's secret as ${subject}.requested
@@ -506,7 +492,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                     // TODO
                 } else {
                     // TODO
-                    secret.getData().put(requiredCertificate.subject() + "something", "some state");
+                    secret.getData().put(requiredCertificate.subjectAndSan() + "something", "some state");
                     trustSecretRef().createOrReplace(secret);
                 }
 
@@ -620,8 +606,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                     .withName(trustSecretName)
                     .withNamespace(namespace)
                 .endMetadata();
-
-        for (TrustManager.CaState state : trustManager.entries()) {
+        for (TrustRoot state : trustManager.entries()) {
             try {
                 secretBuilder.addToData(state.fingerprint() + "." + state.state() + ".crt",
                         StandardCharsets.ISO_8859_1.decode(Base64.getEncoder().encode(PkiUtils.asPemBuffer(state.x509()))).toString());
@@ -629,9 +614,7 @@ public abstract class Pki<Cr extends CustomResource<Spec, Status>, Spec, Status>
                 throw new RuntimeException("Could not encode certificate: " + state.fingerprint(), e);
             }
         }
-
-        Secret build = secretBuilder.build();
-        trustSecretRef().createOrReplace(build);
+        trustSecretRef().createOrReplace(secretBuilder.build());
         updateStatus(cr, trustManager.asStatusList());
     }
 

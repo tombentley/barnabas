@@ -33,7 +33,6 @@ import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.certs.Subject;
 import io.strimzi.operator.cluster.model.KafkaCluster;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
-import io.strimzi.operator.cluster.model.pki.TrustManager.CaState;
 import io.strimzi.test.mockkube.MockKube;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -140,14 +139,14 @@ class ClusterPkiTest {
 
     private void doPhase2(Kafka cr, TrustManager trustManager, Pki pki) throws CertificateException, UnrecoverableEntryException, NoSuchAlgorithmException, KeyStoreException, IOException {
         List<CaCertStatus> clusterCa;
-        CaState caState;
+        TrustRoot trustRoot;
         // TODO EO, KafkaExporter, CO secret
 
         pki.reconcilePending(cr, trustManager);
 
         // assert the Kafka status
         clusterCa = kafkaRef.get().getStatus().getClusterCa();
-        caState = trustManager.findCa(CaCertState.TRUSTED).get();
+        trustRoot = trustManager.findCa(CaCertState.TRUSTED).get();
         assertEquals(
                 trustManager.asStatusList(),
                 clusterCa,
@@ -185,9 +184,9 @@ class ClusterPkiTest {
         dumpSecrets();
 
         // assert the secrets
-        CaState caState = trustManager.findCa(expectedState).get();
+        TrustRoot trustRoot = trustManager.findCa(expectedState).get();
         assertEquals(
-                Set.of(caState.fingerprint() + ".key", "pending"),
+                Set.of(trustRoot.fingerprint() + ".key", "pending"),
                 secretItemKeys(CA_KEY_SECRET),
                 "Expected a single item in the " + CA_KEY_SECRET + " secret");
         assertEquals(
