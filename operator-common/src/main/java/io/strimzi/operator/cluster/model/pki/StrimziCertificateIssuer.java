@@ -21,7 +21,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -43,13 +45,12 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
     private final Clock clock;
     private final CertManager certManager;
     // CA cert and key for the issuing CA
-    //private final CertAndKey issuingCertAndKey;
+    private final X509Certificate issuingCert;
+    private final byte[] issuingKey;
     // the cert chain between issuer and root (excluding both)
     private final List<X509Certificate> chain;
     /** The soonest notAfter date of all the certificate on the path from the issuing cert to the trust root*/
-    private final Instant max;
-    private final X509Certificate issuingCert;
-    private final byte[] issuingKey;
+    private final Instant soonestNotAfter;
     // the trust root
     private final X509Certificate trustRoot;
 
@@ -66,10 +67,10 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
                 @JsonProperty("csr") byte[] csr,
                 @JsonProperty("requestedValidityDays") int requestedValidityDays,
                 @JsonProperty("subject") Subject subject) {
-            this.key = key;
-            this.csr = csr;
+            this.key = Objects.requireNonNull(key);
+            this.csr = Objects.requireNonNull(csr);
             this.requestedValidityDays = requestedValidityDays;
-            this.subject = subject;
+            this.subject = Objects.requireNonNull(subject);
         }
 
         @JsonProperty
@@ -93,23 +94,34 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
         }
     }
 
+    /**
+     * Create an issuer.
+     * @param clock A clock for the start of issued certificates.
+     * @param certManager The thing used to actually generate the certificates and key.
+     * @param pathFromTrusted The path of trusted certificates, from the CA cert that should be trust anchor (which may not be self-signed).
+     *                        Each certificate should be issued by the previous certificate in the list.
+     *                        It doesn't make a difference whether this includes {@code issuingCert} or not.
+     * @param issuingKey The key of the CA which will be used to issue certificates.
+     * @param issuingCert The cert of the CA which will be used to issue certificates.
+     */
     @SuppressWarnings("unchecked")
-    StrimziCertificateIssuer(Clock clock, CertManager certManager, byte[] issuingKey, X509Certificate issuingCert, List<X509Certificate> pathToRoot) {
-        this.clock = clock;
-        this.certManager = certManager;
-        this.issuingCert = issuingCert;
-        this.issuingKey = issuingKey;
+    StrimziCertificateIssuer(Clock clock, CertManager certManager, List<X509Certificate> pathFromTrusted, byte[] issuingKey, X509Certificate issuingCert) {
+        this.clock = Objects.requireNonNull(clock);
+        this.certManager = Objects.requireNonNull(certManager);
+        this.issuingCert = Objects.requireNonNull(issuingCert);
+        this.issuingKey = Objects.requireNonNull(issuingKey);
+        Objects.requireNonNull(pathFromTrusted);
 
         // This is probably not needed if we do full cert path validation.
         X509Certificate prev = null;
-        for (int i = pathToRoot.size() - 1; i >= 0; i--) {
-            X509Certificate current = pathToRoot.get(i);
+        for (int i = pathFromTrusted.size() - 1; i >= 0; i--) {
+            X509Certificate current = pathFromTrusted.get(i);
             if (current.getBasicConstraints() == -1) {
                 throw new IllegalArgumentException("The chain of CA certificate contains a non-CA certificate: " + current.getSubjectDN());
             }
             if (prev != null) {
                 if (!current.getIssuerDN().toString().equals(prev.getSubjectDN().toString())) {
-                    throw new IllegalArgumentException("pathToRoot should start with a CA certificate and each next " +
+                    throw new IllegalArgumentException("pathFromTrusted should start with a CA certificate and each next " +
                             "certificate's issued should be the previous certificate's subject: ");
                 }
             }
@@ -122,31 +134,32 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
 
             ArrayList<X509Certificate> unorderedChain = new ArrayList<>();
             unorderedChain.add(issuingCert);
-            unorderedChain.addAll(pathToRoot.subList(1, pathToRoot.size()));
+            unorderedChain.addAll(pathFromTrusted.subList(1, pathFromTrusted.size()));
 
+            // TODO do we want to do this directly here, or use the Validator?
+            // This gives us better access to the build certpath, Validator give nicer programatic access to failed validations
             CertPathValidator validator = CertPathValidator.getInstance("PKIX");
-            PKIXParameters parameters = new PKIXParameters(Set.of(new TrustAnchor(pathToRoot.get(0), null)));
+            PKIXParameters parameters = new PKIXParameters(Set.of(new TrustAnchor(pathFromTrusted.get(0), null)));
             parameters.setRevocationEnabled(false);
+            parameters.setDate(new Date(clock.millis()));
             CertPath certPath = cf.generateCertPath(unorderedChain);
             PKIXCertPathValidatorResult validate = (PKIXCertPathValidatorResult) validator.validate(certPath, parameters);
             trustRoot = validate.getTrustAnchor().getTrustedCert();
             chain = new ArrayList<>((List<X509Certificate>) certPath.getCertificates());
             chain.remove(issuingCert);
-            Instant max = issuingCert.getNotAfter().toInstant();
+            Instant soonestNotAfter = issuingCert.getNotAfter().toInstant();
             for (X509Certificate c : chain) {
-                Instant instant = c.getNotAfter().toInstant();
-                max = min(max, instant);
+                soonestNotAfter = soonest(soonestNotAfter, c.getNotAfter().toInstant());
             }
             Instant instant = trustRoot.getNotAfter().toInstant();
-            max = min(max, instant);
-            this.max = max;
+            this.soonestNotAfter = soonest(soonestNotAfter, instant);
         } catch (GeneralSecurityException e) {
             throw new RuntimeException(e);
         }
         // TODO validate that the issuing ca cert and key are a pair
     }
 
-    private Instant min(Instant min, Instant instant) {
+    private Instant soonest(Instant min, Instant instant) {
         if (instant.isBefore(min)) {
             min = instant;
         }
@@ -168,8 +181,8 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
         X509Certificate cert;
         try {
             try {
-                keyPath = Files.createTempFile(null, ".key");
-                certPath = Files.createTempFile(null, ".crt");
+                keyPath = Files.createTempFile(null, null);
+                certPath = Files.createTempFile(null, null);
                 certManager.generateSelfSignedCert(keyPath.toFile(), certPath.toFile(), subject, validityDays);
                 cert = PkiUtils.x509Certificate(certPath);
                 key = Files.readAllBytes(keyPath);
@@ -180,16 +193,14 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
             delete(keyPath);
             delete(certPath);
         }
-        return new StrimziCertificateIssuer(clock, certManager, key, cert, List.of(cert));
-        // TODO when the issuing CA is self-signed, do we include it in the chain?
+        return new StrimziCertificateIssuer(clock, certManager, List.of(cert), key, cert);
     }
 
 
     private int adjustValidity(int requestedValidity) {
-        // TODO probably want to use the minimum date of the whole chain
         Instant now = clock.instant();
         Instant requestedEnd = now.plus(requestedValidity, ChronoUnit.DAYS);
-        Instant actualEnd = min(requestedEnd, this.max);
+        Instant actualEnd = soonest(requestedEnd, this.soonestNotAfter);
         long actualValidity = Duration.between(now, actualEnd).toDays();
         int actualValidityInt;
         if (actualValidity > Integer.MAX_VALUE) {
@@ -208,16 +219,21 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
         return issuingCert;
     }
 
+    public List<X509Certificate> chain() {
+        List<X509Certificate> result = new ArrayList<>(chain);
+        return result;
+    }
+
     @Override
     public byte[] requestCertificate(Subject subject, int requestedValidityDays) throws CertificateIssuanceException {
         try {
             byte[] issuedKey;
             byte[] csr;
             Path csrPath;
-            Path issuedKeyPath = Files.createTempFile(null, ".csr");
+            Path issuedKeyPath = Files.createTempFile(null, null);
             try {
-                csrPath = Files.createTempFile(null, ".csr");
-                issuedKeyPath = Files.createTempFile(null, ".csr");
+                csrPath = Files.createTempFile(null, null);
+                issuedKeyPath = Files.createTempFile(null, null);
                 certManager.generateCsr(issuedKeyPath.toFile(), csrPath.toFile(), subject);
                 issuedKey = Files.readAllBytes(issuedKeyPath);
                 csr = Files.readAllBytes(csrPath);
@@ -259,7 +275,6 @@ public class StrimziCertificateIssuer implements CertificateIssuer {
                 delete(csrPath);
                 delete(issuedCertPath);
             }
-
 
             return Optional.of(new IssuedCertificate(token.key(), issuedCertificate, chain, trustRoot));
         } catch (IOException | CertificateException e) {

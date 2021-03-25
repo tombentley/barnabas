@@ -1,0 +1,52 @@
+/*
+ * Copyright Strimzi authors.
+ * License: Apache License 2.0 (see the file LICENSE or http://apache.org/licenses/LICENSE-2.0.html).
+ */
+package io.strimzi.operator.cluster.model.pki;
+
+import io.fabric8.kubernetes.api.model.Secret;
+import io.fabric8.kubernetes.client.dsl.Resource;
+
+/**
+ * Writes a secret like:
+ * <pre><code>
+ * kind: Secret
+ * metadata:
+ *   name: ...
+ * data:
+ *   # Entries for the current secret
+ *   $CLUSTER-kafka-$NUM.p12: ...      # PKCS #12 archive file for storing certificates and keys
+ *   $CLUSTER-kafka-$NUM.password: ... # Password for protecting the PKCS #12 archive file.
+ *   $CLUSTER-kafka-$NUM.crt: ...      # Certificate for Kafka broker pod <num>.
+ *   $CLUSTER-kafka-$NUM.key: ...      # Private key for Kafka broker pod <num>.
+ * </code></pre>
+ * for consumption by broker containers.
+ *
+ * @see NewBrokersCertificateOutputWriter for the new-style support
+ */
+public class LegacyBrokersCertificateOutputWriter extends AbstractCertificateOutputWriter<BrokerIdentity> {
+
+    public LegacyBrokersCertificateOutputWriter(Resource<Secret> secretResource) {
+        super(BrokerIdentity.class, secretResource);
+    }
+
+    @Override
+    protected String p12Key(BrokerIdentity id) {
+        return "broker-" + id.brokerId() + ".p12";
+    }
+
+    @Override
+    protected String passwordKey(BrokerIdentity id) {
+        return "broker-" + id.brokerId() + ".password";
+    }
+
+    @Override
+    protected String certKey(BrokerIdentity id) {
+        return "broker-" + id.brokerId() + ".crt";
+    }
+
+    @Override
+    protected String keyKey(BrokerIdentity id) {
+        return "broker-" + id.brokerId() + ".key";
+    }
+}

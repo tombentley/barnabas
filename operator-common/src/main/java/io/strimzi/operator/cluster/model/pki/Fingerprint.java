@@ -5,6 +5,7 @@
 package io.strimzi.operator.cluster.model.pki;
 
 import java.util.Arrays;
+import java.util.Objects;
 
 class Fingerprint {
     static final int BYTE_LENGTH = 20;
@@ -12,6 +13,7 @@ class Fingerprint {
     private final byte[] bytes;
 
     Fingerprint(byte[] bytes) {
+        Objects.requireNonNull(bytes);
         if (bytes.length != BYTE_LENGTH) {
             throw new IllegalArgumentException("Wrong length: " + bytes.length);
         }

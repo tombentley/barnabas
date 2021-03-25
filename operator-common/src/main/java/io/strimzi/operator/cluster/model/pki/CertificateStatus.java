@@ -10,6 +10,7 @@ import java.util.Arrays;
 import java.util.Objects;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 public class CertificateStatus {
     private final CertificateState state;
@@ -19,47 +20,54 @@ public class CertificateStatus {
     private Fingerprint fingerprint = null;
 
     @JsonCreator
-    private CertificateStatus(CertificateState state, SubjectIdentity subjectIdentity, byte[] token) {
-        this(state, subjectIdentity, token, null, null);
+    public CertificateStatus(
+            @JsonProperty("state") CertificateState state,
+            @JsonProperty("subjectIdentity") SubjectIdentity subjectIdentity,
+            @JsonProperty("requestToken") byte[] token,
+            @JsonProperty("pending") IssuedCertificate pending) {
+        this(state, subjectIdentity, token, pending, null);
     }
 
-    private CertificateStatus(CertificateState state, SubjectIdentity subjectIdentity, byte[] token, IssuedCertificate issuedCertificate, Fingerprint fingerprint) {
-        this.state = state;
-        this.subjectIdentity = subjectIdentity;
+    CertificateStatus(CertificateState state, SubjectIdentity subjectIdentity, byte[] token, IssuedCertificate issuedCertificate, Fingerprint fingerprint) {
+        this.state = Objects.requireNonNull(state);
+        this.subjectIdentity = Objects.requireNonNull(subjectIdentity);
         this.issuedCertificate = issuedCertificate;
         this.token = token;
         this.fingerprint = fingerprint;
     }
 
     public static CertificateStatus createNew(SubjectIdentity subjectIdentity) {
+        Objects.requireNonNull(subjectIdentity);
         return new CertificateStatus(CertificateState.NEW, subjectIdentity, null, null, null);
     }
 
     public CertificateStatus toRequested(byte[] token) {
-        assert (this.state == CertificateState.NEW);
+        assert (this.state == CertificateState.NEW || this.state == CertificateState.IN_USE): "Unexpected state transition: " + this.state + "->" + CertificateState.REQUESTED;
         return new CertificateStatus(CertificateState.REQUESTED, this.subjectIdentity, token, null, null);
     }
 
     public CertificateStatus toPending(IssuedCertificate issuedCertificate) {
-        assert (this.state == CertificateState.REQUESTED);
+        Objects.requireNonNull(issuedCertificate);
+        assert (this.state == CertificateState.REQUESTED): "Unexpected state transition: " + this.state + "->" + CertificateState.PENDING;
         return new CertificateStatus(CertificateState.PENDING, this.subjectIdentity, null, issuedCertificate, null);
     }
 
     public CertificateStatus toInUse() {
-        assert (this.state == CertificateState.PENDING);
+        assert (this.state == CertificateState.PENDING): "Unexpected state transition: " + this.state + "->" + CertificateState.IN_USE;
         return new CertificateStatus(CertificateState.IN_USE, this.subjectIdentity, null, this.issuedCertificate, this.fingerprint);
     }
 
     public CertificateStatus toNotNeeded() {
-        assert (this.state == CertificateState.IN_USE);
+        assert (this.state == CertificateState.IN_USE): "Unexpected state transition: " + this.state + "->" + CertificateState.NOT_NEEDED;
         return new CertificateStatus(CertificateState.NOT_NEEDED, this.subjectIdentity, null, null, this.fingerprint);
     }
 
-    public byte[] token() {
+    @JsonProperty("requestToken")
+    public byte[] tokenBytes() {
         if (state == CertificateState.REQUESTED) {
             return token;
         } else {
-            throw new IllegalStateException(toString());
+            return null;
         }
     }
 
@@ -67,6 +75,7 @@ public class CertificateStatus {
         return fingerprint == null ? fingerprint = PkiUtils.fingerprint(x509()) : fingerprint;
     }
 
+    @JsonProperty
     public SubjectIdentity subjectIdentity() {
         return subjectIdentity;
     }
@@ -75,8 +84,14 @@ public class CertificateStatus {
         return issuedCertificate().issuedCertificate();
     }
 
+    @JsonProperty
     public CertificateState state() {
         return state;
+    }
+
+    @JsonProperty("pending")
+    public IssuedCertificate getIssuedCertificate() {
+        return issuedCertificate;
     }
 
     public Instant notBefore() {

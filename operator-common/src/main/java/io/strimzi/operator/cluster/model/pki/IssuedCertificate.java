@@ -15,6 +15,7 @@ import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
 import java.security.UnrecoverableEntryException;
 import java.security.cert.Certificate;
+import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.security.spec.InvalidKeySpecException;
@@ -24,6 +25,11 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
+
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import static io.strimzi.operator.cluster.model.pki.PkiUtils.fingerprint;
 
@@ -37,17 +43,47 @@ public class IssuedCertificate {
                              X509Certificate issuedCertificate,
                              List<X509Certificate> intermediateChain,
                              X509Certificate rootCaCertificate) {
-        this.key = key;
-        this.issuedCertificate = issuedCertificate;
-        this.intermediateChain = intermediateChain;
+        this.key = Objects.requireNonNull(key);
+        this.issuedCertificate = Objects.requireNonNull(issuedCertificate);
+        this.intermediateChain = Objects.requireNonNull(intermediateChain);
+        // note the root Ca cert may be null once transitioned to in_use/serialization round trip
         this.rootCaCertificate = rootCaCertificate;
+    }
+
+    @JsonCreator
+    public static IssuedCertificate deserialize(
+            @JsonProperty("key") byte[] key,
+            @JsonProperty("cert") byte[] issued,
+            @JsonProperty("chain") byte[] chain,
+            @JsonProperty("root") byte[] root
+            ) throws CertificateException {
+        return new IssuedCertificate(key,
+            PkiUtils.x509Certificate(issued),
+            PkiUtils.parsePemCertChain(chain),
+            PkiUtils.x509Certificate(root));
     }
 
     /**
      * @return The private key corresponding to the certificate that was issued.
      */
+    @JsonProperty("key")
     public byte[] privateKey() {
         return key;
+    }
+
+    @JsonProperty("cert")
+    public byte[] certBytes() throws CertificateEncodingException {
+        return issuedCertificate.getEncoded();
+    }
+
+    @JsonProperty("root")
+    public byte[] rootBytes() throws CertificateEncodingException {
+        return rootCaCertificate.getEncoded();
+    }
+
+    @JsonProperty("chain")
+    public byte[] chainBytes() throws CertificateEncodingException {
+        return PkiUtils.asPemCertChain(intermediateChain).getBytes();
     }
 
     /**
@@ -99,7 +135,7 @@ public class IssuedCertificate {
      * @throws CertificateException Something wrong with the certificate.
      * @throws InvalidKeySpecException Bad keyspec.
      */
-    public byte[] toPkcs12(char[] password) throws KeyStoreException, IOException, NoSuchAlgorithmException, CertificateException, InvalidKeySpecException {
+    public byte[] toPkcs12(char[] password) throws KeyStoreException, IOException, CertificateException, InvalidKeySpecException {
         IssuedCertificate issuedCert = this;
         String pemPrivateKey = new String(issuedCert.privateKey(), StandardCharsets.US_ASCII)
                 .replace("-----BEGIN PRIVATE KEY-----", "")
@@ -107,18 +143,33 @@ public class IssuedCertificate {
                 .replaceAll(System.lineSeparator(), "");
 
         KeyStore ks = KeyStore.getInstance("PKCS12");
-        ks.load(null, null);
+        try {
+            ks.load(null, null);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e); // should never happen, since PKCS12 is a standard part of the JRE
+        } catch (CertificateException e) {
+            throw new RuntimeException(e); // should never happen, since the keystore is empty
+        }
         List<X509Certificate> certificateChain = issuedCert.completeChain();
         String alias = fingerprint(issuedCert.issuedCertificate()).toString();
+        KeyFactory keyFactory;
+        try {
+            keyFactory = KeyFactory.getInstance(issuedCert.issuedCertificate().getPublicKey().getAlgorithm());
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e); // should never happen, since RSA is a standard part of the JRE
+        }
         ks.setEntry(alias,
                 new KeyStore.PrivateKeyEntry(
                         // TODO is it always RSA even for EC crypto?
-                        KeyFactory.getInstance("RSA")
-                                .generatePrivate(new PKCS8EncodedKeySpec(Base64.getDecoder().decode(pemPrivateKey))),
+                        keyFactory.generatePrivate(new PKCS8EncodedKeySpec(Base64.getDecoder().decode(pemPrivateKey))),
                         certificateChain.toArray(Certificate[]::new)),
                 new KeyStore.PasswordProtection(password));
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        ks.store(baos, password);
+        try {
+            ks.store(baos, password);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e); // should never happen, since PKCS12 is a standard part of the JRE
+        }
         return baos.toByteArray();
     }
 
@@ -162,5 +213,33 @@ public class IssuedCertificate {
         } else {
             throw new RuntimeException("Entry is not a key");
         }
+    }
+
+    @Override
+    public String toString() {
+        return "IssuedCertificate(" +
+                // Don't include key
+                ", issuedCertificate=" + PkiUtils.fingerprint(issuedCertificate) +
+                ", intermediateChain=" + intermediateChain.stream().map(x -> PkiUtils.fingerprint(x).toString()).collect(Collectors.joining(",")) +
+                ", rootCaCertificate=" + PkiUtils.fingerprint(rootCaCertificate) +
+                ')';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        IssuedCertificate that = (IssuedCertificate) o;
+        return Arrays.equals(key, that.key) &&
+                Objects.equals(issuedCertificate, that.issuedCertificate) &&
+                Objects.equals(intermediateChain, that.intermediateChain) &&
+                Objects.equals(rootCaCertificate, that.rootCaCertificate);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Objects.hash(issuedCertificate, intermediateChain, rootCaCertificate);
+        result = 31 * result + Arrays.hashCode(key);
+        return result;
     }
 }

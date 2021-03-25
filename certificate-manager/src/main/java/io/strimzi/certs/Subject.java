@@ -4,12 +4,14 @@
  */
 package io.strimzi.certs;
 
+import javax.security.auth.x500.X500Principal;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -21,6 +23,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 public class Subject {
 
     public static class Builder {
+        private static final Pattern IPV4_ADDRESS = Pattern.compile("[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}");
+        private static final Pattern DNS_NAME = Pattern.compile("^(" +
+                // a single char dns name
+                "[a-zA-Z0-9]|" +
+                // can't begin or end with -                followed by more labels of same
+                "[a-zA-Z0-9][a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9])(\\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]{0,61}[a-zA-Z0-9]))*$");
         private String organizationName;
         private String commonName;
         private Set<String> dnsNames = null;
@@ -35,19 +43,46 @@ public class Subject {
             return this;
         }
         public Builder addDnsName(String dnsName) {
+            if (!isValidDnsName(dnsName)) {
+                throw new IllegalArgumentException("Invalid DNS name");
+            }
             if (dnsNames == null) {
                  dnsNames = new HashSet<>();
             }
             dnsNames.add(dnsName);
             return this;
         }
+
+        public boolean isValidDnsName(String dnsName) {
+            return dnsName.length() <= 255
+                    && DNS_NAME.matcher(dnsName).matches();
+        }
+
         public Builder addIpAddress(String ip) {
+            if (!isValidIpv4Address(ip)) {
+                throw new IllegalArgumentException("Invalid IPv4 address");
+            }
             if (ipAddresses == null) {
                 ipAddresses = new HashSet<>();
             }
             ipAddresses.add(ip);
             return this;
         }
+
+        public boolean isValidIpv4Address(String ip) {
+            boolean matches = IPV4_ADDRESS.matcher(ip).matches();
+            if (matches) {
+                String[] split = IPV4_ADDRESS.split("\\.");
+                for (String num : split) {
+                    int i = Integer.parseInt(num);
+                    if (i > 255) {
+                        return false;
+                    }
+                }
+            }
+            return matches;
+        }
+
         public Subject build() {
             return new Subject(commonName, organizationName, dnsNames, ipAddresses);
         }
@@ -79,6 +114,22 @@ public class Subject {
     @JsonProperty
     public String commonName() {
         return commonName;
+    }
+
+    public X500Principal principal() {
+        if (commonName != null) {
+            if (organizationName != null) {
+                return new X500Principal("CN=" + commonName() + ", O=" + organizationName());
+            } else {
+                return new X500Principal("CN=" + commonName());
+            }
+        } else {
+            if (organizationName != null) {
+                return new X500Principal("O=" + organizationName());
+            } else {
+                return null;
+            }
+        }
     }
 
     @JsonProperty

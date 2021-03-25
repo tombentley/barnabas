@@ -11,10 +11,12 @@ import io.fabric8.kubernetes.api.model.KubernetesResource;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
 import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.LabelSelectorRequirement;
+import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
+import io.fabric8.kubernetes.client.dsl.Replaceable;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.fabric8.kubernetes.client.internal.readiness.Readiness;
 import org.apache.logging.log4j.LogManager;
@@ -43,6 +45,7 @@ import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -275,7 +278,7 @@ class MockBuilder<T extends HasMetadata,
         when(resource.createOrReplace(any())).thenAnswer(i -> {
             T resource2 = i.getArgument(0);
             if (db.containsKey(resourceName)) {
-                return resource.patch(resource2);
+                return doReplace(resourceName, null, resource2);
             } else {
                 return doCreate(resourceName, resource2);
             }
@@ -284,15 +287,24 @@ class MockBuilder<T extends HasMetadata,
         when(resource.withGracePeriod(anyLong())).thenReturn(resource);
         mockWithPropagationPolicy(resource);
         mockPatch(resourceName, resource);
+        when(resource.lockResourceVersion(anyString())).thenAnswer(i -> {
+            String matchVersion = i.getArgument(0);
+            Replaceable<T> replaceable = mock(Replaceable.class);
+            when(replaceable.replace(any())).thenAnswer(i2 -> {
+                T resource2 = i2.getArgument(0);
+                return doReplace(resourceName, matchVersion, resource2);
+            });
+            return replaceable;
+        });
         when(resource.edit()).thenAnswer(i -> {
             T t = resource.get();
             Function f = i.getArgument(0);
-            return doPatch(t.getMetadata().getName(), resource, (T) f.apply(t));
+            return doPatch(resourceName, resource, (T) f.apply(t));
         });
         when(resource.edit(any(UnaryOperator.class))).thenAnswer(i -> {
             T t = resource.get();
             Function f = i.getArgument(0);
-            return doPatch(t.getMetadata().getName(), resource, (T) f.apply(t));
+            return doPatch(resourceName, resource, (T) f.apply(t));
         });
         mockDelete(resourceName, resource);
         if (Readiness.isReadinessApplicable(resourceTypeClass)) {
@@ -425,7 +437,22 @@ class MockBuilder<T extends HasMetadata,
         return copyResource(argument);
     }
 
+    private T doReplace(String resourceName, String matchVersion, T argument) {
+        checkDoesExist(resourceName);
+        if (matchVersion != null &&
+                !matchVersion.equals(db.get(resourceName).getMetadata().getResourceVersion())) {
+            throw new KubernetesClientException("Version mismatch " + matchVersion + " cf " + db.get(resourceName).getMetadata().getResourceVersion());
+        }
+        LOGGER.debug("replace {} {} -> {}", resourceType, resourceName, argument);
+        db.put(resourceName, incrementGeneration(incrementResourceVersion(copyResource(argument))));
+        fireWatchers(resourceName, argument, Watcher.Action.MODIFIED, "replace");
+        return copyResource(argument);
+    }
+
     protected T incrementResourceVersion(T resource) {
+        if (resource.getMetadata() == null) {
+            resource.setMetadata(new ObjectMeta());
+        }
         String resourceVersion = resource.getMetadata().getResourceVersion();
         if (resourceVersion == null || resourceVersion.isEmpty()) {
             resourceVersion = "0";

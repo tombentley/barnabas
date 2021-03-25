@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class PkiUtilsTest {
 
     private byte[] certBytes() throws IOException {
-        InputStream resourceAsStream = TrustManagerTest.class.getResourceAsStream("/CLUSTER_CERT.pem");
+        InputStream resourceAsStream = PkiUtilsTest.class.getResourceAsStream("/CLUSTER_CERT.pem");
         return resourceAsStream.readAllBytes();
     }
 
@@ -48,6 +48,11 @@ class PkiUtilsTest {
         try (InputStream is = getClass().getResourceAsStream("/CLIENTS_CERT.pem")) {
             X509Certificate certificate = (X509Certificate) factory.generateCertificate(is);
             try (ByteArrayInputStream in = new ByteArrayInputStream(PkiUtils.asPemString(certificate).getBytes(StandardCharsets.ISO_8859_1))) {
+                X509Certificate certificate2 = (X509Certificate) factory.generateCertificate(in);
+                assertEquals(certificate, certificate2);
+            }
+            // asPemBytes should have the same result as asPemString().getBytes(ISO_8859_1)
+            try (ByteArrayInputStream in = new ByteArrayInputStream(PkiUtils.asPemBytes(certificate))) {
                 X509Certificate certificate2 = (X509Certificate) factory.generateCertificate(in);
                 assertEquals(certificate, certificate2);
             }

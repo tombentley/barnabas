@@ -13,19 +13,15 @@ import io.strimzi.certs.Subject;
  * For example this could be a certificate for a given broker.
  */
 public class RequiredCertificate {
-    public static final String PENDING_SUFFIX = ".pending";
-    private final Subject subject;
-    private final String secretName;
-    private final String entryName;
 
-    public RequiredCertificate(Subject subject, String secretName, String entryName) {
-        Objects.requireNonNull(subject);
-        Objects.requireNonNull(secretName);
-        Objects.requireNonNull(entryName);
-        this.subject = subject;
-        this.secretName = secretName;
-        this.entryName = entryName;
+    private final SubjectIdentity subjectIdentity;
+    private final Subject subject;
+
+    public RequiredCertificate(SubjectIdentity subjectIdentity, Subject subject) {
+        this.subjectIdentity = Objects.requireNonNull(subjectIdentity);
+        this.subject = Objects.requireNonNull(subject);
     }
+
 
     /**
      * @return The subject and SAN of the certificate.
@@ -38,33 +34,14 @@ public class RequiredCertificate {
      * @return The subject's DN.
      */
     public SubjectIdentity subjectIdentity() {
-        return subject.opensslDn();
+        return subjectIdentity;
     }
-//
-//    /**
-//     * @return The name of the Secret where the certificate should eventually be stored.
-//     */
-//    public String secretName() {
-//        return secretName;
-//    }
-//
-//    /**
-//     * @return The name of the entry in the {@link #secretName()} Secret which contains the certificate chain.
-//     */
-//    public String certChainEntryName() {
-//        return entryName;
-//    }
-//
-//    public String pendingCertChainEntryName() {
-//        return certChainEntryName() + PENDING_SUFFIX;
-//    }
 
     @Override
     public String toString() {
         return "RequiredCertificate(" +
-                "subject=" + subject +
-                ", secretName='" + secretName + '\'' +
-                ", entryName='" + entryName + '\'' +
+                "subjectIdentity=" + subjectIdentity +
+                ", subject=" + subject +
                 ')';
     }
 }

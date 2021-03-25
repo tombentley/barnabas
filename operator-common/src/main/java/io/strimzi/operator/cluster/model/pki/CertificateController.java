@@ -5,23 +5,14 @@
 package io.strimzi.operator.cluster.model.pki;
 
 import javax.security.auth.x500.X500Principal;
-import java.security.InvalidAlgorithmParameterException;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.CertPath;
-import java.security.cert.CertPathValidator;
-import java.security.cert.CertPathValidatorException;
+import java.io.IOException;
+import java.security.KeyStoreException;
+import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
-import java.security.cert.CertificateFactory;
 import java.security.cert.CertificateParsingException;
-import java.security.cert.PKIXCertPathValidatorResult;
-import java.security.cert.PKIXParameters;
-import java.security.cert.PKIXReason;
 import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
-import java.time.Clock;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
-import java.util.Date;
+import java.security.spec.InvalidKeySpecException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -32,133 +23,55 @@ import io.strimzi.certs.Subject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import static io.strimzi.operator.cluster.model.pki.PkiUtils.fingerprint;
-
 public class CertificateController {
+
     private static final Logger LOGGER = LogManager.getLogger(CertificateController.class);
-    private final Clock clock;
-    private final CertPathValidator pkixValidator;
-    private final TrustController.PrivateState trustState;
+
+    private final Validator validator;
+    private final TrustPrivateState trustPrivateState;
     private final CertificateStatusStore certificateStatusStore;
     private final List<CertificateOutputWriter> certificateOutputWriters;
-    private final CertificateFactory certificateFactory;
     private final CertificateIssuer issuer;
-    private final int renewalDays;
+    private final int requestedValidity;
 
-    public CertificateController(Clock clock, TrustController.PrivateState trustState,
+
+    public CertificateController(TrustPrivateState trustPrivateState,
                                  CertificateStatusStore certificateStatusStore,
                                  List<CertificateOutputWriter> certificateOutputWriters,
-                                 CertificateIssuer issuer, int renewalDays) {
-        this.clock = clock;
-        this.trustState = trustState;
-        this.certificateStatusStore = certificateStatusStore;
-        this.certificateOutputWriters = certificateOutputWriters;
-        this.issuer = issuer;
-        this.renewalDays = renewalDays;
-        try {
-            this.pkixValidator = CertPathValidator.getInstance("PKIX");
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e); // standard part of Java: should never happen
-        }
-        try {
-            this.certificateFactory = CertificateFactory.getInstance("X.509");
-        } catch (CertificateException e) {
-            throw new RuntimeException(e); // standard part of Java: should never happen
-        }
+                                 CertificateIssuer issuer,
+                                 Validator validator, int requestedValidity) {
+        // TODO we're just passing in the issuer, but really that has its own little state machine
+        // or at least some state mgmt for knowing when we need to regenerate???
+        // Or is it a recursive use of the trust controller and certificate controller?
+        this.trustPrivateState = Objects.requireNonNull(trustPrivateState);
+        this.certificateStatusStore = Objects.requireNonNull(certificateStatusStore);
+        this.certificateOutputWriters = Objects.requireNonNull(certificateOutputWriters);
+        this.issuer = Objects.requireNonNull(issuer);
+        this.validator = Objects.requireNonNull(validator);
+        this.requestedValidity = Objects.requireNonNull(requestedValidity);
     }
 
-    public boolean reconcile(RequiredCertificate requiredCertificate) throws CertificateException {
-        Instant now = clock.instant();
-        Map<Fingerprint, TrustRoot> trustState = this.trustState.load();
-        CertificateStatus status = certificateStatusStore.load(requiredCertificate.subjectIdentity());
+    public CertificateReconcileResult reconcile(RequiredCertificate requiredCertificate) throws CertificateException {
+        // TODO need a clean way to handle the NOT_NEEDED case.
+        // Maybe that's a delete(SubjectIdentity) method.
+        // Which would basically just to remove the state and the output certificates.
+
+        Map<Fingerprint, TrustRoot> trustState = this.trustPrivateState.load();
+        CertificateStatus status = certificateStatusStore.loadStatus(requiredCertificate.subjectIdentity());
         final CertificateState startState = status.state();
         switch (startState) {
             case NEW: {
-                status = requestCertificate(status, requiredCertificate);
+                status = handleNew(status, requiredCertificate);
                 // fall through
             }
             case REQUESTED: {
-                // TODO could optimise away the load if fallen through
-                var issuedOpt = issuer.pollForRequestedCertificate(status.token());
-                if (issuedOpt.isEmpty()) {
-                    // Not issued yet: Wait for another reconciliation
-                    return startState != status.state();
-                }
-                IssuedCertificate issued = issuedOpt.get();
-                try {
-                    validateIssuedCertificate(requiredCertificate.subjectAndSan(), issued);
-                } catch (Exception e) {
-                    // ???
-                }
-
-                // fall through
-
-                Result result = validate(now, pkixParameters(trustAnchors(trustState, TrustState.TRUSTED)), null, issued.completeChain());
-                switch (result.type) {
-                    case OK:
-                        status = status.toInUse();
-                        // store in output store
-                        for (var w : certificateOutputWriters) {
-                            w.write(issued);
-                        }
-                        certificateStatusStore.store(requiredCertificate.subjectIdentity(), status);
-                        return true;
-                    case WILL_EXPIRE:
-                    case EXPIRED:
-                    case OTHER:
-                        status = requestCertificate(status, requiredCertificate);
-                        // TODO should loop, but return for now
-                        return false;
-                    case NO_TRUST_ANCHOR:
-                        // store in pending store
-                        status = status.toPending(issued);
-                        certificateStatusStore.store(requiredCertificate.subjectIdentity(), status);
-                        return false;
-                    default:
-                        throw new IllegalStateException();
-                }
+                return handleRequested(status, requiredCertificate, trustState);
             }
             case PENDING: {
-                IssuedCertificate issued = status.issuedCertificate();
-                Result result = validate(now, pkixParameters(trustAnchors(trustState, TrustState.TRUSTED)), null, issued.completeChain());
-                switch (result.type) {// should we query the trustState or should be pkixValidate?
-                    case OK:
-                    case WILL_EXPIRE: // it may be about to expire, but it's better than nothing
-                        // deploy it for use
-                        status = status.toInUse();
-                        certificateStatusStore.store(requiredCertificate.subjectIdentity(), status);
-                        return true;
-                    case NO_TRUST_ANCHOR:
-                        // It's not trusted yet: we have to wait
-                        return false;
-                    case EXPIRED:
-                    case OTHER:
-                        status = requestCertificate(status, requiredCertificate);
-                        // TODO should loop, but return for now
-                        return false;
-                    default:
-                        throw new IllegalStateException();
-                }
+                return handlePending(status, requiredCertificate, trustState);
             }
             case IN_USE: {
-                // Is it still OK? validate it to find out
-                IssuedCertificate issued = status.issuedCertificate(); // Alternative load the chain from the p12
-                Result result = validate(now, pkixParameters(trustAnchors(trustState, TrustState.TRUSTED, TrustState.PHASE_OUT)), null, issued.completeChain());
-                switch (result.type) {
-                    case OK:
-                        // still valid: do nothing (this is the common case)
-                        return false;
-                    case OTHER:
-                    case NO_TRUST_ANCHOR:
-                    case EXPIRED:
-                        LOGGER.error("Oh dear we shouldn't normally get here");
-                        // fall thru
-                    case WILL_EXPIRE:
-                        status = requestCertificate(status, requiredCertificate);
-                        return true;
-                    default:
-                        throw new IllegalStateException();
-                }
+                return handleInUse(status, requiredCertificate, trustState);
             }
             case NOT_NEEDED:
                 // This shouldn't occur here and only be handled at a higher level
@@ -168,14 +81,136 @@ public class CertificateController {
         throw new AssertionError();
     }
 
-    CertificateStatus requestCertificate(CertificateStatus status, RequiredCertificate requiredCertificate) {
-        byte[] token = issuer.requestCertificate(requiredCertificate.subjectAndSan(), 10);
+    private CertificateStatus handleNew(CertificateStatus status, RequiredCertificate requiredCertificate) {
+        byte[] token = issuer.requestCertificate(requiredCertificate.subjectAndSan(), requestedValidity);
         CertificateStatus requested = status.toRequested(token);
-        certificateStatusStore.store(requiredCertificate.subjectIdentity(), requested);
+        certificateStatusStore.storeStatus(requested);
         return requested;
     }
 
-    Set<TrustAnchor> trustAnchors(Map<Fingerprint, TrustRoot> trustState, TrustState... s) {
+    private CertificateReconcileResult handleRequested(CertificateStatus status,
+                                               RequiredCertificate requiredCertificate,
+                                               Map<Fingerprint, TrustRoot> trustState)
+            throws CertificateParsingException, CertificateEncodingException {
+
+        // TODO could optimise away the load if fallen through
+        // TODO it's possible that the certIssuer changes (e.g. strimzi to cert manager) after the request is made and before it completes
+        // we need to be able to detect this and issue the request again
+        var issuedOpt = issuer.pollForRequestedCertificate(status.tokenBytes());
+        if (issuedOpt.isEmpty()) {
+            // Not issued yet: Wait for another reconciliation
+            return CertificateReconcileResult.waitingForIssuance();
+        }
+        IssuedCertificate issued = issuedOpt.get();
+        Subject subject = requiredCertificate.subjectAndSan();
+        X509Certificate issuedCertificate = issued.issuedCertificate();
+        X500Principal requestedPrincipal = subject.principal();
+        X500Principal issuedPrincipal = issuedCertificate.getSubjectX500Principal();
+        if (!issuedPrincipal.equals(requestedPrincipal)) {
+            throw new IllegalStateException("Requested certificate for " + requestedPrincipal + " but was issued a certificate for " + issuedCertificate.getSubjectDN());
+        }
+        Set<String> issuedSans = PkiUtils.dnsNames(issuedCertificate);
+        Set<String> requestedSans = Set.copyOf(subject.subjectAltNames().values());
+        if (!issuedSans.equals(requestedSans)) {
+            throw new IllegalStateException("Requested certificate with subject alternative names " + requestedSans + " but was issued a certificate with " + issuedSans);
+        }
+
+        Set<TrustAnchor> anchors = trustAnchors(trustState, TrustState.TRUSTED);
+        if (anchors.isEmpty()) {
+            return waitingForTrust(requiredCertificate, status, issued);
+        }
+        Validator.Result result = validator.validate(issued, anchors);
+        switch (result.type()) {
+            case OK:
+                // The issued certificate is signed by an already trusted CA cert
+                return deploy(status, requiredCertificate, issued);
+            case WILL_EXPIRE:
+            case EXPIRED:
+            case OTHER: // TODO OTHER is probably an error case => reconciliation error.
+                status = handleNew(status, requiredCertificate);
+                // TODO should loop, but return for now
+                // TODO can we detect the case where the issuer issued a cert which isn't valid?
+                return CertificateReconcileResult.issuedBad();
+            case NO_TRUST_ANCHOR:
+                // TODO we can validate again with the issued cert's root CA cert as the trust anchor
+                // validate that the issued certificate is good. If not => reconciliation error.
+                status = status.toPending(issued);
+                // store in pending store
+                return waitingForTrust(requiredCertificate, status, issued);
+            default:
+                throw new IllegalStateException();
+        }
+    }
+
+    private CertificateReconcileResult handlePending(CertificateStatus status,
+                                             RequiredCertificate requiredCertificate,
+                                             Map<Fingerprint, TrustRoot> trustState) {
+        IssuedCertificate issued = status.issuedCertificate();
+        Validator.Result result = validator.validate(issued, trustAnchors(trustState, TrustState.TRUSTED));
+        switch (result.type()) {// should we query the trustState or should be pkixValidate?
+            case OK:
+            case WILL_EXPIRE: // it may be about to expire, but it's better than nothing
+                // deploy it for use
+                return deploy(status, requiredCertificate, issued);
+            case NO_TRUST_ANCHOR:
+                // It's still not trusted yet: we have to wait
+                return CertificateReconcileResult.waitingForTrust(new TrustRoot(issued.rootCaCertificate(), TrustState.TRUSTED));
+            case EXPIRED:
+            case OTHER:
+                status = handleNew(status, requiredCertificate);
+                // TODO should loop, but return for now
+                return CertificateReconcileResult.pendingBad();
+            default:
+                throw new IllegalStateException();
+        }
+    }
+
+    private CertificateReconcileResult deploy(CertificateStatus status, RequiredCertificate requiredCertificate, IssuedCertificate issued) {
+        status = status.toInUse();
+        // store in output store
+        for (var writer : certificateOutputWriters) {
+            try {
+                // TODO This can add and replace certs, but what about removing old certs?
+                writer.writeIssued(requiredCertificate.subjectIdentity(), issued);
+            } catch (CertificateException | InvalidKeySpecException | KeyStoreException | IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        certificateStatusStore.storeStatus(status);
+        return CertificateReconcileResult.ok();
+    }
+
+    private CertificateReconcileResult handleInUse(CertificateStatus status,
+                                           RequiredCertificate requiredCertificate,
+                                           Map<Fingerprint, TrustRoot> trustState) {
+        // Is it still OK? validate it to find out
+        IssuedCertificate issued = status.issuedCertificate(); // Alternative load the chain from the p12
+        Validator.Result result = validator.validate(issued, trustAnchors(trustState, TrustState.TRUSTED, TrustState.PHASE_OUT));
+        switch (result.type()) {
+            case OK:
+                // still valid: do nothing (this is the common case once a cluster is bootstrapped)
+                return CertificateReconcileResult.ok();
+            case OTHER:
+            case NO_TRUST_ANCHOR:
+            case EXPIRED:
+                LOGGER.error("Oh dear we shouldn't normally get here");
+                // fall thru
+            case WILL_EXPIRE:
+                status = handleNew(status, requiredCertificate);
+                return CertificateReconcileResult.waitingForIssuance();
+            default:
+                throw new IllegalStateException();
+        }
+    }
+
+    private CertificateReconcileResult waitingForTrust(RequiredCertificate requiredCertificate, CertificateStatus status, IssuedCertificate issued) {
+        status = status.toPending(issued);
+        certificateStatusStore.storeStatus(status);
+        return CertificateReconcileResult.waitingForTrust(new TrustRoot(issued.rootCaCertificate(), TrustState.TRUSTED));
+    }
+
+
+    private Set<TrustAnchor> trustAnchors(Map<Fingerprint, TrustRoot> trustState, TrustState... s) {
         Set<TrustState> x = Set.of(s);
         return trustState.values().stream()
             .filter(root -> x.contains(root.state()))
@@ -184,135 +219,7 @@ public class CertificateController {
     }
 
 
-    /** Validate a newly issued certificate */
-    void validateIssuedCertificate(Subject subject, IssuedCertificate issuedCert) throws CertificateParsingException {
-        X509Certificate issuedCertificate = issuedCert.issuedCertificate();
-        if (!issuedCertificate.getSubjectX500Principal().equals(new X500Principal("CN=" + subject.commonName() + ", O=" + subject.organizationName()))) {
-            throw new IllegalStateException("Requested certificate for " + subject.opensslDn() + " but was issued a certificate for " + issuedCertificate.getSubjectDN());
-        }
-        if (issuedCertificate.getSubjectAlternativeNames().equals(subject.subjectAltNames().values())) {
-            throw new IllegalStateException("Requested certificate with subject alternative names" + subject.subjectAltNames().values() + " but was issued a certificate with " + issuedCertificate.getSubjectAlternativeNames());
-        }
-        // TODO do cert path validation too (with UNTRUSTED+TRUSTED certs as trust roots)
-        // That way we can verify that new certs are actually fix problems
-        // E.g. what if the problem is in an intermediate certificate? It's possible that a newly issued cert has the same problem
-        // Detecting it here allows use to fail the reconciliation, rather than loop pointlessly
-        // creating new invalid certificates.
-    }
 
 
-    static class Result {
-        enum Type {
-            OK,
-            NO_TRUST_ANCHOR,
-            EXPIRED,
-            WILL_EXPIRE,
-            OTHER
-        }
-        private final Type type;
-        private final TrustAnchor anchor;
-        private final String description;
 
-        public Result(Type type, TrustAnchor anchor, String description) {
-            this.type = type;
-            this.anchor = anchor;
-            this.description = description;
-        }
-
-        static Result ok(TrustAnchor anchor) {
-            Objects.requireNonNull(anchor);
-            return new Result(Type.OK, anchor, null);
-        }
-        static Result noTrustAnchor() {
-            return new Result(Type.NO_TRUST_ANCHOR, null, null);
-        }
-        static Result expired() {
-            return new Result(Type.EXPIRED, null, null);
-        }
-        static Result willExpire(TrustAnchor anchor) {
-            return new Result(Type.WILL_EXPIRE, anchor, null);
-        }
-        static Result other(String description) {
-            return new Result(Type.OTHER, null, description);
-        }
-    }
-
-    Result validate(Instant now,
-                    PKIXParameters pkixParameters,
-                    RequiredCertificate requiredCertificate,
-                    List<X509Certificate> chain) {
-        Objects.requireNonNull(pkixParameters);
-
-        try {
-            // Validate whether there's currently a valid cert path
-            CertPath certPath = certificateFactory.generateCertPath(chain);
-            TrustAnchor currentTrustAnchor;
-            try {
-                currentTrustAnchor = pkixValidate(now, pkixParameters, requiredCertificate, certPath);
-            } catch (CertPathValidatorException e) {
-                CertPathValidatorException.Reason reason = e.getReason();
-                if (reason == CertPathValidatorException.BasicReason.EXPIRED) {
-                    return Result.expired();
-                } else if (reason == PKIXReason.NO_TRUST_ANCHOR) {
-                    return Result.noTrustAnchor();
-                } else {
-                    return Result.other(describeCertPathFailure(e));
-                }
-            }
-
-            // Validate whether there will still be a valid cert path in $renewalPeriod days time
-            Instant date = now.plus(renewalDays, ChronoUnit.DAYS);
-            try {
-                TrustAnchor futureTrustAnchor = pkixValidate(date, pkixParameters, requiredCertificate, certPath);
-                if (!currentTrustAnchor.equals(futureTrustAnchor)) {
-                    throw new AssertionError();
-                }
-                return Result.ok(currentTrustAnchor);
-            } catch (CertPathValidatorException e) {
-                CertPathValidatorException.Reason reason = e.getReason();
-                if (reason == CertPathValidatorException.BasicReason.EXPIRED) {
-                    return Result.willExpire(currentTrustAnchor);
-                } else if (reason == PKIXReason.NO_TRUST_ANCHOR) {
-                    return Result.noTrustAnchor();
-                } else {
-                    return Result.other(describeCertPathFailure(e));
-                }
-            }
-        } catch (CertificateException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private String describeCertPathFailure(CertPathValidatorException e) {
-        int index = e.getIndex();
-        if (index != -1) {
-            X509Certificate certificate = (X509Certificate) e.getCertPath().getCertificates().get(index);
-            return "The certificate at index " + index + " with fingerprint " + fingerprint(certificate) + " and subject " + certificate.getSubjectDN() + " has problem " + e.getReason();
-        } else {
-            return e.getReason().toString() + " (no certificate )";
-        }
-    }
-
-    TrustAnchor pkixValidate(Instant date, PKIXParameters pkixParameters, RequiredCertificate requiredCertificate, CertPath certPath)
-            throws CertPathValidatorException {
-        try {
-            pkixParameters.setDate(new Date(date.getEpochSecond() * 1000L));
-            TrustAnchor trustAnchor = ((PKIXCertPathValidatorResult) pkixValidator.validate(certPath, pkixParameters)).getTrustAnchor();
-            LOGGER.debug("Valid cert path exists at {}: cert: {}, trustAnchor: {}", date, requiredCertificate, trustAnchor);
-            return trustAnchor;
-        } catch (InvalidAlgorithmParameterException e) {
-            throw new RuntimeException(e); // should never happen
-        }
-    }
-
-    private PKIXParameters pkixParameters(Set<TrustAnchor> anchors) {
-        PKIXParameters pkixParameters;
-        try {
-            pkixParameters = new PKIXParameters(anchors);
-        } catch (InvalidAlgorithmParameterException e) {
-            throw new RuntimeException(e);
-        }
-        pkixParameters.setRevocationEnabled(false);
-        return pkixParameters;
-    }
 }

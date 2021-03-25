@@ -5,6 +5,6 @@
 package io.strimzi.operator.cluster.model.pki;
 
 public interface CertificateStatusStore {
-    CertificateStatus load(SubjectIdentity subjectDn);
-    public void store(SubjectIdentity subjectDn, CertificateStatus c);
+    CertificateStatus loadStatus(SubjectIdentity subjectIdentity);
+    void storeStatus(CertificateStatus c);
 }

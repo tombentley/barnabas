@@ -18,10 +18,14 @@ import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
+import java.security.cert.CertificateParsingException;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Helper functions for PEM encoding
@@ -30,6 +34,9 @@ final class PkiUtils {
 
     public static final String BEGIN_CERTIFICATE = "-----BEGIN CERTIFICATE-----";
     public static final String END_CERTIFICATE = "-----END CERTIFICATE-----";
+
+    public static final String BEGIN_PRIVATE_KEY = "-----BEGIN PRIVAT KEY-----";
+    public static final String END_PRIVATE_KEY = "-----END PRIVATE KEY-----";
 
     private PkiUtils() {
     }
@@ -96,15 +103,30 @@ final class PkiUtils {
                 '\n' + END_CERTIFICATE;
     }
 
+    public static byte[] asPemBytes(X509Certificate x509) throws CertificateEncodingException {
+        ByteBuffer byteBuffer = asPemBuffer(x509);
+        byte[] result = new byte[byteBuffer.remaining()];
+        byteBuffer.get(result);
+        return result;
+    }
+
+    public static String asPemKey(byte[] key) {
+        Base64.Encoder encoder = Base64.getEncoder();
+        return BEGIN_PRIVATE_KEY + '\n' +
+                encoder.encodeToString(key) +
+                '\n' + END_PRIVATE_KEY;
+    }
+
     public static ByteBuffer asPemBuffer(X509Certificate x509) throws CertificateEncodingException {
-        byte[] encoded = x509.getEncoded();
-        int worseCaseSize = (int)(encoded.length / 3.0 + 1) * 4
+        byte[] asn1 = x509.getEncoded();
+        int worseCaseSize = (int)(asn1.length / 3.0 + 1) * 4
                 + BEGIN_CERTIFICATE.length() // each char therein will encode to 1 byte
                 + END_CERTIFICATE.length() // each char therein will encode to 1 byte
                 + 2; // for the two \n
         var buf = ByteBuffer.allocate(worseCaseSize)
-                .put(StandardCharsets.ISO_8859_1.encode(BEGIN_CERTIFICATE)).put((byte) '\n')
-                .put(Base64.getEncoder().encode(encoded))
+                .put(StandardCharsets.ISO_8859_1.encode(BEGIN_CERTIFICATE))
+                .put((byte) '\n')
+                .put(Base64.getEncoder().encode(asn1))
                 .put((byte) '\n')
                 .put(StandardCharsets.ISO_8859_1.encode(END_CERTIFICATE));
         buf.flip();
@@ -195,6 +217,27 @@ final class PkiUtils {
     public static X509Certificate x509Certificate(Path path) throws CertificateException, IOException {
         try (InputStream stream = Files.newInputStream(path)) {
             return x509Certificate(stream);
+        }
+    }
+
+    public static Set<String> dnsNames(X509Certificate x509Certificate) throws CertificateParsingException {
+        Integer dnsType = Integer.valueOf(2);
+        return sansOfType(x509Certificate, dnsType);
+    }
+
+    public static Set<String> ipAddresses(X509Certificate x509Certificate) throws CertificateParsingException {
+        Integer dnsType = Integer.valueOf(7);
+        return sansOfType(x509Certificate, dnsType);
+    }
+
+    private static Set<String> sansOfType(X509Certificate x509Certificate, Integer dnsType) throws CertificateParsingException {
+        Collection<List<?>> subjectAlternativeNames = x509Certificate.getSubjectAlternativeNames();
+        if (subjectAlternativeNames == null) {
+            return Set.of();
+        } else {
+            return subjectAlternativeNames.stream()
+                    .filter(list -> dnsType.equals(list.get(0)))
+                    .map(list -> (String) list.get(0)).collect(Collectors.toUnmodifiableSet());
         }
     }
 }

@@ -24,8 +24,8 @@ class TrustRoot {
     private Fingerprint fingerprint = null;
 
     public TrustRoot(X509Certificate x509, TrustState state) {
-        this.state = state;
-        this.x509 = x509;
+        this.state = Objects.requireNonNull(state);
+        this.x509 = Objects.requireNonNull(x509);
     }
 
     public Fingerprint fingerprint() {
