@@ -45,7 +45,7 @@ class DeploymentMockBuilder extends MockBuilder<Deployment, DeploymentList, Roll
             LOGGER.debug("create {} {} -> {}", resourceType, resourceName, deployment);
             deployment.getMetadata().setGeneration(Long.valueOf(0));
             deployment.setStatus(new DeploymentStatusBuilder().withObservedGeneration(Long.valueOf(0)).build());
-            db.put(resourceName, copyResource(deployment));
+            db.put(resourceName, copyResource(resourceName, deployment));
             for (int i = 0; i < deployment.getSpec().getReplicas(); i++) {
                 String uuid = UUID.randomUUID().toString();
                 String podName = deployment.getMetadata().getName() + "-" + uuid;
@@ -67,7 +67,7 @@ class DeploymentMockBuilder extends MockBuilder<Deployment, DeploymentList, Roll
                     return podsInDeployment;
                 });
             }
-            return deployment;
+            return copyResource(resourceName, deployment);
         });
     }
 
@@ -82,7 +82,7 @@ class DeploymentMockBuilder extends MockBuilder<Deployment, DeploymentList, Roll
             deployment.getMetadata().setGeneration(Long.valueOf(0));
             deployment.setStatus(new DeploymentStatusBuilder().withObservedGeneration(Long.valueOf(0)).build());
             LOGGER.debug("patched {} {} -> {}", resourceType, resourceName, deployment);
-            db.put(resourceName, copyResource(deployment));
+            db.put(resourceName, copyResource(resourceName, deployment));
 
             // Handle case where patch reduces replicas
             int podsToDelete = podsForDeployments.get(deploymentName).size() - deployment.getSpec().getReplicas();

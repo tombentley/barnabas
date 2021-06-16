@@ -4,24 +4,6 @@
  */
 package io.strimzi.test.mockkube;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.fabric8.kubernetes.api.model.DeletionPropagation;
-import io.fabric8.kubernetes.api.model.HasMetadata;
-import io.fabric8.kubernetes.api.model.KubernetesResource;
-import io.fabric8.kubernetes.api.model.KubernetesResourceList;
-import io.fabric8.kubernetes.api.model.LabelSelector;
-import io.fabric8.kubernetes.api.model.LabelSelectorRequirement;
-import io.fabric8.kubernetes.client.KubernetesClientException;
-import io.fabric8.kubernetes.client.Watch;
-import io.fabric8.kubernetes.client.Watcher;
-import io.fabric8.kubernetes.client.dsl.MixedOperation;
-import io.fabric8.kubernetes.client.dsl.Resource;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.mockito.ArgumentMatchers;
-import org.mockito.invocation.InvocationOnMock;
-import org.mockito.stubbing.OngoingStubbing;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -38,10 +20,32 @@ import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.fabric8.kubernetes.api.model.DeletionPropagation;
+import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.KubernetesResource;
+import io.fabric8.kubernetes.api.model.KubernetesResourceList;
+import io.fabric8.kubernetes.api.model.LabelSelector;
+import io.fabric8.kubernetes.api.model.LabelSelectorRequirement;
+import io.fabric8.kubernetes.api.model.ObjectMeta;
+import io.fabric8.kubernetes.client.KubernetesClientException;
+import io.fabric8.kubernetes.client.Watch;
+import io.fabric8.kubernetes.client.Watcher;
+import io.fabric8.kubernetes.client.dsl.MixedOperation;
+import io.fabric8.kubernetes.client.dsl.Replaceable;
+import io.fabric8.kubernetes.client.dsl.Resource;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.OngoingStubbing;
+
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -110,7 +114,7 @@ class MockBuilder<T extends HasMetadata,
     }
 
     @SuppressWarnings("unchecked")
-    protected T copyResource(T resource) {
+    protected T copyResource(String resourceName, T resource) {
         if (resource == null) {
             return null;
         } else {
@@ -118,7 +122,17 @@ class MockBuilder<T extends HasMetadata,
             try {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 objectMapper.writeValue(baos, resource);
-                return (T) objectMapper.readValue(baos.toByteArray(), resource.getClass());
+                T copy = (T) objectMapper.readValue(baos.toByteArray(), resource.getClass());
+                ObjectMeta objectMeta = copy.getMetadata();
+                if (objectMeta == null) {
+                    objectMeta = new ObjectMeta();
+                    objectMeta.setName(resourceName);
+                    copy.setMetadata(objectMeta);
+                }
+                if (resourceName != null && objectMeta.getName() != null && !resourceName.equals(objectMeta.getName())) {
+                    throw new KubernetesClientException(String.format("Name does not match, %s != %s", resourceName, objectMeta.getName()));
+                }
+                return copy;
             } catch (IOException e) {
                 return null;
             }
@@ -248,7 +262,7 @@ class MockBuilder<T extends HasMetadata,
         KubernetesResourceList<T> l = mock(listClass);
         Collection<T> values;
         synchronized (db) {
-            values = db.values().stream().filter(predicate).map(resource -> copyResource(resource)).collect(Collectors.toList());
+            values = db.values().stream().filter(predicate).map(resource -> copyResource(resource.getMetadata().getName(), resource)).collect(Collectors.toList());
         }
         when(l.getItems()).thenAnswer(i3 -> {
             LOGGER.debug("{} list -> {}", resourceTypeClass.getSimpleName(), values);
@@ -274,7 +288,7 @@ class MockBuilder<T extends HasMetadata,
         when(resource.createOrReplace(any())).thenAnswer(i -> {
             T resource2 = i.getArgument(0);
             if (db.containsKey(resourceName)) {
-                return resource.patch(resource2);
+                return doReplace(resourceName, null, resource2);
             } else {
                 return doCreate(resourceName, resource2);
             }
@@ -283,15 +297,25 @@ class MockBuilder<T extends HasMetadata,
         when(resource.withGracePeriod(anyLong())).thenReturn(resource);
         mockWithPropagationPolicy(resource);
         mockPatch(resourceName, resource);
+        when(resource.lockResourceVersion(anyString())).thenAnswer(i -> {
+            String matchVersion = i.getArgument(0);
+            Replaceable<T> replaceable = mock(Replaceable.class);
+            when(replaceable.replace(any())).thenAnswer(i2 -> {
+                T resource2 = i2.getArgument(0);
+                return doReplace(resourceName, matchVersion, resource2);
+            });
+            return replaceable;
+        });
+        when(resource.lockResourceVersion(Mockito.isNull())).thenThrow(new IllegalArgumentException("Null resource version"));
         when(resource.edit()).thenAnswer(i -> {
             T t = resource.get();
-            Function f = i.getArgument(0);
-            return doPatch(t.getMetadata().getName(), resource, (T) f.apply(t));
+            Function<T, T> f = i.getArgument(0);
+            return doPatch(resourceName, resource, (T) f.apply(t));
         });
         when(resource.edit(any(UnaryOperator.class))).thenAnswer(i -> {
             T t = resource.get();
-            Function f = i.getArgument(0);
-            return doPatch(t.getMetadata().getName(), resource, (T) f.apply(t));
+            Function<T, T> f = i.getArgument(0);
+            return doPatch(resourceName, resource, (T) f.apply(t));
         });
         mockDelete(resourceName, resource);
         mockIsReady(resourceName, resource);
@@ -376,11 +400,11 @@ class MockBuilder<T extends HasMetadata,
 
     private T doPatch(String resourceName, R resource, T instance) {
         checkDoesExist(resourceName);
-        T argument = copyResource(instance);
+        T argument = copyResource(resourceName, instance);
         LOGGER.debug("patch {} {} -> {}", resourceType, resourceName, resource);
-        db.put(resourceName, incrementGeneration(incrementResourceVersion(argument)));
+        db.put(resourceName, incrementGeneration(resourceName, incrementResourceVersion(resourceName, argument)));
         fireWatchers(resourceName, argument, Watcher.Action.MODIFIED, "patch");
-        return copyResource(argument);
+        return copyResource(resourceName, argument);
     }
 
     protected void mockWithPropagationPolicy(R resource) {
@@ -418,33 +442,62 @@ class MockBuilder<T extends HasMetadata,
     private T doCreate(String resourceName, T argument) {
         checkNotExists(resourceName);
         LOGGER.debug("create {} {} -> {}", resourceType, resourceName, argument);
-        db.put(resourceName, incrementGeneration(incrementResourceVersion(copyResource(argument))));
+        T inserted = copyResource(resourceName, argument);
+        db.put(resourceName, incrementGeneration(resourceName, incrementResourceVersion(resourceName, inserted)));
         fireWatchers(resourceName, argument, Watcher.Action.ADDED, "create");
-        return copyResource(argument);
+        return copyResource(resourceName, inserted);
     }
 
-    protected T incrementResourceVersion(T resource) {
-        String resourceVersion = resource.getMetadata().getResourceVersion();
-        if (resourceVersion == null || resourceVersion.isEmpty()) {
+    private T doReplace(String resourceName, String matchVersion, T argument) {
+        checkDoesExist(resourceName);
+        if (matchVersion != null &&
+                !matchVersion.equals(db.get(resourceName).getMetadata().getResourceVersion())) {
+            throw new KubernetesClientException("Version mismatch " + matchVersion + " cf " + db.get(resourceName).getMetadata().getResourceVersion());
+        }
+        LOGGER.debug("replace {} {} -> {}", resourceType, resourceName, argument);
+        db.put(resourceName, incrementGeneration(resourceName, incrementResourceVersion(resourceName, copyResource(resourceName, argument))));
+        fireWatchers(resourceName, argument, Watcher.Action.MODIFIED, "replace");
+        return copyResource(resourceName, argument);
+    }
+
+    protected T incrementResourceVersion(String resourceName, T resource) {
+        ObjectMeta objectMeta = resource.getMetadata();
+        if (objectMeta == null) {
+            objectMeta = new ObjectMeta();
+            objectMeta.setName(resourceName);
+            resource.setMetadata(objectMeta);
+        }
+        if (resourceName != null && objectMeta.getName() != null && !resourceName.equals(objectMeta.getName())) {
+            throw new KubernetesClientException("Name does not match");
+        }
+        String resourceVersion = null;
+        T storedResource = db.get(resourceName);
+        if (storedResource != null) {
+            resourceVersion = storedResource.getMetadata().getResourceVersion();
+        }
+        if (resourceVersion == null) {
             resourceVersion = "0";
         }
         resource.getMetadata().setResourceVersion(Long.toString(Long.parseLong(resourceVersion) +  1));
         return resource;
     }
 
-    protected T incrementGeneration(T resource) {
-        Long generation = resource.getMetadata().getGeneration();
-        if (generation == null) {
-            resource.getMetadata().setGeneration(0L);
-        } else {
-            resource.getMetadata().setGeneration(generation + 1);
+    protected T incrementGeneration(String resourceName, T resource) {
+        Long generation = null;
+        T storedResource = db.get(resourceName);
+        if (storedResource != null) {
+            generation = storedResource.getMetadata().getGeneration();
         }
+        if (generation == null) {
+            generation = 0L;
+        }
+        resource.getMetadata().setGeneration(generation + 1);
         return resource;
     }
 
     protected OngoingStubbing<T> mockGet(String resourceName, R resource) {
         return when(resource.get()).thenAnswer(i -> {
-            T r = copyResource(db.get(resourceName));
+            T r = copyResource(resourceName, db.get(resourceName));
             LOGGER.debug("{} {} get {}", resourceType, resourceName, r);
             return r;
         });
@@ -463,7 +516,7 @@ class MockBuilder<T extends HasMetadata,
             T r = i.getArgument(0);
             updateStatus(r.getMetadata().getNamespace(), r.getMetadata().getName(), r);
             LOGGER.debug("{} {} setStatus {}", resourceType, resourceName, r);
-            return copyResource(db.get(resourceName));
+            return copyResource(resourceName, db.get(resourceName));
         });
     }
 
