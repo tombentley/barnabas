@@ -4,6 +4,28 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateEncodingException;
+import java.security.cert.X509Certificate;
+import java.text.ParseException;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.TreeSet;
+import java.util.concurrent.ExecutionException;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Node;
 import io.fabric8.kubernetes.api.model.OwnerReference;
@@ -29,6 +51,7 @@ import io.strimzi.api.kafka.model.CertificateAuthority;
 import io.strimzi.api.kafka.model.Constants;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
+import io.strimzi.api.kafka.model.KafkaFluent;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.api.kafka.model.KafkaSpec;
 import io.strimzi.api.kafka.model.listener.NodeAddressType;
@@ -110,41 +133,18 @@ import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
-
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.common.KafkaException;
 import org.quartz.CronExpression;
-
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.CertificateEncodingException;
-import java.security.cert.X509Certificate;
-import java.text.ParseException;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.TimeZone;
-import java.util.function.Function;
-import java.util.TreeSet;
-import java.util.concurrent.ExecutionException;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 import static io.strimzi.operator.cluster.model.AbstractModel.ANCILLARY_CM_KEY_LOG_CONFIG;
 import static io.strimzi.operator.cluster.model.AbstractModel.ANNO_STRIMZI_IO_STORAGE;
 import static io.strimzi.operator.cluster.model.KafkaCluster.ANNO_STRIMZI_IO_KAFKA_VERSION;
 import static io.strimzi.operator.cluster.model.KafkaVersion.compareDottedVersions;
 import static java.util.Collections.emptyList;
+import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
-import static java.util.Collections.emptyMap;
 
 /**
  * <p>Assembly operator for a "Kafka" assembly, which manages:</p>
@@ -258,12 +258,19 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         reconcileState.initialStatus()
                 .compose(state -> state.reconcileCas(this::dateSupplier))
+                .compose(state -> state.bootstrapCa())
                 .compose(state -> state.clusterOperatorSecret(this::dateSupplier))
                 .compose(state -> state.getKafkaClusterDescription())
                 .compose(state -> state.prepareVersionChange())
                 // Roll everything if a new CA is added to the trust store.
                 .compose(state -> state.rollingUpdateForNewCaKey())
                 .compose(state -> state.getZookeeperDescription())
+                .compose(state -> state.zkGenerateCertificates(this::dateSupplier))
+                .compose(state -> state.kafkaGenerateCertificates(this::dateSupplier))
+                .compose(state -> state.customListenerCertificates())
+
+
+
                 .compose(state -> state.zkModelWarnings())
                 .compose(state -> state.zkManualPodCleaning())
                 .compose(state -> state.zkNetPolicy())
@@ -273,7 +280,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.zkPvcs())
                 .compose(state -> state.zkService())
                 .compose(state -> state.zkHeadlessService())
-                .compose(state -> state.zkGenerateCertificates(this::dateSupplier))
+
+
                 .compose(state -> state.zkAncillaryCm())
                 .compose(state -> state.zkNodesSecret())
                 .compose(state -> state.zkPodDisruptionBudget())
@@ -306,8 +314,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaRoutesReady())
                 .compose(state -> state.kafkaIngressesReady())
                 .compose(state -> state.kafkaIngressesV1Beta1Ready())
-                .compose(state -> state.kafkaGenerateCertificates(this::dateSupplier))
-                .compose(state -> state.customListenerCertificates())
+
                 .compose(state -> state.kafkaAncillaryCm())
                 .compose(state -> state.kafkaBrokersSecret())
                 .compose(state -> state.kafkaJmxSecret())
@@ -671,6 +678,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             secretReconciliations.add(clientsSecretReconciliation);
                         }
 
+                        KafkaFluent.StatusNested<KafkaBuilder> statusBuilder = new KafkaBuilder(kafkaAssembly).editOrNewStatus();
+                        Kafka build = statusBuilder.endStatus().build();
+                        crdOperator.updateStatusAsync(reconciliation, build);
+
                         CompositeFuture.join(secretReconciliations).onComplete(res -> {
                             if (res.succeeded())    {
                                 future.complete(this);
@@ -711,6 +722,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          */
         Future<ReconciliationState> rollingUpdateForNewCaKey() {
             List<String> reason = new ArrayList<>(4);
+            // TODO is it really correct that this is only needed for new keys? What about expiring certs in the certpath?
             if (this.clusterCa.keyReplaced()) {
                 reason.add("trust new cluster CA certificate signed by new key");
             }
@@ -740,7 +752,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                         .compose(i -> rollDeploymentIfExists(EntityOperator.entityOperatorName(name), reason.toString()))
                         .compose(i -> rollDeploymentIfExists(KafkaExporter.kafkaExporterName(name), reason.toString()))
                         .compose(i -> rollDeploymentIfExists(CruiseControl.cruiseControlName(name), reason.toString()))
-                        .map(i -> this);
+                        .compose(i -> {
+                            KafkaBuilder kafkaBuilder = new KafkaBuilder(kafkaAssembly);
+                            return crdOperator.updateStatusAsync(reconciliation, kafkaBuilder.build());
+                        })
+                        .map(this);
             } else {
                 return Future.succeededFuture(this);
             }
@@ -3541,6 +3557,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION;
         }
 
+        /**
+         * Records any existing CO secret.
+         * Updates the Secret with a new cert & key if needed.
+         * Reconciles the Secret.
+         * @param dateSupplier The current time.
+         * @return this
+         */
         Future<ReconciliationState> clusterOperatorSecret(Supplier<Date> dateSupplier) {
             oldCoSecret = clusterCa.clusterOperatorSecret();
 
@@ -3757,6 +3780,9 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return withVoid(Future.succeededFuture());
         }
 
+        public Future<ReconciliationState> bootstrapCa() {
+            return Future.succeededFuture(this); // failedFuture("TODO");
+        }
     }
 
     /* test */ Date dateSupplier() {

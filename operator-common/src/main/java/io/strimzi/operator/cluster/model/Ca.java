@@ -4,28 +4,16 @@
  */
 package io.strimzi.operator.cluster.model;
 
-import io.fabric8.kubernetes.api.model.OwnerReference;
-import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.api.model.SecretBuilder;
-import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
-import io.strimzi.certs.CertAndKey;
-import io.strimzi.certs.CertManager;
-import io.strimzi.certs.SecretCertProvider;
-import io.strimzi.certs.Subject;
-import io.strimzi.operator.common.Annotations;
-import io.strimzi.operator.common.PasswordGenerator;
-import io.strimzi.operator.common.Reconciliation;
-import io.strimzi.operator.common.ReconciliationLogger;
-import io.strimzi.operator.common.Util;
-
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.KeyStoreException;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.Certificate;
+import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
@@ -45,6 +33,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import io.fabric8.kubernetes.api.model.OwnerReference;
+import io.fabric8.kubernetes.api.model.Secret;
+import io.fabric8.kubernetes.api.model.SecretBuilder;
+import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
+import io.strimzi.certs.CertAndKey;
+import io.strimzi.certs.CertManager;
+import io.strimzi.certs.SecretCertProvider;
+import io.strimzi.certs.Subject;
+import io.strimzi.operator.common.Annotations;
+import io.strimzi.operator.common.PasswordGenerator;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
+import io.strimzi.operator.common.Util;
 
 import static java.time.temporal.ChronoField.DAY_OF_MONTH;
 import static java.time.temporal.ChronoField.HOUR_OF_DAY;
@@ -277,6 +279,16 @@ public abstract class Ca {
         return result;
     }
 
+    /**
+     * Issues a certificate for the given subject, signed by the current CA cert/key pair.
+     * @param subject The subject
+     * @param csrFile The CSR file
+     * @param keyFile The file that will contain the issued certificate
+     * @param certFile The file that will contain the issued key
+     * @param keyStoreFile A keystore to be updated
+     * @return
+     * @throws IOException
+     */
     /*test*/ CertAndKey generateSignedCert(Subject subject,
                                            File csrFile, File keyFile, File certFile, File keyStoreFile) throws IOException {
         LOGGER.debugCr(reconciliation, "Generating certificate {} with SAN {}, signed by CA {}", subject, subject.subjectAltNames(), this);
@@ -505,12 +517,14 @@ public abstract class Ca {
      * @param namespace The namespace containing the cluster.
      * @param clusterName The name of the cluster.
      * @param labels The labels of the {@code Secrets} created.
-     * @param additonalLabels The additional labels of the {@code Secrets} created.
-     * @param additonalAnnotations The additional annotations of the {@code Secrets} created.
+     * @param additionalLabels The additional labels of the {@code Secrets} created.
+     * @param additionalAnnotations The additional annotations of the {@code Secrets} created.
      * @param ownerRef The owner of the {@code Secrets} created.
      * @param maintenanceWindowSatisfied Flag indicating whether we are in the maintenance window
      */
-    public void createRenewOrReplace(String namespace, String clusterName, Map<String, String> labels, Map<String, String> additonalLabels, Map<String, String> additonalAnnotations, OwnerReference ownerRef, boolean maintenanceWindowSatisfied) {
+    public void createRenewOrReplace(String namespace, String clusterName, Map<String, String> labels,
+                                     Map<String, String> additionalLabels, Map<String, String> additionalAnnotations,
+                                     OwnerReference ownerRef, boolean maintenanceWindowSatisfied) {
         X509Certificate currentCert = cert(caCertSecret, CA_CRT);
         Map<String, String> certData;
         Map<String, String> keyData;
@@ -533,7 +547,7 @@ public abstract class Ca {
                     keyData = new HashMap<>(1);
                     certData = new HashMap<>(caCertSecret.getData());
                     if (certData.containsKey(CA_CRT)) {
-                        String notAfterDate = DATE_TIME_FORMATTER.format(currentCert.getNotAfter().toInstant().atZone(ZoneId.of("Z")));
+                        String notAfterDate = formatDate(currentCert.getNotAfter());
                         addCertCaToTrustStore("ca-" + notAfterDate + ".crt", certData);
                         certData.put("ca-" + notAfterDate + ".crt", certData.remove(CA_CRT));
                     }
@@ -584,8 +598,8 @@ public abstract class Ca {
             keyAnnotations.put(ANNO_STRIMZI_IO_FORCE_REPLACE, Annotations.stringAnnotation(caKeySecret, ANNO_STRIMZI_IO_FORCE_REPLACE, "false"));
         }
 
-        caCertSecret = secretCertProvider.createSecret(namespace, caCertSecretName, certData, Util.mergeLabelsOrAnnotations(labels, additonalLabels),
-                Util.mergeLabelsOrAnnotations(certAnnotations, additonalAnnotations), ownerRef);
+        caCertSecret = secretCertProvider.createSecret(namespace, caCertSecretName, certData, Util.mergeLabelsOrAnnotations(labels, additionalLabels),
+                Util.mergeLabelsOrAnnotations(certAnnotations, additionalAnnotations), ownerRef);
 
         caKeySecret = secretCertProvider.createSecret(namespace, caKeySecretName, keyData, labels,
                 keyAnnotations, ownerRef);
@@ -899,6 +913,13 @@ public abstract class Ca {
         }
     }
 
+    /**
+     * Generate a CA certificate and key, updating the given keyData and certData and returning the certificate fingerprint.
+     * @param subject The subject.
+     * @param keyData The key data to update.
+     * @param certData The cert data to update.
+     * @return The generated certificate fingerprint.
+     */
     private void generateCaKeyAndCert(Subject subject, Map<String, String> keyData, Map<String, String> certData) {
         try {
             LOGGER.debugCr(reconciliation, "Generating CA with subject={}", subject);
@@ -940,6 +961,29 @@ public abstract class Ca {
         } catch (IOException | CertificateException | KeyStoreException | NoSuchAlgorithmException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private String formatDate(Date notAfter) {
+        return DATE_TIME_FORMATTER.format(notAfter.toInstant().atZone(ZoneId.of("Z")));
+    }
+
+    private String fingerprint(X509Certificate cert) throws CertificateEncodingException {
+        try {
+            return hex(MessageDigest.getInstance("SHA1").digest(cert.getEncoded()));
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException(e); // SHA1 should always exist
+        }
+    }
+
+    private String hex(byte[] bytes) {
+        char[] hexChars = "0123456789ABCDEF".toCharArray();
+        char[] resultChars = new char[bytes.length * 2];
+        for (int i = 0; i < bytes.length; i += 2) {
+            int v = bytes[i] & 0xFF;
+            resultChars[i] = hexChars[v >>> 4];
+            resultChars[i + 1] = hexChars[v & 0x0F];
+        }
+        return new String(resultChars);
     }
 
     private void renewCaCert(Subject subject, Map<String, String> certData) {

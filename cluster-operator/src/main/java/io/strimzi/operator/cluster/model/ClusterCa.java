@@ -4,13 +4,6 @@
  */
 package io.strimzi.operator.cluster.model;
 
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.regex.Pattern;
-
 import io.fabric8.kubernetes.api.model.Secret;
 import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
 import io.strimzi.api.kafka.model.Kafka;
@@ -20,6 +13,13 @@ import io.strimzi.certs.Subject;
 import io.strimzi.operator.cluster.ClusterOperator;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.regex.Pattern;
 
 public class ClusterCa extends Ca {
 
@@ -79,6 +79,10 @@ public class ClusterCa extends Ca {
         return "cluster-ca";
     }
 
+    /**
+     * Record the initial secrets prior to updating during a reconciliation.
+     * @param secrets Secrets
+     */
     @SuppressWarnings("deprecation")
     public void initCaSecrets(List<Secret> secrets) {
         for (Secret secret: secrets) {
