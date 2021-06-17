@@ -406,7 +406,7 @@ public class Chain {
                 ZonedDateTime notAfter = now.plus(issuanceParams.getValidity(), ChronoUnit.DAYS).atZone(UTC);
 
                 if (issuerCert == null) {
-                    ((OpenSslCertManager) certManager).generateRootCaCert(
+                    certManager.generateRootCaCert(
                             issuanceParams.getSubject(), subjectKeyPath.toFile(), subjectCertPath.toFile(),
                             notBefore, notAfter, pathLen);
                 } else {
@@ -416,7 +416,7 @@ public class Chain {
                     Files.write(issuerKeyPath, issuerKey);
                     subjectKeyPath = Files.createTempFile(null, null);
                     subjectCertPath = Files.createTempFile(null, null);
-                    ((OpenSslCertManager) certManager).generateIntermediateCaCert(
+                    certManager.generateIntermediateCaCert(
                             issuerKeyPath.toFile(), issuerCertPath.toFile(),
                             issuanceParams.getSubject(),
                             subjectKeyPath.toFile(), subjectCertPath.toFile(),
