@@ -268,8 +268,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.zkGenerateCertificates(this::dateSupplier))
                 .compose(state -> state.kafkaGenerateCertificates(this::dateSupplier))
                 .compose(state -> state.customListenerCertificates())
-
-
+                .compose(state -> state.getEntityOperatorDescription())
+                .compose(state -> state.entityOperatorSecret(this::dateSupplier))
+                .compose(state -> state.getCruiseControlDescription())
+                .compose(state -> state.cruiseControlSecret(this::dateSupplier))
+                .compose(state -> state.getKafkaExporterDescription())
+                .compose(state -> state.kafkaExporterSecret(this::dateSupplier))
 
                 .compose(state -> state.zkModelWarnings())
                 .compose(state -> state.zkManualPodCleaning())
@@ -280,7 +284,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.zkPvcs())
                 .compose(state -> state.zkService())
                 .compose(state -> state.zkHeadlessService())
-
 
                 .compose(state -> state.zkAncillaryCm())
                 .compose(state -> state.zkNodesSecret())
@@ -314,7 +317,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaRoutesReady())
                 .compose(state -> state.kafkaIngressesReady())
                 .compose(state -> state.kafkaIngressesV1Beta1Ready())
-
                 .compose(state -> state.kafkaAncillaryCm())
                 .compose(state -> state.kafkaBrokersSecret())
                 .compose(state -> state.kafkaJmxSecret())
@@ -332,7 +334,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaNodePortExternalListenerStatus())
                 .compose(state -> state.kafkaCustomCertificatesToStatus())
 
-                .compose(state -> state.getEntityOperatorDescription())
                 .compose(state -> state.entityOperatorRole())
                 .compose(state -> state.entityTopicOperatorRole())
                 .compose(state -> state.entityUserOperatorRole())
@@ -341,22 +342,19 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.entityOperatorUserOpRoleBindingForRole())
                 .compose(state -> state.entityOperatorTopicOpAncillaryCm())
                 .compose(state -> state.entityOperatorUserOpAncillaryCm())
-                .compose(state -> state.entityOperatorSecret(this::dateSupplier))
                 .compose(state -> state.entityOperatorDeployment())
                 .compose(state -> state.entityOperatorReady())
 
-                .compose(state -> state.getCruiseControlDescription())
+
                 .compose(state -> state.cruiseControlNetPolicy())
                 .compose(state -> state.cruiseControlServiceAccount())
                 .compose(state -> state.cruiseControlAncillaryCm())
-                .compose(state -> state.cruiseControlSecret(this::dateSupplier))
                 .compose(state -> state.cruiseControlDeployment())
                 .compose(state -> state.cruiseControlService())
                 .compose(state -> state.cruiseControlReady())
 
-                .compose(state -> state.getKafkaExporterDescription())
+
                 .compose(state -> state.kafkaExporterServiceAccount())
-                .compose(state -> state.kafkaExporterSecret(this::dateSupplier))
                 .compose(state -> state.kafkaExporterDeployment())
                 .compose(state -> state.kafkaExporterReady())
 
