@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
 /**
  * Helper functions for PEM encoding
  */
-final class PkiUtils {
+public final class PkiUtils {
 
     public static final String BEGIN_CERTIFICATE = "-----BEGIN CERTIFICATE-----";
     public static final String END_CERTIFICATE = "-----END CERTIFICATE-----";

@@ -46,13 +46,13 @@ public class Validator {
         }
 
         private final Result.Type type;
-        private final X509Certificate expiring;
+        private final X509Certificate certificate;
         private final TrustAnchor anchor;
         private final String description;
 
-        public Result(Result.Type type, X509Certificate expiring, TrustAnchor anchor, String description) {
+        public Result(Result.Type type, X509Certificate certificate, TrustAnchor anchor, String description) {
             this.type = type;
-            this.expiring = expiring;
+            this.certificate = certificate;
             this.anchor = anchor;
             this.description = description;
         }
@@ -62,12 +62,12 @@ public class Validator {
         }
 
         public X509Certificate expiring() {
-            return expiring;
+            return certificate;
         }
 
         public boolean isRootExpiring() {
-            if (expiring != null && anchor != null) {
-                return Objects.equals(expiring, anchor.getTrustedCert());
+            if (certificate != null && anchor != null) {
+                return Objects.equals(certificate, anchor.getTrustedCert());
             }
             return false;
         }
@@ -103,8 +103,8 @@ public class Validator {
             return new Result(Result.Type.WILL_EXPIRE, expiringCert, anchor, null);
         }
 
-        static Result other(String description) {
-            return new Result(Result.Type.OTHER, null, null, description);
+        static Result other(String description, X509Certificate certificate) {
+            return new Result(Result.Type.OTHER, certificate, null, description);
         }
 
         @Override
@@ -114,6 +114,7 @@ public class Validator {
                     ", anchorFingerprint=" + (anchor == null || anchor.getTrustedCert() == null ? null : PkiUtils.fingerprint(anchor.getTrustedCert())) +
                     ", anchorSubject=" + (anchor == null ? null : anchor.getCA()) +
                     ", description='" + description + '\'' +
+                    (type == Type.OTHER ? ", certificate=" + certificate : "") +
                     ')';
         }
     }
@@ -167,7 +168,8 @@ public class Validator {
                 } else if (reason == PKIXReason.NO_TRUST_ANCHOR) {
                     return Result.noTrustAnchor();
                 } else {
-                    return Result.other(describeCertPathFailure(e));
+                    X509Certificate certificate = certificateFromValidationFailure(e);
+                    return Result.other(describeCertPathFailure(e, certificate, now), certificate);
                 }
             }
 
@@ -188,12 +190,21 @@ public class Validator {
                 } else if (reason == PKIXReason.NO_TRUST_ANCHOR) {
                     return Result.noTrustAnchor();
                 } else {
-                    return Result.other(describeCertPathFailure(e));
+                    X509Certificate certificate = certificateFromValidationFailure(e);
+                    return Result.other(describeCertPathFailure(e, certificate, date), certificate);
                 }
             }
         } catch (CertificateException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private X509Certificate certificateFromValidationFailure(CertPathValidatorException e) {
+        X509Certificate certificate = null;
+        if (e.getIndex() != -1) {
+            certificate = (X509Certificate) e.getCertPath().getCertificates().get(e.getIndex());
+        }
+        return certificate;
     }
 
     private PKIXParameters pkixParameters(Set<TrustAnchor> anchors) {
@@ -207,13 +218,11 @@ public class Validator {
         return pkixParameters;
     }
 
-    private String describeCertPathFailure(CertPathValidatorException e) {
-        int index = e.getIndex();
-        if (index != -1) {
-            X509Certificate certificate = (X509Certificate) e.getCertPath().getCertificates().get(index);
-            return "The certificate at index " + index + " with fingerprint " + fingerprint(certificate) + " and subject " + certificate.getSubjectDN() + " has problem " + e.getReason();
+    private String describeCertPathFailure(CertPathValidatorException e, X509Certificate certificate, Instant now) {
+        if (certificate != null) {
+            return "The certificate at index " + e.getIndex() + " with fingerprint " + fingerprint(certificate) + " and subject " + certificate.getSubjectDN() + " has problem " + e.getReason() + " when validated at " + now;
         } else {
-            return e.getReason().toString() + " (no certificate )";
+            return e.getReason().toString() + " when validated at " + now + " (no certificate)";
         }
     }
 

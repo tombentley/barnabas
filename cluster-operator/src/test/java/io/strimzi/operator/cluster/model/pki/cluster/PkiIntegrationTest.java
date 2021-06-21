@@ -4,15 +4,18 @@
  */
 package io.strimzi.operator.cluster.model.pki.cluster;
 
+import java.io.File;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,7 +25,7 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
 import io.strimzi.api.kafka.model.KafkaResources;
-import io.strimzi.certs.OpenSslCertManager;
+import io.strimzi.certs.CertManager;
 import io.strimzi.certs.Subject;
 import io.strimzi.operator.cluster.model.KafkaCluster;
 import io.strimzi.operator.cluster.model.pki.CertificateController;
@@ -32,6 +35,7 @@ import io.strimzi.operator.cluster.model.pki.CertificateState;
 import io.strimzi.operator.cluster.model.pki.CertificateStatus;
 import io.strimzi.operator.cluster.model.pki.Chain;
 import io.strimzi.operator.cluster.model.pki.NewTrustOutputWriter;
+import io.strimzi.operator.cluster.model.pki.PkiUtils;
 import io.strimzi.operator.cluster.model.pki.RequiredCertificate;
 import io.strimzi.operator.cluster.model.pki.TestClock;
 import io.strimzi.operator.cluster.model.pki.TrustController;
@@ -71,26 +75,43 @@ class PkiIntegrationTest {
     private CertificateController cc;
     private TrustController tc;
     private Chain.InternalIssuerSpec internalIssuerSpec;
+    private CertManager certManager;
+    int g = 1; // TODO get rid of this!
+    private String chainCertSecretName;
+    private String chainKeySecretName;
+    private String chainCertItem;
+    private String chainKeyItem;
+    private String trustPrivateStateName;
+    private String trustSecretName;
+    private String brokerCertsSecretName;
 
     @BeforeEach
     void setUp() {
         clock = new TestClock(Clock.fixed(Instant.ofEpochMilli(0), ZoneId.of("UTC")));
+        //certManager = TestOpenSslCertManager.record("testLifecycle", new OpenSslCertManager(clock), new File("/home/tom/messaging/operator/cluster-operator/src/test/resources/io/strimzi/operator/cluster/model/pki/cluster"));
+        certManager = TestOpenSslCertManager.replay("testLifecycle", new File("/home/tom/messaging/operator/cluster-operator/src/test/resources/io/strimzi/operator/cluster/model/pki/cluster"));
+
         client = new MockKube().build();
 
         // TODO non-null addresses
         brokerReqCert = ClusterPki.brokerSubject(NAMESPACE, CLUSTER, 0, null, null);
 
-        trustPrivateStateResource = client.secrets().inNamespace(NAMESPACE).withName(KafkaResources.clusterCaKeySecretName(CLUSTER));
-        trustSecretResource = client.secrets().inNamespace(NAMESPACE).withName(CLUSTER + "-cluster-ca-trust");
-        brokerCertsSecretResource = client.secrets().inNamespace(NAMESPACE).withName(KafkaCluster.brokersSecretName(CLUSTER));
+        trustPrivateStateName = KafkaResources.clusterCaKeySecretName(CLUSTER);
+        trustPrivateStateResource = client.secrets().inNamespace(NAMESPACE).withName(trustPrivateStateName);
         trustPrivateState = new TrustPrivateState(trustPrivateStateResource);
+
+        trustSecretName = CLUSTER + "-cluster-ca-trust";
+        trustSecretResource = client.secrets().inNamespace(NAMESPACE).withName(trustSecretName);
         NewTrustOutputWriter trustOutputWriter = new NewTrustOutputWriter(trustSecretResource);
+
+        brokerCertsSecretName = KafkaCluster.brokersSecretName(CLUSTER);
+        brokerCertsSecretResource = client.secrets().inNamespace(NAMESPACE).withName(brokerCertsSecretName);
+
+        tc = new TrustController(trustPrivateState, List.of(trustOutputWriter));
+
         mapper = new ObjectMapper();
         mapper.registerSubtypes(new NamedType(BrokerIdentity.class, "broker"));
-        tc = new TrustController(trustPrivateState, List.of(trustOutputWriter));
     }
-
-    int g = 1;
 
     private void initCc(int caValidity, int certValidity, int certRenewal) throws CertificateException {
         BrokersCertificateStatusStore statusStore = new BrokersCertificateStatusStore(mapper, brokerCertsSecretResource);
@@ -98,10 +119,15 @@ class PkiIntegrationTest {
 
 //        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(clock,
 //                new OpenSslCertManager(clock), new Subject.Builder().withCommonName("My CA").build(), caValidity);
-        Chain chain = new Chain(clock, client.secrets(), new OpenSslCertManager(clock));
+
+        Chain chain = new Chain(clock, client.secrets(), certManager);
+        chainCertSecretName = "ggg";
+        chainKeySecretName = "hhh";
+        chainCertItem = "ca.crt";
+        chainKeyItem = "ca.key";
         internalIssuerSpec = new Chain.InternalIssuerSpec(certRenewal,
                 List.of(
-                        new Chain.CaCertificateReference("ggg", "ca.crt", "hhh", "ca.key",
+                        new Chain.CaCertificateReference(chainCertSecretName, chainCertItem, chainKeySecretName, chainKeyItem,
                                 new Chain.IssuanceParams(new Subject.Builder().withCommonName("my CA " + g).build(),
                                         caValidity, CertificateExpirationPolicy.REPLACE_KEY))
                 )
@@ -118,65 +144,227 @@ class PkiIntegrationTest {
     void tearDown() {
     }
 
+    @SuppressWarnings({"checkstyle:LocalVariableName", "checkstyle:MethodLength"})
     @Test
     public void testLifecycle() throws CertificateException, JsonProcessingException {
         int caValidity = 30;
         int certValidity = 15;
         int certRenewal = 5;
-        initCc(caValidity, certValidity, certRenewal);
+        String rootFingerprint0 = "38D5517DC5229AF6B1EA0CB2BF9DE20C5783DB19";
+        String clientFingerprint0_0 = "3864C4916E51C43174D94C451DD84ECF3B3E958A";
+        String clientFingerprint0_1 = "5AFDBB66ADA6E57B759364B116683A683EDBBD61"; // when client cert expires
 
-        // Initial certificate reconciliation, which will have a new CA certificate which won't be trusted yet
-        TrustRoot trustRoot = reconcileCertToPending(Set.of("broker-0.state")).trustRoot();
-        assertNull(trustSecretResource.get());
-        Object fingerprint = trustRoot.fingerprint();
-        assertEquals(Set.of(fingerprint + ".crt"), trustPrivateStateResource.get().getData().keySet());
-        assertEquals(Set.of(fingerprint), trustPrivateState.load().keySet());
+
+        assertEquals(Map.of(), secretsKeySets());
+
+        // Reconcile the Chain, creating secrets with CA cert & key
+        initCc(caValidity, certValidity, certRenewal);
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem)),
+                secretsKeySets(),
+                "Expected " + chainKeySecretName + " and " + chainCertSecretName + " to be created");
+        assertEquals(rootFingerprint0, secretItemFingerprint(chainCertSecretName, chainCertItem));
+
+        // Initial certificate reconciliation, resulting in a new CA certificate which won't be trusted yet
+        CertificateReconcileResult crr1 = cc.reconcile(brokerReqCert);
+        Assertions.assertEquals(CertificateReconcileResult.State.WAITING_FOR_TRUST, crr1.state());
+        assertNotNull(crr1.trustRoot(), "Expected a trust root");
+        assertEquals(rootFingerprint0, ((Object) crr1.trustRoot().fingerprint()).toString());
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        brokerCertsSecretName, Set.of("broker-0.state")),
+                secretsKeySets(),
+                "Expected new Secrets " + trustSecretName + " and " + brokerCertsSecretName);
+        // And broker secret should show pending state
+        assertCertificateStatus("broker-0.state", CertificateState.PENDING, clientFingerprint0_0, rootFingerprint0);
+        assertEquals(Map.of(rootFingerprint0, TrustState.UNTRUSTED), trustPrivateState());
+        TrustRoot trustRoot = crr1.trustRoot();
 
         // Reconcile the trust controller, to establish trust in the CA certificate
-        reconcileTrustToTrusted(trustRoot, fingerprint);
+        reconcileTrustToTrusted(trustRoot);
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED), trustPrivateState());
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        brokerCertsSecretName, Set.of("broker-0.state"),
+                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                secretsKeySets(),
+                "Expected new Secret " + trustSecretName);
         Map<String, String> trustCerts = trustSecretResource.get().getData();
 
         // Now reconcile the certificate again, because the CA cert is now trusted it should transition to in use
-        reconcileCertOk(fingerprint, CertificateReconcileResult.State.OK_ISSUED);
 
-        Map<String, String> brokerCerts = brokerCertsSecretResource.get().getData();
+        // TODO this doesn't prove it's a no-op (e.g. it's the same as reconcileCertToInUse). We should do something to prove that.
+        CertificateReconcileResult crr2 = cc.reconcile(brokerReqCert);
+        Assertions.assertEquals(CertificateReconcileResult.State.OK_ISSUED, crr2.state());
+        assertNull(crr2.trustRoot(), "Did not expect a trust root");
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED), trustPrivateState());
+        assertCertificateStatus("broker-0.state", CertificateState.IN_USE,
+                clientFingerprint0_0,
+                rootFingerprint0);
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
+                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                secretsKeySets(),
+                "Expected additional items in " + brokerCertsSecretName);
+        Map<String, String> initialBrokerCerts = brokerCertsSecretResource.get().getData();
 
         // reconcile the trust controller again, should be a no op
-        reconcileTrustNoop(trustRoot, fingerprint);
+        reconcileTrustNoop(trustRoot);
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED), trustPrivateState());
         assertEquals(trustCerts, trustSecretResource.get().getData());
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
+                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                secretsKeySets(),
+                "Expected the secret keysets to be the same");
 
         // reconcile the certificate again, should be a no op
-        reconcileCertOk(fingerprint, CertificateReconcileResult.State.OK_NOOP);
-        assertEquals(brokerCerts, brokerCertsSecretResource.get().getData());
+
+        // TODO this doesn't prove it's a no-op (e.g. it's the same as reconcileCertToInUse). We should do something to prove that.
+        CertificateReconcileResult crr3 = cc.reconcile(brokerReqCert);
+        // And we have a trust relationship
+        Assertions.assertEquals(CertificateReconcileResult.State.OK_NOOP, crr3.state());
+        assertNull(crr3.trustRoot(), "Did not expect a trust root");
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED), trustPrivateState());
+        assertCertificateStatus("broker-0.state", CertificateState.IN_USE,
+                clientFingerprint0_0,
+                rootFingerprint0);
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
+                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                secretsKeySets(),
+                "Expected the secret keysets to be the same");
+        assertEquals(initialBrokerCerts, brokerCertsSecretResource.get().getData(),
+                "Expected broker certs to be unchanged");
 
         // advance the time and reconcile the certificate again, trust relationship won't change, but expect OK_ISSUED
         clock.advanceFromOrigin(Duration.ofDays(certValidity - certRenewal + 1));
         // The CA cert is still valid, so the trust relationship shouldn't change
-        reconcileTrustNoop(trustRoot, fingerprint);
-        assertNull(reconcileCertOk(fingerprint, CertificateReconcileResult.State.OK_ISSUED).trustRoot());
-        assertNotEquals(brokerCerts, brokerCertsSecretResource.get().getData());
-        brokerCerts = brokerCertsSecretResource.get().getData();
+        reconcileTrustNoop(trustRoot);
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
+                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                secretsKeySets(),
+                "Expected the secret keysets to be the same");
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED), trustPrivateState());
+
+        // TODO this doesn't prove it's a no-op (e.g. it's the same as reconcileCertToInUse). We should do something to prove that.
+        CertificateReconcileResult crr4 = cc.reconcile(brokerReqCert);
+        // And we have a trust relationship
+        Assertions.assertEquals(CertificateReconcileResult.State.OK_ISSUED, crr4.state());
+        assertNull(crr4.trustRoot(), "Did not expect a trust root");
+
+        assertNull(crr4.trustRoot());
+        assertEquals(Map.of(((Object) trustRoot.fingerprint()).toString(), TrustState.TRUSTED), trustPrivateState());
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
+                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                secretsKeySets(),
+                "Expected the secret keysets to be the same");
+        assertCertificateStatus("broker-0.state", CertificateState.IN_USE,
+                clientFingerprint0_1,
+                rootFingerprint0);
+        assertNotEquals(initialBrokerCerts, brokerCertsSecretResource.get().getData());
+        initialBrokerCerts = brokerCertsSecretResource.get().getData();
         assertEquals(trustCerts, trustSecretResource.get().getData());
 
         // advance the clock so that the CA cert will expire and check that the TrustState changes appropriately
+        String rootFingerprint1 = "306612038CECE14BCD109541BA668561BE85F8A8";
+        String clientFingerprint1_0 = "EC3C9ADFB89C970D8EC799D74B884F9EA3BF4774"; // when root CA expiry forces a 2nd client cert issuance
         clock.advanceFromOrigin(Duration.ofDays(28));
+
         initCc(caValidity, certValidity, certRenewal);
-        reconcileTrustNoop(trustRoot, fingerprint);
-        TrustRoot trustRoot2 = reconcileCertToPending(Set.of("broker-0.state", "broker-0.p12", "broker-0.password")).trustRoot();
-        Object fingerprint2 = trustRoot2.fingerprint();
-        assertEquals(Set.of(fingerprint + ".crt", fingerprint2 + ".crt"), trustPrivateStateResource.get().getData().keySet());
-        assertEquals(Set.of(fingerprint, fingerprint2), trustPrivateState.load().keySet());
-        assertNotEquals(brokerCerts, brokerCertsSecretResource.get().getData());
-        brokerCerts = brokerCertsSecretResource.get().getData();
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
+                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                secretsKeySets(),
+                "Expected the secret keysets to be the same");
+        assertEquals(rootFingerprint1, secretItemFingerprint(chainCertSecretName, chainCertItem));
+
+        reconcileTrustNoop(trustRoot);
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
+                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                secretsKeySets(),
+                "Expected the secret keysets to be the same");
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED), trustPrivateState());
+
+        CertificateReconcileResult crr5 = cc.reconcile(brokerReqCert);
+        // We should be waiting for a trust relationship
+        Assertions.assertEquals(CertificateReconcileResult.State.WAITING_FOR_TRUST, crr5.state());
+        assertNotNull(crr5.trustRoot(), "Expected a trust root");
+        assertEquals(Map.of(rootFingerprint1, TrustState.UNTRUSTED,
+                rootFingerprint0, TrustState.TRUSTED), trustPrivateState());
+        assertEquals(
+                Map.of(chainKeySecretName, Set.of(chainKeyItem),
+                        chainCertSecretName, Set.of(chainCertItem),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint1 + ".crt"),
+                        brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
+                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                secretsKeySets(),
+                "Expected additional item " + rootFingerprint1 + ".crt in " + trustPrivateStateName);
+        assertCertificateStatus("broker-0.state", CertificateState.PENDING, clientFingerprint1_0, rootFingerprint1);
+        assertEquals(Map.of(
+                rootFingerprint0, TrustState.TRUSTED,
+                rootFingerprint1, TrustState.UNTRUSTED), trustPrivateState());
+        assertNotEquals(initialBrokerCerts, brokerCertsSecretResource.get().getData());
+        initialBrokerCerts = brokerCertsSecretResource.get().getData();
         assertEquals(trustCerts, trustSecretResource.get().getData());
 
-        reconcileTrustToTrusted(trustRoot2, fingerprint2);
+        reconcileTrustToTrusted(crr5.trustRoot());
+        assertEquals(Map.of(rootFingerprint1, TrustState.TRUSTED), trustPrivateState());
 
+    }
+
+    private Map<String, TrustState> trustPrivateState() {
+        return ((Map<? extends Object, TrustRoot>) trustPrivateState.load()).entrySet()
+                .stream()
+                .collect(Collectors.toMap(
+                    entry -> entry.getKey().toString(),
+                    entry -> entry.getValue().state()));
+    }
+
+    private String secretItemFingerprint(String secret, String item) throws CertificateException {
+        return ((Object) PkiUtils.fingerprint(PkiUtils.x509Certificate(Base64.getDecoder().decode(client.secrets()
+                .withName(secret).get().getData().get(item))))).toString();
+    }
+
+    private Map<String, Set<String>> secretsKeySets() {
+        return client.secrets().list().getItems().stream().collect(Collectors.toMap(
+            secret -> secret.getMetadata().getName(),
+            secret -> secret.getData().keySet()));
     }
 
     // TODO also need a test for where the CertificateIssuer doesn't immediately issue the certificate
 
-    private void reconcileTrustToTrusted(TrustRoot trustRoot, Object fingerprint) throws CertificateEncodingException {
+    private void reconcileTrustToTrusted(TrustRoot trustRoot) throws CertificateEncodingException {
+        Object fingerprint = trustRoot.fingerprint();
         // We can reconcile the trust relationship
         boolean rollBroker = tc.reconcile(Set.of(trustRoot.toTrusted("123")));
         assertTrue(rollBroker, "Expected TrustController to cause roll");
@@ -197,11 +385,11 @@ class PkiIntegrationTest {
         String s = stringData.get(fingerprint + ".state");
         assertEquals("trusted", s);
         assertEquals(Set.of(fingerprint + ".crt"), trustPrivateStateResource.get().getData().keySet());
-        assertEquals(Set.of(fingerprint), trustPrivateState.load().keySet());
-        assertEquals(TrustState.TRUSTED, trustPrivateState.load().get(fingerprint).state());
+
     }
 
-    private void reconcileTrustNoop(TrustRoot trustRoot, Object fingerprint) throws CertificateEncodingException {
+    private void reconcileTrustNoop(TrustRoot trustRoot) throws CertificateEncodingException {
+        Object fingerprint = trustRoot.fingerprint();
         // We can reconcile the trust relationship
         boolean rollBroker = tc.reconcile(Set.of(trustRoot.toTrusted("123")));
         assertFalse(rollBroker, "Expected TrustController to cause not roll");
@@ -222,58 +410,20 @@ class PkiIntegrationTest {
         String s = stringData.get(fingerprint + ".state");
         assertEquals("trusted", s);
         assertEquals(Set.of(fingerprint + ".crt"), trustPrivateStateResource.get().getData().keySet());
-        assertEquals(Set.of(fingerprint), trustPrivateState.load().keySet());
-        assertEquals(TrustState.TRUSTED, trustPrivateState.load().get(fingerprint).state());
     }
 
-    private CertificateReconcileResult reconcileCertOk(Object fingerprint,
-                                                       CertificateReconcileResult.State expectedState) throws CertificateException, JsonProcessingException {
-
-        // TODO this doesn't prove it's a no-op (e.g. it's the same as reconcileCertToInUse). We should do something to prove that.
-        CertificateReconcileResult crr = cc.reconcile(brokerReqCert);
-        // And we have a trust relationship
-        Assertions.assertEquals(expectedState, crr.state());
-        assertNull(crr.trustRoot());
-
-        assertEquals(Set.of(fingerprint + ".crt"), trustSecretResource.get().getData().keySet());
-        assertEquals(Set.of(fingerprint), trustPrivateState.load().keySet());
-        assertEquals(TrustState.TRUSTED, trustPrivateState.load().get(fingerprint).state());
-        assertNotNull(trustSecretResource.get());
-        // Broker secret shows is-use state
+    private void assertCertificateStatus(String secretItem, CertificateState state, String expectedIssuedFingerprint, String expectedIssuerFingerprint) throws JsonProcessingException {
         Secret brokerSecret = brokerCertsSecretResource.get();
         assertNotNull(brokerSecret);
         assertNotNull(brokerSecret.getData());
-        assertEquals(Set.of("broker-0.state", "broker-0.p12", "broker-0.password"), brokerSecret.getData().keySet());
-        CertificateStatus certificateStatus = mapper.readValue(brokerSecret.getData().get("broker-0.state"), CertificateStatus.class);
-        Assertions.assertEquals(CertificateState.IN_USE, certificateStatus.state());
+
+        CertificateStatus certificateStatus = mapper.readValue(brokerSecret.getData().get(secretItem), CertificateStatus.class);
+        Assertions.assertEquals(state, certificateStatus.state());
         assertEquals(new BrokerIdentity(0), certificateStatus.subjectIdentity());
         assertNull(certificateStatus.tokenBytes());
         assertNotNull(certificateStatus.issuedCertificate());
-
-        return crr;
-    }
-
-    private CertificateReconcileResult reconcileCertToPending(Set<String> expectedBrokerSecret) throws CertificateException, JsonProcessingException {
-        CertificateReconcileResult crr = cc.reconcile(brokerReqCert);
-
-        // We should be waiting for a trust relationship
-        Assertions.assertEquals(CertificateReconcileResult.State.WAITING_FOR_TRUST, crr.state());
-        assertNotNull(crr.trustRoot());
-        Object fingerprint = crr.trustRoot().fingerprint();
-        assertEquals(TrustState.UNTRUSTED, trustPrivateState.load().get(fingerprint).state());
-
-        // And broker secret should show pending state
-        Secret brokerSecret = brokerCertsSecretResource.get();
-        assertNotNull(brokerSecret);
-        assertNotNull(brokerSecret.getData());
-        assertEquals(expectedBrokerSecret, brokerSecret.getData().keySet());
-        CertificateStatus certificateStatus = mapper.readValue(brokerSecret.getData().get("broker-0.state"), CertificateStatus.class);
-        Assertions.assertEquals(CertificateState.PENDING, certificateStatus.state());
-        assertEquals(new BrokerIdentity(0), certificateStatus.subjectIdentity());
-        assertNull(certificateStatus.tokenBytes());
-        assertNotNull(certificateStatus.issuedCertificate());
-
-        return crr;
+        assertEquals(expectedIssuedFingerprint, ((Object) PkiUtils.fingerprint(certificateStatus.issuedCertificate().issuedCertificate())).toString());
+        assertEquals(expectedIssuerFingerprint, ((Object) PkiUtils.fingerprint(certificateStatus.issuedCertificate().rootCaCertificate())).toString());
     }
 
 }

@@ -33,7 +33,6 @@ import io.strimzi.api.kafka.model.CertificateAuthority;
 import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.certs.CertManager;
-import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.certs.Subject;
 
 import static io.strimzi.operator.common.Util.delete;
