@@ -148,7 +148,7 @@ public class KafkaConnectorIT {
         MetricsProvider metrics = new MicrometerMetricsProvider();
 
         KafkaConnectAssemblyOperator operator = new KafkaConnectAssemblyOperator(vertx, pfa,
-                new ResourceOperatorSupplier(
+                new ResourceOperatorSupplier(null,
                         null, null, null, null, null, null, null, null, null, null, null, null,
                         null, null, null, null, null, null, null, null, null, null, null, null,
                         null, null, connectCrdOperator, null, null, null, null, null, metrics, null),

@@ -15,6 +15,8 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.jsontype.NamedType;
+import io.fabric8.kubernetes.api.model.OwnerReference;
+import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
@@ -23,6 +25,8 @@ import io.strimzi.api.kafka.model.CruiseControlResources;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaExporterResources;
 import io.strimzi.api.kafka.model.KafkaResources;
+import io.strimzi.certs.CertManager;
+import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.certs.Subject;
 import io.strimzi.operator.cluster.ClusterOperator;
 import io.strimzi.operator.cluster.model.Ca;
@@ -36,8 +40,8 @@ import io.strimzi.operator.cluster.model.pki.CertificateIssuer;
 import io.strimzi.operator.cluster.model.pki.CertificateOutputWriter;
 import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult;
 import io.strimzi.operator.cluster.model.pki.CertificateStatusStore;
+import io.strimzi.operator.cluster.model.pki.Chain;
 import io.strimzi.operator.cluster.model.pki.RequiredCertificate;
-import io.strimzi.operator.cluster.model.pki.StrimziCertificateIssuerStore;
 import io.strimzi.operator.cluster.model.pki.TrustController;
 import io.strimzi.operator.cluster.model.pki.TrustPrivateState;
 import io.strimzi.operator.cluster.model.pki.TrustRoot;
@@ -80,6 +84,8 @@ public class ClusterPki {
                 new NamedType(KafkaExporterIdentity.class, "kafka-exporter"));
     }
 
+    private final Chain chain;
+
     private static CertificateOutputWriter co(Resource<Secret> secretResource) {
         return new AbstractCertificateOutputWriter<>(ClusterOperatorIdentity.class, secretResource, "cluster-operator") { };
     }
@@ -96,12 +102,14 @@ public class ClusterPki {
         return new AbstractCertificateOutputWriter<>(KafkaExporterIdentity.class, secretResource, "kafka-exporter") { };
     }
 
+    private final Clock clock = Clock.systemUTC();
     private final KubernetesClient client;
     private final String namespace;
     private final String cluster;
+    private final CertManager certManager = new OpenSslCertManager(clock);
     private final List<CertificateOutputWriter> certOutputWriters;
     private Resource<Secret> caKeySecretResource;
-    private final Clock clock = Clock.systemUTC();
+
     private CertificateIssuer issuer;
     private final CertificateStatusStore certificateStatusStore;
     private final TrustPrivateState trustPrivateState;
@@ -111,6 +119,10 @@ public class ClusterPki {
         this.client = Objects.requireNonNull(client);
         this.namespace = Objects.requireNonNull(namespace);
         this.cluster = Objects.requireNonNull(cluster);
+
+        this.chain = new Chain(clock,
+                client.secrets().inNamespace(namespace),
+                certManager);
 
         this.caKeySecretResource = client.secrets().inNamespace(namespace).withName(KafkaResources.clusterCaKeySecretName(cluster));
         this.certificateStatusStore = new BrokersCertificateStatusStore(MAPPER, client.secrets().inNamespace(namespace).withName(KafkaCluster.brokersSecretName(cluster)));
@@ -133,7 +145,14 @@ public class ClusterPki {
      * @throws CertificateException if problems.
      */
     public void bootstrapCa(Kafka kafkaAssembly) throws CertificateException {
-        new StrimziCertificateIssuerStore(clock, caKeySecretResource).bootstrapCa(kafkaAssembly);
+        CertificateAuthority clusterCa = kafkaAssembly.getSpec().getClusterCa();
+        OwnerReference ownerReference;
+        if (clusterCa.isGenerateSecretOwnerReference()) {
+            ownerReference = new OwnerReferenceBuilder().build();
+        } else {
+            ownerReference = null;
+        }
+        issuer = chain.reconcile(Chain.clusterCaFromCrd(cluster, clusterCa), ownerReference);
     }
 
     public void issueZkCertificates(Kafka kafka) throws CertificateException {

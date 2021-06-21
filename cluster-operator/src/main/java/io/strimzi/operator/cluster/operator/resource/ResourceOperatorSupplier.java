@@ -90,6 +90,7 @@ public class ResourceOperatorSupplier {
     public final NodeOperator nodeOperator;
     public final ZookeeperScalerProvider zkScalerProvider;
     public final MetricsProvider metricsProvider;
+    public final KubernetesClient client;
     public AdminClientProvider adminClientProvider;
 
     public ResourceOperatorSupplier(Vertx vertx, KubernetesClient client, PlatformFeaturesAvailability pfa, FeatureGates gates, long operationTimeoutMs) {
@@ -106,7 +107,7 @@ public class ResourceOperatorSupplier {
     public ResourceOperatorSupplier(Vertx vertx, KubernetesClient client, ZookeeperLeaderFinder zlf,
                                     AdminClientProvider adminClientProvider, ZookeeperScalerProvider zkScalerProvider,
                                     MetricsProvider metricsProvider, PlatformFeaturesAvailability pfa, FeatureGates gates, long operationTimeoutMs) {
-        this(new ServiceOperator(vertx, client),
+        this(client, new ServiceOperator(vertx, client),
                 pfa.hasRoutes() ? new RouteOperator(vertx, client.adapt(OpenShiftClient.class)) : null,
                 new ZookeeperSetOperator(vertx, client, zlf, operationTimeoutMs),
                 new KafkaSetOperator(vertx, client, operationTimeoutMs, adminClientProvider),
@@ -142,7 +143,8 @@ public class ResourceOperatorSupplier {
                 adminClientProvider);
     }
 
-    public ResourceOperatorSupplier(ServiceOperator serviceOperations,
+    public ResourceOperatorSupplier(KubernetesClient client,
+                                    ServiceOperator serviceOperations,
                                     RouteOperator routeOperations,
                                     ZookeeperSetOperator zkSetOperations,
                                     KafkaSetOperator kafkaSetOperations,
@@ -176,6 +178,7 @@ public class ResourceOperatorSupplier {
                                     ZookeeperScalerProvider zkScalerProvider,
                                     MetricsProvider metricsProvider,
                                     AdminClientProvider adminClientProvider) {
+        this.client = client;
         this.serviceOperations = serviceOperations;
         this.routeOperations = routeOperations;
         this.zkSetOperations = zkSetOperations;

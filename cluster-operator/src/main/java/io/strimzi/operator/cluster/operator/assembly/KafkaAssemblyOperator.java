@@ -95,6 +95,7 @@ import io.strimzi.operator.cluster.model.StatusDiff;
 import io.strimzi.operator.cluster.model.StorageDiff;
 import io.strimzi.operator.cluster.model.StorageUtils;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
+import io.strimzi.operator.cluster.model.pki.cluster.ClusterPki;
 import io.strimzi.operator.cluster.operator.resource.ConcurrentDeletionException;
 import io.strimzi.operator.cluster.operator.resource.KafkaRoller;
 import io.strimzi.operator.cluster.operator.resource.KafkaSetOperator;
@@ -178,6 +179,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
     private final CrdOperator<KubernetesClient, Kafka, KafkaList> crdOperator;
     private final ZookeeperScalerProvider zkScalerProvider;
     private final AdminClientProvider adminClientProvider;
+    private final KubernetesClient client;
 
     /**
      * @param vertx The Vertx instance
@@ -212,6 +214,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         this.nodeOperator = supplier.nodeOperator;
         this.zkScalerProvider = supplier.zkScalerProvider;
         this.adminClientProvider = supplier.adminClientProvider;
+        this.client = supplier.client;
     }
 
     @Override
@@ -253,26 +256,32 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         return createOrUpdatePromise.future();
     }
 
+
+
     Future<Void> reconcile(ReconciliationState reconcileState)  {
         Promise<Void> chainPromise = Promise.promise();
 
         reconcileState.initialStatus()
                 .compose(state -> state.reconcileCas(this::dateSupplier))
-                .compose(state -> state.bootstrapCa())
-                .compose(state -> state.clusterOperatorSecret(this::dateSupplier))
+                .compose(state -> state.bootstrapClusterCa())
                 .compose(state -> state.getKafkaClusterDescription())
+                .compose(state -> state.getZookeeperDescription())
+                .compose(state -> state.getEntityOperatorDescription())
+                .compose(state -> state.getCruiseControlDescription())
+                .compose(state -> state.getKafkaExporterDescription())
+                .compose(state -> state.clusterOperatorSecret(this::dateSupplier))
                 .compose(state -> state.prepareVersionChange())
                 // Roll everything if a new CA is added to the trust store.
                 .compose(state -> state.rollingUpdateForNewCaKey())
-                .compose(state -> state.getZookeeperDescription())
+
                 .compose(state -> state.zkGenerateCertificates(this::dateSupplier))
                 .compose(state -> state.kafkaGenerateCertificates(this::dateSupplier))
                 .compose(state -> state.customListenerCertificates())
-                .compose(state -> state.getEntityOperatorDescription())
+
                 .compose(state -> state.entityOperatorSecret(this::dateSupplier))
-                .compose(state -> state.getCruiseControlDescription())
+
                 .compose(state -> state.cruiseControlSecret(this::dateSupplier))
-                .compose(state -> state.getKafkaExporterDescription())
+
                 .compose(state -> state.kafkaExporterSecret(this::dateSupplier))
 
                 .compose(state -> state.zkModelWarnings())
@@ -442,6 +451,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private JmxTrans jmxTrans = null;
         private ConfigMap jmxTransConfigMap = null;
         private Deployment jmxTransDeployment = null;
+        private ClusterPki clusterPki;
 
         ReconciliationState(Reconciliation reconciliation, Kafka kafkaAssembly) {
             this.reconciliation = reconciliation;
@@ -569,6 +579,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          */
         Future<ReconciliationState> zkModelWarnings() {
             kafkaStatus.addConditions(zkCluster.getWarningConditions());
+            return Future.succeededFuture(this);
+        }
+
+        Future<ReconciliationState> bootstrapClusterCa() {
+            this.clusterPki = new ClusterPki(client, namespace, KafkaCluster.kafkaClusterName(name));
             return Future.succeededFuture(this);
         }
 
@@ -3778,9 +3793,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return withVoid(Future.succeededFuture());
         }
 
-        public Future<ReconciliationState> bootstrapCa() {
-            return Future.succeededFuture(this); // failedFuture("TODO");
-        }
     }
 
     /* test */ Date dateSupplier() {
