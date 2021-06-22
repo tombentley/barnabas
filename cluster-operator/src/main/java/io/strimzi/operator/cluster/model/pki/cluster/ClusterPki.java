@@ -146,6 +146,11 @@ public class ClusterPki {
      */
     public void bootstrapCa(Kafka kafkaAssembly) throws CertificateException {
         CertificateAuthority clusterCa = kafkaAssembly.getSpec().getClusterCa();
+        if (clusterCa == null) {
+            clusterCa = new CertificateAuthority();
+            clusterCa.setValidityDays(365);
+            clusterCa.setRenewalDays(30);
+        }
         OwnerReference ownerReference;
         if (clusterCa.isGenerateSecretOwnerReference()) {
             ownerReference = new OwnerReferenceBuilder().build();

@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateEncodingException;
+import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.text.ParseException;
 import java.util.ArrayList;
@@ -584,7 +585,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> bootstrapClusterCa() {
             this.clusterPki = new ClusterPki(client, namespace, KafkaCluster.kafkaClusterName(name));
-            return Future.succeededFuture(this);
+            try {
+                this.clusterPki.bootstrapCa(kafkaAssembly);
+                return Future.succeededFuture(this);
+            } catch (CertificateException e) {
+                return Future.failedFuture(e);
+            }
         }
 
         /**
