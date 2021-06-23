@@ -43,6 +43,7 @@ import io.strimzi.operator.cluster.model.pki.TrustPrivateState;
 import io.strimzi.operator.cluster.model.pki.TrustRoot;
 import io.strimzi.operator.cluster.model.pki.TrustState;
 import io.strimzi.operator.cluster.model.pki.Validator;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.mockkube.MockKube;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -84,12 +85,13 @@ class PkiIntegrationTest {
     private String trustPrivateStateName;
     private String trustSecretName;
     private String brokerCertsSecretName;
+    private Reconciliation reconciliation = new Reconciliation("test", "Kafka", "ns", "test");
 
     @BeforeEach
     void setUp() {
         clock = new TestClock(Clock.fixed(Instant.ofEpochMilli(0), ZoneId.of("UTC")));
-        //certManager = TestOpenSslCertManager.record("testLifecycle", new OpenSslCertManager(clock), new File("/home/tom/messaging/operator/cluster-operator/src/test/resources/io/strimzi/operator/cluster/model/pki/cluster"));
-        certManager = TestOpenSslCertManager.replay("testLifecycle", new File("/home/tom/messaging/operator/cluster-operator/src/test/resources/io/strimzi/operator/cluster/model/pki/cluster"));
+        certManager = TestOpenSslCertManager.replay("testLifecycle", new File("src/test/resources/io/strimzi/operator/cluster/model/pki/cluster"));
+        //certManager = TestOpenSslCertManager.replay("testLifecycle", new File("/home/tom/messaging/operator/cluster-operator/src/test/resources/io/strimzi/operator/cluster/model/pki/cluster"));
 
         client = new MockKube().build();
 
@@ -114,7 +116,7 @@ class PkiIntegrationTest {
     }
 
     private void initCc(int caValidity, int certValidity, int certRenewal) throws CertificateException {
-        BrokersCertificateStatusStore statusStore = new BrokersCertificateStatusStore(mapper, brokerCertsSecretResource);
+        BrokersCertificateStatusStore statusStore = new BrokersCertificateStatusStore(mapper, null, brokerCertsSecretResource);
         NewBrokersCertificateOutputWriter outputStore = new NewBrokersCertificateOutputWriter(brokerCertsSecretResource);
 
 //        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(clock,
@@ -132,7 +134,7 @@ class PkiIntegrationTest {
                                         caValidity, CertificateExpirationPolicy.REPLACE_KEY))
                 )
         );
-        CertificateIssuer issuer = chain.reconcile(internalIssuerSpec, null);
+        CertificateIssuer issuer = chain.reconcile(reconciliation, internalIssuerSpec, null);
         g++;
         cc = new CertificateController(
                 trustPrivateState, statusStore,
@@ -150,10 +152,9 @@ class PkiIntegrationTest {
         int caValidity = 30;
         int certValidity = 15;
         int certRenewal = 5;
-        String rootFingerprint0 = "38D5517DC5229AF6B1EA0CB2BF9DE20C5783DB19";
-        String clientFingerprint0_0 = "3864C4916E51C43174D94C451DD84ECF3B3E958A";
-        String clientFingerprint0_1 = "5AFDBB66ADA6E57B759364B116683A683EDBBD61"; // when client cert expires
-
+        String rootFingerprint0 = "2D507CF7021DA69B48DD71D19CDAD257C23CD951";
+        String clientFingerprint0_0 = "ECCF853623216F9AE6FC68B5CB34942626E5D88C";
+        String clientFingerprint0_1 = "D73FA81BCF62EEDE9D769831C40B02C4FB65AA0E"; // when client cert expires
 
         assertEquals(Map.of(), secretsKeySets());
 
@@ -289,8 +290,8 @@ class PkiIntegrationTest {
         assertEquals(trustCerts, trustSecretResource.get().getData());
 
         // advance the clock so that the CA cert will expire and check that the TrustState changes appropriately
-        String rootFingerprint1 = "306612038CECE14BCD109541BA668561BE85F8A8";
-        String clientFingerprint1_0 = "EC3C9ADFB89C970D8EC799D74B884F9EA3BF4774"; // when root CA expiry forces a 2nd client cert issuance
+        String rootFingerprint1 = "294E0E39228CA56A37A134A16CBFCE49FE69584A";
+        String clientFingerprint1_0 = "84D2A876ACF24ABF9E8FC515B2D1C6D26912631D"; // when root CA expiry forces a 2nd client cert issuance
         clock.advanceFromOrigin(Duration.ofDays(28));
 
         initCc(caValidity, certValidity, certRenewal);

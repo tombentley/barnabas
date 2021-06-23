@@ -4,6 +4,23 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
@@ -45,6 +62,7 @@ import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.storage.Storage;
 import io.strimzi.api.kafka.model.template.JmxTransOutputDefinitionTemplateBuilder;
 import io.strimzi.api.kafka.model.template.JmxTransQueryTemplateBuilder;
+import io.strimzi.certs.CertManager;
 import io.strimzi.operator.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ClusterOperator;
@@ -94,26 +112,12 @@ import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
-
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static io.strimzi.test.TestUtils.set;
 import static java.util.Arrays.asList;
@@ -167,7 +171,7 @@ public class KafkaAssemblyOperatorTest {
     private static Storage kafkaStorage;
     private static SingleVolumeStorage zkStorage;
     private static EntityOperatorSpec eoConfig;
-    private static MockCertManager certManager = new MockCertManager();
+    private static CertManager certManager;
     private static PasswordGenerator passwordGenerator = new PasswordGenerator(10, "a", "a");
 
     public static class Params {
@@ -324,6 +328,14 @@ public class KafkaAssemblyOperatorTest {
     @BeforeAll
     public static void before() {
         vertx = Vertx.vertx();
+
+    }
+
+    @BeforeEach
+    public void foo() {
+//        certManager = TestOpenSslCertManager.record("foo", Clock.systemUTC(), new File("."));
+//        certManager = TestOpenSslCertManager.replay("foo", new File("."));
+        certManager = new MockCertManager();
     }
 
     @AfterAll
@@ -683,6 +695,16 @@ public class KafkaAssemblyOperatorTest {
                     @Override
                     public Future<Void> waitForQuiescence(StatefulSet sts) {
                         return Future.succeededFuture();
+                    }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
                     }
                 };
             }
@@ -1284,6 +1306,16 @@ public class KafkaAssemblyOperatorTest {
                     public Future<Void> waitForQuiescence(StatefulSet sts) {
                         return Future.succeededFuture();
                     }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
                 };
             }
         };
@@ -1403,6 +1435,20 @@ public class KafkaAssemblyOperatorTest {
                 }
                 return Future.succeededFuture();
             }
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+                    @Override
+                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                };
+            }
         };
 
         Checkpoint async = context.checkpoint();
@@ -1487,6 +1533,20 @@ public class KafkaAssemblyOperatorTest {
                     context.failNow(new AssertionError("Unexpected name " + name));
                 }
                 return Future.succeededFuture();
+            }
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+                    @Override
+                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                };
             }
         };
 

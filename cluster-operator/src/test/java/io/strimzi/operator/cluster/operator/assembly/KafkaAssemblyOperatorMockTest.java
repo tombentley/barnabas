@@ -4,6 +4,20 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
 import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
@@ -63,18 +77,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
-
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 import static io.strimzi.api.kafka.model.storage.Storage.deleteClaim;
 import static java.util.Collections.singletonMap;
@@ -282,8 +284,27 @@ public class KafkaAssemblyOperatorMockTest {
         PlatformFeaturesAvailability pfa = new PlatformFeaturesAvailability(true, kubernetesVersion);
         ResourceOperatorSupplier supplier = supplierWithMocks();
         ClusterOperatorConfig config = ResourceUtils.dummyClusterOperatorConfig(VERSIONS);
+//        CertManager foo = TestOpenSslCertManager.record(KafkaAssemblyOperatorMockTest.class.getSimpleName() + ",z=" + params.zkReplicas + ",z=" + params.kafkaReplicas, Clock.systemUTC(),
+//                new File("."));
+//        CertManager foo = TestOpenSslCertManager.replay(KafkaAssemblyOperatorMockTest.class.getSimpleName() + ",z=" + params.zkReplicas + ",z=" + params.kafkaReplicas, new File("."));
+
         operator = new KafkaAssemblyOperator(vertx, pfa, new MockCertManager(),
-                new PasswordGenerator(10, "a", "a"), supplier, config);
+                new PasswordGenerator(10, "a", "a"), supplier, config) {
+
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+                    @Override
+                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                };
+            }
+        };
     }
 
     private ResourceOperatorSupplier supplierWithMocks() {

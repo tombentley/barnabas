@@ -171,7 +171,7 @@ public class CertificateController {
                 status = handleNew(status, requiredCertificate);
                 return CertificateReconcileResult.issuedBad();
             }
-            case EXPIRED:
+            case HAS_EXPIRED:
                 // fall through
             case OTHER: {
                 status = handleNew(status, requiredCertificate);
@@ -199,7 +199,7 @@ public class CertificateController {
                 // fall through
             case OK:
                 return waitingForTrust(status, issued, trustRoot);
-            case EXPIRED:
+            case HAS_EXPIRED:
                 LOGGER.error("The certificate issued for {} has expired before trust " +
                         "was established for its root CA certificate", requiredCertificate.subjectIdentity());
                 status = handleNew(status, requiredCertificate);
@@ -235,7 +235,7 @@ public class CertificateController {
             case NO_TRUST_ANCHOR:
                 // It's still not trusted yet: we have to wait
                 return CertificateReconcileResult.waitingForTrust(TrustRoot.untrusted(issued.rootCaCertificate()));
-            case EXPIRED:
+            case HAS_EXPIRED:
             case OTHER:
                 status = handleNew(status, requiredCertificate);
                 // TODO should loop, but return for now
@@ -274,7 +274,7 @@ public class CertificateController {
                 return CertificateReconcileResult.okNoop();
             case OTHER:
             case NO_TRUST_ANCHOR:
-            case EXPIRED:
+            case HAS_EXPIRED:
                 LOGGER.error("Oh dear we shouldn't normally get here");
                 // fall thru
             case WILL_EXPIRE:

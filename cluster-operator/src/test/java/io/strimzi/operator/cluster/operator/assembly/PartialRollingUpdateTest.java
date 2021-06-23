@@ -31,6 +31,7 @@ import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.test.mockkube.MockKube;
+import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.junit5.Checkpoint;
 import io.vertx.junit5.VertxExtension;
@@ -44,10 +45,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.Collections;
+import java.util.Date;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 import static io.strimzi.test.TestUtils.set;
 import static org.hamcrest.CoreMatchers.is;
@@ -145,7 +148,22 @@ public class PartialRollingUpdateTest {
 
         ResourceOperatorSupplier supplier = supplier(bootstrapClient);
         KafkaAssemblyOperator kco = new KafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(true, KubernetesVersion.V1_16),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"), supplier, ResourceUtils.dummyClusterOperatorConfig(VERSIONS, 2_000));
+                new MockCertManager(), new PasswordGenerator(10, "a", "a"), supplier, ResourceUtils.dummyClusterOperatorConfig(VERSIONS, 2_000)) {
+
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+                    @Override
+                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                };
+            }
+        };
 
         LOGGER.info("bootstrap reconciliation");
         CountDownLatch createAsync = new CountDownLatch(1);
@@ -199,7 +217,22 @@ public class PartialRollingUpdateTest {
         ResourceOperatorSupplier supplier = supplier(mockClient);
 
         this.kco = new KafkaAssemblyOperator(vertx, new PlatformFeaturesAvailability(true, KubernetesVersion.V1_16),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"), supplier, ResourceUtils.dummyClusterOperatorConfig(VERSIONS, 2_000));
+                new MockCertManager(), new PasswordGenerator(10, "a", "a"), supplier, ResourceUtils.dummyClusterOperatorConfig(VERSIONS, 2_000)) {
+
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+                    @Override
+                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                };
+            }
+        };
         LOGGER.info("Started test KafkaAssemblyOperator");
     }
 

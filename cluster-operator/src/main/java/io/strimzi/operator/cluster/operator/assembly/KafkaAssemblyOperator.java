@@ -181,6 +181,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
     private final ZookeeperScalerProvider zkScalerProvider;
     private final AdminClientProvider adminClientProvider;
     private final KubernetesClient client;
+    private final CertManager certManager;
+    private final PasswordGenerator passwordGenerator;
 
     /**
      * @param vertx The Vertx instance
@@ -194,8 +196,9 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                  CertManager certManager, PasswordGenerator passwordGenerator,
                                  ResourceOperatorSupplier supplier,
                                  ClusterOperatorConfig config) {
-        super(vertx, pfa, Kafka.RESOURCE_KIND, certManager, passwordGenerator,
-                supplier.kafkaOperator, supplier, config);
+        super(vertx, pfa, Kafka.RESOURCE_KIND, supplier.kafkaOperator, supplier, config);
+        this.certManager = certManager;
+        this.passwordGenerator = passwordGenerator;
         this.operationTimeoutMs = config.getOperationTimeoutMs();
         this.operatorNamespace = config.getOperatorNamespace();
         this.operatorNamespaceLabels = config.getOperatorNamespaceLabels();
@@ -264,27 +267,16 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         reconcileState.initialStatus()
                 .compose(state -> state.reconcileCas(this::dateSupplier))
-                .compose(state -> state.bootstrapClusterCa())
-                .compose(state -> state.getKafkaClusterDescription())
-                .compose(state -> state.getZookeeperDescription())
-                .compose(state -> state.getEntityOperatorDescription())
-                .compose(state -> state.getCruiseControlDescription())
-                .compose(state -> state.getKafkaExporterDescription())
+                .compose(state -> state.clusterCaBootstrap(this::dateSupplier))
+
                 .compose(state -> state.clusterOperatorSecret(this::dateSupplier))
+                .compose(state -> state.getKafkaClusterDescription())
                 .compose(state -> state.prepareVersionChange())
                 // Roll everything if a new CA is added to the trust store.
                 .compose(state -> state.rollingUpdateForNewCaKey())
 
-                .compose(state -> state.zkGenerateCertificates(this::dateSupplier))
-                .compose(state -> state.kafkaGenerateCertificates(this::dateSupplier))
-                .compose(state -> state.customListenerCertificates())
-
-                .compose(state -> state.entityOperatorSecret(this::dateSupplier))
-
-                .compose(state -> state.cruiseControlSecret(this::dateSupplier))
-
-                .compose(state -> state.kafkaExporterSecret(this::dateSupplier))
-
+                // Prep ZK
+                .compose(state -> state.getZookeeperDescription())
                 .compose(state -> state.zkModelWarnings())
                 .compose(state -> state.zkManualPodCleaning())
                 .compose(state -> state.zkNetPolicy())
@@ -294,20 +286,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.zkPvcs())
                 .compose(state -> state.zkService())
                 .compose(state -> state.zkHeadlessService())
-
+                .compose(state -> state.zkGenerateCertificates(this::dateSupplier))
+                .compose(state -> state.clusterCaIssueZkCertificates(this::dateSupplier))
                 .compose(state -> state.zkAncillaryCm())
                 .compose(state -> state.zkNodesSecret())
                 .compose(state -> state.zkPodDisruptionBudget())
-                .compose(state -> state.zkStatefulSet())
-                .compose(state -> state.zkScalingDown())
-                .compose(state -> state.zkRollingUpdate())
-                .compose(state -> state.zkPodsReady())
-                .compose(state -> state.zkScalingUp())
-                .compose(state -> state.zkScalingCheck())
-                .compose(state -> state.zkServiceEndpointReadiness())
-                .compose(state -> state.zkHeadlessServiceEndpointReadiness())
-                .compose(state -> state.zkPersistentClaimDeletion())
-
+                .compose(state -> state.kafkaPodDisruptionBudget())
+                // Prep Kafka
                 .compose(state -> state.checkKafkaSpec())
                 .compose(state -> state.kafkaModelWarnings())
                 .compose(state -> state.kafkaManualPodCleaning())
@@ -327,10 +312,48 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaRoutesReady())
                 .compose(state -> state.kafkaIngressesReady())
                 .compose(state -> state.kafkaIngressesV1Beta1Ready())
+                .compose(state -> state.kafkaGenerateCertificates(this::dateSupplier))
+                .compose(state -> state.customListenerCertificates())
                 .compose(state -> state.kafkaAncillaryCm())
                 .compose(state -> state.kafkaBrokersSecret())
                 .compose(state -> state.kafkaJmxSecret())
-                .compose(state -> state.kafkaPodDisruptionBudget())
+
+                // This has to run after all possible rolling updates which might move the pods to different nodes
+                .compose(state -> state.kafkaNodePortExternalListenerStatus())
+                .compose(state -> state.kafkaCustomCertificatesToStatus())
+                // Prep EO
+                .compose(state -> state.getEntityOperatorDescription())
+                .compose(state -> state.entityOperatorRole())
+                .compose(state -> state.entityTopicOperatorRole())
+                .compose(state -> state.entityUserOperatorRole())
+                .compose(state -> state.entityOperatorServiceAccount())
+                .compose(state -> state.entityOperatorTopicOpRoleBindingForRole())
+                .compose(state -> state.entityOperatorUserOpRoleBindingForRole())
+                .compose(state -> state.entityOperatorTopicOpAncillaryCm())
+                .compose(state -> state.entityOperatorUserOpAncillaryCm())
+                .compose(state -> state.entityOperatorSecret(this::dateSupplier))
+                // Prep CC
+                .compose(state -> state.getCruiseControlDescription())
+                .compose(state -> state.cruiseControlNetPolicy())
+                .compose(state -> state.cruiseControlServiceAccount())
+                .compose(state -> state.cruiseControlAncillaryCm())
+                .compose(state -> state.cruiseControlSecret(this::dateSupplier))
+                // Prep Exporter
+                .compose(state -> state.getKafkaExporterDescription())
+                .compose(state -> state.kafkaExporterServiceAccount())
+                .compose(state -> state.kafkaExporterSecret(this::dateSupplier))
+
+                // And now we can create pods
+                .compose(state -> state.zkStatefulSet())
+                .compose(state -> state.zkScalingDown())
+                .compose(state -> state.zkRollingUpdate())
+                .compose(state -> state.zkPodsReady())
+                .compose(state -> state.zkScalingUp())
+                .compose(state -> state.zkScalingCheck())
+                .compose(state -> state.zkServiceEndpointReadiness())
+                .compose(state -> state.zkHeadlessServiceEndpointReadiness())
+                .compose(state -> state.zkPersistentClaimDeletion())
+
                 .compose(state -> state.kafkaStatefulSet())
                 .compose(state -> state.kafkaRollToAddOrRemoveVolumes())
                 .compose(state -> state.kafkaRollingUpdate())
@@ -340,31 +363,14 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaHeadlessServiceEndpointReady())
                 .compose(state -> state.kafkaGetClusterId())
                 .compose(state -> state.kafkaPersistentClaimDeletion())
-                // This has to run after all possible rolling updates which might move the pods to different nodes
-                .compose(state -> state.kafkaNodePortExternalListenerStatus())
-                .compose(state -> state.kafkaCustomCertificatesToStatus())
 
-                .compose(state -> state.entityOperatorRole())
-                .compose(state -> state.entityTopicOperatorRole())
-                .compose(state -> state.entityUserOperatorRole())
-                .compose(state -> state.entityOperatorServiceAccount())
-                .compose(state -> state.entityOperatorTopicOpRoleBindingForRole())
-                .compose(state -> state.entityOperatorUserOpRoleBindingForRole())
-                .compose(state -> state.entityOperatorTopicOpAncillaryCm())
-                .compose(state -> state.entityOperatorUserOpAncillaryCm())
                 .compose(state -> state.entityOperatorDeployment())
                 .compose(state -> state.entityOperatorReady())
 
-
-                .compose(state -> state.cruiseControlNetPolicy())
-                .compose(state -> state.cruiseControlServiceAccount())
-                .compose(state -> state.cruiseControlAncillaryCm())
                 .compose(state -> state.cruiseControlDeployment())
                 .compose(state -> state.cruiseControlService())
                 .compose(state -> state.cruiseControlReady())
 
-
-                .compose(state -> state.kafkaExporterServiceAccount())
                 .compose(state -> state.kafkaExporterDeployment())
                 .compose(state -> state.kafkaExporterReady())
 
@@ -583,14 +589,27 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return Future.succeededFuture(this);
         }
 
-        Future<ReconciliationState> bootstrapClusterCa() {
-            this.clusterPki = new ClusterPki(client, namespace, KafkaCluster.kafkaClusterName(name));
+        Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+            this.clusterPki = new ClusterPki(reconciliation, client, certManager, namespace, KafkaCluster.kafkaClusterName(name));
             try {
-                this.clusterPki.bootstrapCa(kafkaAssembly);
+                if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
+                    this.clusterPki.bootstrapCa(kafkaAssembly.getSpec().getClusterCa());
+                }
                 return Future.succeededFuture(this);
             } catch (CertificateException e) {
                 return Future.failedFuture(e);
             }
+        }
+
+        Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
+                try {
+                    clusterPki.issueZkCertificates(kafkaAssembly);
+                } catch (CertificateException e) {
+                    return Future.failedFuture(e);
+                }
+            }
+            return Future.succeededFuture(this);
         }
 
         /**

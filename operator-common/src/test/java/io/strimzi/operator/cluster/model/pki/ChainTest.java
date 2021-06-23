@@ -27,6 +27,7 @@ import io.strimzi.api.kafka.model.CertificateAuthorityBuilder;
 import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
 import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.certs.Subject;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.mockkube.MockKube;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -48,6 +49,7 @@ class ChainTest {
     private MixedOperation<Secret, SecretList, Resource<Secret>> secrets;
     private TestClock clock;
     private String clusterName;
+    private Reconciliation reconciliation = new Reconciliation("test", "Kafka", "ns", "test");
 
     @BeforeEach
     public void setup() {
@@ -118,9 +120,10 @@ class ChainTest {
 
         // Expect initial reconciliation to create the secrets
         if (ca.isGenerateCertificateAuthority()) {
-            chain.reconcile(internalIssuerSpec, ownerReference);
+            chain.reconcile(reconciliation, internalIssuerSpec, ownerReference);
         } else {
-            PkiException pkiException = assertThrows(PkiException.class, () -> chain.reconcile(internalIssuerSpec, ownerReference));
+            PkiException pkiException = assertThrows(PkiException.class,
+                () -> chain.reconcile(reconciliation, internalIssuerSpec, ownerReference));
             assertEquals("CA Certificate ca.crt in secret test-cluster-cluster-ca-cert does not exist and is not configured to allow automatic issuance", pkiException.getMessage());
             return;
         }
@@ -144,13 +147,13 @@ class ChainTest {
 
         // Reconcile a day later shouldn't change anything
         clock.advanceFromOrigin(Duration.ofDays(1));
-        chain.reconcile(internalIssuerSpec, ownerReference);
+        chain.reconcile(reconciliation, internalIssuerSpec, ownerReference);
         assertEquals(1, secrets.withName("test-cluster-cluster-ca").get().getMetadata().getGeneration());
         assertEquals(1, secrets.withName("test-cluster-cluster-ca-cert").get().getMetadata().getGeneration());
 
         // Reconcile within the renewal period should change
         clock.advanceFromOrigin(Duration.ofDays(ca.getValidityDays() - ca.getRenewalDays() + 1));
-        chain.reconcile(internalIssuerSpec, ownerReference);
+        chain.reconcile(reconciliation, internalIssuerSpec, ownerReference);
         assertEquals(2, secrets.withName("test-cluster-cluster-ca").get().getMetadata().getGeneration());
         assertEquals(2, secrets.withName("test-cluster-cluster-ca-cert").get().getMetadata().getGeneration());
         switch (ca.getCertificateExpirationPolicy()) {
@@ -164,7 +167,7 @@ class ChainTest {
 
         // Reconcile a day later shouldn't change anything
         clock.advanceFromOrigin(Duration.ofDays(ca.getValidityDays() - ca.getRenewalDays() + 2));
-        chain.reconcile(internalIssuerSpec, ownerReference);
+        chain.reconcile(reconciliation, internalIssuerSpec, ownerReference);
         assertEquals(2, secrets.withName("test-cluster-cluster-ca").get().getMetadata().getGeneration());
         assertEquals(2, secrets.withName("test-cluster-cluster-ca-cert").get().getMetadata().getGeneration());
     }
@@ -194,7 +197,7 @@ class ChainTest {
         OwnerReference ownerReference = null;
         int rootValidityDays = spec.getChain().get(0).getIssuanceParams().getValidity();
         int intermediateValidityDays = spec.getChain().get(1).getIssuanceParams().getValidity();
-        chain.reconcile(spec, ownerReference);
+        chain.reconcile(reconciliation, spec, ownerReference);
         assertEquals(Set.of("foo"), secretNames());
 
         assertEquals(2, secrets.withName("foo").get().getMetadata().getGeneration());
@@ -221,13 +224,13 @@ class ChainTest {
 
         // Reconcile a day later shouldn't change anything
         clock.advanceFromOrigin(Duration.ofDays(1));
-        chain.reconcile(spec, ownerReference);
+        chain.reconcile(reconciliation, spec, ownerReference);
         assertEquals(2, secrets.withName("foo").get().getMetadata().getGeneration());
         assertEquals(2, secrets.withName("foo").get().getMetadata().getGeneration());
 
         // Reconcile within the renewal period should change
         clock.advanceFromOrigin(Duration.ofDays(intermediateValidityDays - spec.getRenewalDays() + 1));
-        chain.reconcile(spec, ownerReference);
+        chain.reconcile(reconciliation, spec, ownerReference);
         assertEquals(3, secrets.withName("foo").get().getMetadata().getGeneration());
         assertEquals(rootCert, x509FromBase64String(secrets.withName("foo").get().getData().get("root.crt")),
                 "expected the root cert not to have changed");
@@ -247,7 +250,7 @@ class ChainTest {
 
         // New reconcile in the renewal period of the root ca
         clock.advanceFromOrigin(Duration.ofDays(rootValidityDays - spec.getRenewalDays() + 1));
-        chain.reconcile(spec, ownerReference);
+        chain.reconcile(reconciliation, spec, ownerReference);
         assertEquals(5, secrets.withName("foo").get().getMetadata().getGeneration());
         assertNotEquals(rootCert, x509FromBase64String(secrets.withName("foo").get().getData().get("root.crt")),
                 "expected the root cert to have changed");

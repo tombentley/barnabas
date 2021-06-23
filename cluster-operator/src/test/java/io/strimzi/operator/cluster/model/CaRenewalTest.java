@@ -4,6 +4,14 @@
  */
 package io.strimzi.operator.cluster.model;
 
+import java.io.File;
+import java.io.IOException;
+import java.security.cert.X509Certificate;
+import java.util.Base64;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.strimzi.certs.CertAndKey;
@@ -13,14 +21,6 @@ import io.strimzi.test.annotations.ParallelSuite;
 import io.strimzi.test.annotations.ParallelTest;
 import io.vertx.junit5.VertxExtension;
 import org.junit.jupiter.api.extension.ExtendWith;
-
-import java.io.File;
-import java.io.IOException;
-import java.security.cert.X509Certificate;
-import java.util.Base64;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;

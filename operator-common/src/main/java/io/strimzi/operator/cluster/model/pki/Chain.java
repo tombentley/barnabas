@@ -34,6 +34,8 @@ import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.certs.CertManager;
 import io.strimzi.certs.Subject;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 
 import static io.strimzi.operator.common.Util.delete;
 
@@ -52,7 +54,7 @@ public class Chain {
             this.subject = Objects.requireNonNull(subject);
             this.policy = policy;
             if (validity <= 0) {
-                throw new IllegalArgumentException();
+                throw new IllegalArgumentException("");
             }
             this.validity = validity;
         }
@@ -185,6 +187,8 @@ public class Chain {
         }
     }
 
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(Chain.class.getName());
+
     private static final ZoneId UTC = ZoneId.of("UTC");
 
     // TODO we need to increment the version
@@ -240,7 +244,7 @@ public class Chain {
         this.certManager = certManager;
     }
 
-    public CertificateIssuer reconcile(InternalIssuerSpec chain, OwnerReference ownerRef) throws CertificateException {
+    public CertificateIssuer reconcile(Reconciliation reconciliation, InternalIssuerSpec chain, OwnerReference ownerRef) throws CertificateException {
         Validator validator = new Validator(clock, chain.getRenewalDays());
         List<X509Certificate> partialCertChain = new ArrayList<>();
         CertAndKey certificate = null;
@@ -257,9 +261,10 @@ public class Chain {
                     certReference.getKeySecret(),
                     certReference.getKeySecretItem());
             boolean issued = false;
-            if (certificate == null || certificate.cert == null || anyIssued) {
+            if (certificate.cert == null || anyIssued) {
                 if (certReference.isIssuable()) {
                     // If it doesn't exist and is issuable then issue it using the given parameters
+                    LOGGER.infoCr(reconciliation, "{} does not exist; creating", certReference);
                     certificate = issue(certReference.getIssuanceParams(), prevCert, prevKey, certificate.key, pathLen);
                     anyIssued = issued = true;
                 } else {
@@ -277,9 +282,11 @@ public class Chain {
             Validator.Result validate = validate(validator, x, certificate.cert);
             switch (validate.type()) {
                 case OK:
+                    LOGGER.debugCr(reconciliation, "CA certificate {} is valid", certReference);
                     break;
                 case WILL_EXPIRE:
-                case EXPIRED:
+                case HAS_EXPIRED:
+                    LOGGER.infoCr(reconciliation, "{} {}, reissuing", certReference, validate.type());
                     // reissue if possible
                     certificate = issue(certReference.getIssuanceParams(), prevCert, prevKey, certificate.key, pathLen);
                     anyIssued = issued = true;
@@ -288,9 +295,8 @@ public class Chain {
                     y.add(certificate.cert);
                     Validator.Result.Type type = validate(validator, y, certificate.cert).type();
                     if (type != Validator.Result.Type.OK) {
-                        throw new IllegalStateException("Reissued certificate is not valid: " + type);
+                        throw new IllegalStateException("Reissued certificate " + certReference + " is not valid: " + type);
                     }
-
                     break;
                 default:
                     throw new IllegalStateException("Unexpected validation result " + validate);

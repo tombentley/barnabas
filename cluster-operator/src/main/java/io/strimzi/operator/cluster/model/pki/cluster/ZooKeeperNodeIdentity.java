@@ -6,17 +6,22 @@ package io.strimzi.operator.cluster.model.pki.cluster;
 
 import java.util.Objects;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
 
 public class ZooKeeperNodeIdentity extends SubjectIdentity {
     private final int nodeId;
 
-    public ZooKeeperNodeIdentity(int nodeId) {
+    @JsonCreator
+    public ZooKeeperNodeIdentity(
+            @JsonProperty("nodeId") int nodeId) {
         if (nodeId <= 0)
             throw new IllegalArgumentException();
         this.nodeId = nodeId;
     }
 
+    @JsonProperty("nodeId")
     public int nodeId() {
         return nodeId;
     }

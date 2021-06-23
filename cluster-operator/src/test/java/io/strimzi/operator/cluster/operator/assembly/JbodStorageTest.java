@@ -33,6 +33,7 @@ import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.test.mockkube.MockKube;
+import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.junit5.Checkpoint;
 import io.vertx.junit5.VertxExtension;
@@ -45,9 +46,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.hamcrest.CoreMatchers.is;
@@ -138,7 +141,22 @@ public class JbodStorageTest {
 
         this.operator = new KafkaAssemblyOperator(this.vertx, pfa, new MockCertManager(),
                 new PasswordGenerator(10, "a", "a"), ros,
-                ResourceUtils.dummyClusterOperatorConfig(VERSIONS, 2_000));
+                ResourceUtils.dummyClusterOperatorConfig(VERSIONS, 2_000)) {
+
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+                    @Override
+                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                };
+            }
+        };
     }
 
     @Test

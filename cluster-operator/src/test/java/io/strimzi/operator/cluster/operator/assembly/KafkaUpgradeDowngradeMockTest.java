@@ -43,7 +43,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.Collections;
+import java.util.Date;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -124,7 +126,22 @@ public class KafkaUpgradeDowngradeMockTest {
         ClusterOperatorConfig config = ResourceUtils.dummyClusterOperatorConfig(VERSIONS);
 
         operator = new KafkaAssemblyOperator(vertx, pfa, new MockCertManager(),
-                new PasswordGenerator(10, "a", "a"), supplier, config);
+                new PasswordGenerator(10, "a", "a"), supplier, config) {
+
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+                    @Override
+                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                };
+            }
+        };
 
         LOGGER.info("Reconciling initially -> create");
         return operator.reconcile(new Reconciliation("initial-reconciliation", Kafka.RESOURCE_KIND, NAMESPACE, CLUSTER_NAME));

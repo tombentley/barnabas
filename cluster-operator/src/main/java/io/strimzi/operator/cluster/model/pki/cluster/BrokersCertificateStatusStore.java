@@ -26,21 +26,26 @@ import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
  */
 public class BrokersCertificateStatusStore implements CertificateStatusStore {
 
-    private final Resource<Secret> secretResource;
-    private final ObjectMapper mapper;
+    protected final Resource<Secret> brokerSecretResource;
+    protected final ObjectMapper mapper;
+    private final Resource<Secret> zkSecretResource;
 
-    public BrokersCertificateStatusStore(ObjectMapper mapper, Resource<Secret> secretResource) {
+    public BrokersCertificateStatusStore(ObjectMapper mapper,
+                                         Resource<Secret> zkSecretResource,
+                                         Resource<Secret> brokerSecretResource) {
         this.mapper = mapper;
-        this.secretResource = secretResource;
+        this.zkSecretResource = zkSecretResource;
+        this.brokerSecretResource = brokerSecretResource;
     }
 
     @Override
     public CertificateStatus loadStatus(SubjectIdentity subjectIdentity) {
+        Resource<Secret> secretResource = secretResource(subjectIdentity);
         Secret secret = secretResource.get();
         if (secret == null || secret.getData() == null || secret.getData().isEmpty()) {
             return CertificateStatus.createNew(subjectIdentity);
         } else {
-            String s = secret.getData().get(stateKey((BrokerIdentity) subjectIdentity)); // TODO get rid of this cast
+            String s = secret.getData().get(stateKey(subjectIdentity));
             if (s == null) {
                 return CertificateStatus.createNew(subjectIdentity);
             } else {
@@ -51,19 +56,38 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
                 }
             }
         }
+
     }
 
-    String stateKey(BrokerIdentity id) {
-        return "broker-" + id.brokerId() + ".state";
+    String stateKey(SubjectIdentity id) {
+        if (id instanceof BrokerIdentity) {
+            return "broker-" + ((BrokerIdentity) id).brokerId() + ".state";
+        } else if (id instanceof ZooKeeperNodeIdentity) {
+            return "node-" + ((ZooKeeperNodeIdentity) id).nodeId() + ".state";
+        } else {
+            throw new IllegalStateException("" + id);
+        }
     }
+
+    Resource<Secret> secretResource(SubjectIdentity id) {
+        if (id instanceof BrokerIdentity) {
+            return brokerSecretResource;
+        } else if (id instanceof ZooKeeperNodeIdentity) {
+            return zkSecretResource;
+        } else {
+            throw new IllegalStateException("" + id);
+        }
+    }
+
 
     @Override
     public void storeStatus(CertificateStatus c) {
-        BrokerIdentity id = (BrokerIdentity) c.subjectIdentity();
+        SubjectIdentity subjectIdentity = c.subjectIdentity();
+        Resource<Secret> secretResource = secretResource(subjectIdentity);
         Secret secret = secretResource.get();
         SecretBuilder builder = secret != null ? new SecretBuilder(secret) : new SecretBuilder();
         try {
-            builder.addToData(stateKey(id), mapper.writeValueAsString(c));
+            builder.addToData(stateKey(subjectIdentity), mapper.writeValueAsString(c));
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }

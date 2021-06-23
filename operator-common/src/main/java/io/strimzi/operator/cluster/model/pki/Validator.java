@@ -38,7 +38,7 @@ public class Validator {
             /** Not path to a trust anchor was found (i.e. not trusted). */
             NO_TRUST_ANCHOR,
             /** An expired certificate was found. */
-            EXPIRED,
+            HAS_EXPIRED,
             /** Currently valid, but not valid at {@code now + renewalPeriod}. */
             WILL_EXPIRE,
             /** Some other kind of invalid. */
@@ -96,7 +96,7 @@ public class Validator {
         }
 
         static Result expired(X509Certificate expiredCert) {
-            return new Result(Result.Type.EXPIRED, expiredCert, null, null);
+            return new Result(Result.Type.HAS_EXPIRED, expiredCert, null, null);
         }
 
         static Result willExpire(X509Certificate expiringCert, TrustAnchor anchor) {
