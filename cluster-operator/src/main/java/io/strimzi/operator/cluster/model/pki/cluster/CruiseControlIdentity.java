@@ -4,18 +4,18 @@
  */
 package io.strimzi.operator.cluster.model.pki.cluster;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
 
-public class CruiseControlIdentity extends SubjectIdentity {
+public final class CruiseControlIdentity extends SubjectIdentity {
 
-    public static final CruiseControlIdentity INSTANCE = new CruiseControlIdentity();
-
-    private CruiseControlIdentity() {
+    @JsonCreator
+    public CruiseControlIdentity() {
     }
 
     @Override
     public boolean equals(Object other) {
-        return other == INSTANCE;
+        return other instanceof CruiseControlIdentity;
     }
 
     @Override

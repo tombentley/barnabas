@@ -4,6 +4,7 @@
  */
 package io.strimzi.operator.cluster.model.pki.cluster;
 
+import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.time.Clock;
 import java.util.HashSet;
@@ -31,7 +32,9 @@ import io.strimzi.operator.cluster.ClusterOperator;
 import io.strimzi.operator.cluster.model.Ca;
 import io.strimzi.operator.cluster.model.CruiseControl;
 import io.strimzi.operator.cluster.model.DnsNameGenerator;
+import io.strimzi.operator.cluster.model.EntityOperator;
 import io.strimzi.operator.cluster.model.KafkaCluster;
+import io.strimzi.operator.cluster.model.KafkaExporter;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
 import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
 import io.strimzi.operator.cluster.model.pki.CertificateController;
@@ -75,6 +78,7 @@ import static io.strimzi.operator.cluster.model.EntityOperator.entityOperatorNam
  *     <dd>or whatever action is needed for the certs to actually be used.</dd>
  * </dl>
  */
+@SuppressWarnings("checkstyle:ClassDataAbstractionCoupling")
 public class ClusterPki {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -138,7 +142,12 @@ public class ClusterPki {
         this.caKeySecretResource = client.secrets().inNamespace(namespace).withName(KafkaResources.clusterCaKeySecretName(cluster));
         this.certificateStatusStore = new BrokersCertificateStatusStore(MAPPER,
                 client.secrets().inNamespace(namespace).withName(ZookeeperCluster.nodesSecretName(cluster)),
-                client.secrets().inNamespace(namespace).withName(KafkaCluster.brokersSecretName(cluster)));
+                client.secrets().inNamespace(namespace).withName(KafkaCluster.brokersSecretName(cluster)),
+                client.secrets().inNamespace(namespace).withName(EntityOperator.secretName(cluster)),
+                client.secrets().inNamespace(namespace).withName(ClusterOperator.secretName(cluster)),
+                client.secrets().inNamespace(namespace).withName(KafkaExporter.secretName(cluster)),
+                client.secrets().inNamespace(namespace).withName(CruiseControl.secretName(cluster))
+                );
         this.certOutputWriters = List.of(
                 new ZookeeperCertificateOutputWriter(client.secrets().inNamespace(namespace)
                         .withName(ZookeeperCluster.nodesSecretName(cluster))),
@@ -190,6 +199,11 @@ public class ClusterPki {
             CertificateReconcileResult reconcile = controller.reconcile(zkSubject(namespace, cluster, nodeId));
             neededRoots.add(reconcile.trustRoot());
         }
+        trust(neededRoots);
+        LOGGER.debugCr(reconciliation, "ZK certificate issuance took {}ms", (System.nanoTime() - t0) / 1_000_000.0);
+    }
+
+    private void trust(Set<TrustRoot> neededRoots) throws CertificateEncodingException {
         Set<TrustRoot> newState = trustPrivateState.load().values().stream().map(trustRoot -> {
             if (neededRoots.contains(trustRoot)) {
                 return trustRoot;
@@ -198,29 +212,31 @@ public class ClusterPki {
             }
         }).collect(Collectors.toSet());
         trustController.reconcile(newState);
-        LOGGER.debugCr(reconciliation, "ZK certificate issuance took {}ms", (System.nanoTime() - t0) / 1_000_000.0);
     }
 
     public void issueKafkaCertificates(Kafka kafka,
                                     Set<String> externalBootstrapAddresses,
                                     Map<Integer, Set<String>> externalAddresses) throws CertificateException {
         Objects.requireNonNull(this.controller);
+        Set<TrustRoot> neededRoots = new HashSet<>();
         int kafkaReplicas = kafka.getSpec().getKafka().getReplicas();
         for (int brokerId = 0; brokerId < kafkaReplicas; brokerId++) {
-            controller.reconcile(
+            CertificateReconcileResult reconcile = controller.reconcile(
                     brokerSubject(namespace, cluster, brokerId, externalBootstrapAddresses, externalAddresses));
+            neededRoots.add(reconcile.trustRoot());
         }
+        trust(neededRoots);
     }
 
     public void issueEoCertificate(Kafka kafka) throws CertificateException {
         Objects.requireNonNull(this.controller);
         io.strimzi.api.kafka.model.EntityOperatorSpec entityOperator = kafka.getSpec().getEntityOperator();
         if (entityOperator != null) {
-            controller.reconcile(new RequiredCertificate(EntityOperatorIdentity.INSTANCE,
+            trust(Set.of(controller.reconcile(new RequiredCertificate(new EntityOperatorIdentity(),
                     new Subject.Builder()
                             .withCommonName(entityOperatorName(cluster))
                             .withOrganizationName(Ca.IO_STRIMZI)
-                            .build()));
+                            .build())).trustRoot()));
         }
     }
 
@@ -228,30 +244,32 @@ public class ClusterPki {
         Objects.requireNonNull(this.controller);
         io.strimzi.api.kafka.model.KafkaExporterSpec i = kafka.getSpec().getKafkaExporter();
         if (i != null) {
-            controller.reconcile(new RequiredCertificate(KafkaExporterIdentity.INSTANCE,
+            trust(Set.of(controller.reconcile(new RequiredCertificate(new KafkaExporterIdentity(),
                     new Subject.Builder()
                             .withCommonName(KafkaExporterResources.deploymentName(cluster))
                             .withOrganizationName(Ca.IO_STRIMZI)
-                            .build()));
+                            .build())).trustRoot()));
         }
     }
 
     public void issueCcCertificate(Kafka kafka) throws CertificateException {
         Objects.requireNonNull(this.controller);
-        controller.reconcile(new RequiredCertificate(CruiseControlIdentity.INSTANCE,
-                new Subject.Builder()
-                        .withCommonName(CruiseControlResources.deploymentName(cluster))
-                        .withOrganizationName(Ca.IO_STRIMZI)
-                        .build()));
+        if (kafka.getSpec().getCruiseControl() != null) {
+            trust(Set.of(controller.reconcile(new RequiredCertificate(new CruiseControlIdentity(),
+                    new Subject.Builder()
+                            .withCommonName(CruiseControlResources.deploymentName(cluster))
+                            .withOrganizationName(Ca.IO_STRIMZI)
+                            .build())).trustRoot()));
+        }
     }
 
     public void issueCoCertificate(Kafka kafka) throws CertificateException {
         Objects.requireNonNull(this.controller);
-        controller.reconcile(new RequiredCertificate(ClusterOperatorIdentity.INSTANCE,
+        trust(Set.of(controller.reconcile(new RequiredCertificate(new ClusterOperatorIdentity(),
                 new Subject.Builder()
                         .withCommonName("cluster-operator")
                         .withOrganizationName(Ca.IO_STRIMZI)
-                        .build()));
+                        .build())).trustRoot()));
 
         // TODO It will figure out the unused certs too, somehow.
         // It should return something which we can feed to the KafkaRoller predicate

@@ -34,7 +34,8 @@ class BrokersCertificateStatusStoreTest {
         secretResource = new MockKube().build().secrets().inNamespace("ns").withName("n");
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerSubtypes(new NamedType(BrokerIdentity.class, "broker"));
-        writer = new BrokersCertificateStatusStore(mapper, null, secretResource);
+        writer = new BrokersCertificateStatusStore(mapper, null, secretResource,
+                null, null, null, null);
     }
 
     @Test

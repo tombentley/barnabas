@@ -26,16 +26,28 @@ import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
  */
 public class BrokersCertificateStatusStore implements CertificateStatusStore {
 
-    protected final Resource<Secret> brokerSecretResource;
     protected final ObjectMapper mapper;
     private final Resource<Secret> zkSecretResource;
+    protected final Resource<Secret> brokerSecretResource;
+    protected final Resource<Secret> eeSecretResource;
+    protected final Resource<Secret> coSecretResource;
+    protected final Resource<Secret> keSecretResource;
+    protected final Resource<Secret> ccSecretResource;
 
     public BrokersCertificateStatusStore(ObjectMapper mapper,
                                          Resource<Secret> zkSecretResource,
-                                         Resource<Secret> brokerSecretResource) {
+                                         Resource<Secret> brokerSecretResource,
+                                         Resource<Secret> eeSecretResource,
+                                         Resource<Secret> coSecretResource,
+                                         Resource<Secret> keSecretResource,
+                                         Resource<Secret> ccSecretResource) {
         this.mapper = mapper;
         this.zkSecretResource = zkSecretResource;
         this.brokerSecretResource = brokerSecretResource;
+        this.eeSecretResource = eeSecretResource;
+        this.coSecretResource = coSecretResource;
+        this.keSecretResource = keSecretResource;
+        this.ccSecretResource = ccSecretResource;
     }
 
     @Override
@@ -64,8 +76,16 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
             return "broker-" + ((BrokerIdentity) id).brokerId() + ".state";
         } else if (id instanceof ZooKeeperNodeIdentity) {
             return "node-" + ((ZooKeeperNodeIdentity) id).nodeId() + ".state";
+        } else if (id instanceof EntityOperatorIdentity) {
+            return "entity-operator.state";
+        } else if (id instanceof ClusterOperatorIdentity) {
+            return "cluster-operator.state";
+        } else if (id instanceof KafkaExporterIdentity) {
+            return "kafka-exporter.state";
+        } else if (id instanceof CruiseControlIdentity) {
+            return "cruise-control.state";
         } else {
-            throw new IllegalStateException("" + id);
+            throw new IllegalStateException("Unknown identity " + id);
         }
     }
 
@@ -74,8 +94,16 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
             return brokerSecretResource;
         } else if (id instanceof ZooKeeperNodeIdentity) {
             return zkSecretResource;
+        } else if (id instanceof EntityOperatorIdentity) {
+            return eeSecretResource;
+        } else if (id instanceof ClusterOperatorIdentity) {
+            return coSecretResource;
+        } else if (id instanceof KafkaExporterIdentity) {
+            return keSecretResource;
+        } else if (id instanceof CruiseControlIdentity) {
+            return ccSecretResource;
         } else {
-            throw new IllegalStateException("" + id);
+            throw new IllegalStateException("Unknown identity " + id);
         }
     }
 

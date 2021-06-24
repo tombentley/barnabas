@@ -4,18 +4,18 @@
  */
 package io.strimzi.operator.cluster.model.pki.cluster;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
 
-public class ClusterOperatorIdentity extends SubjectIdentity {
+public final class ClusterOperatorIdentity extends SubjectIdentity {
 
-    public static final ClusterOperatorIdentity INSTANCE = new ClusterOperatorIdentity();
-
-    private ClusterOperatorIdentity() {
+    @JsonCreator
+    public ClusterOperatorIdentity() {
     }
 
     @Override
     public boolean equals(Object other) {
-        return other == INSTANCE;
+        return other instanceof ClusterOperatorIdentity;
     }
 
     @Override

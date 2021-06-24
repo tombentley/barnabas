@@ -116,7 +116,9 @@ class PkiIntegrationTest {
     }
 
     private void initCc(int caValidity, int certValidity, int certRenewal) throws CertificateException {
-        BrokersCertificateStatusStore statusStore = new BrokersCertificateStatusStore(mapper, null, brokerCertsSecretResource);
+        BrokersCertificateStatusStore statusStore = new BrokersCertificateStatusStore(mapper,
+                null, brokerCertsSecretResource,
+                null, null, null, null);
         NewBrokersCertificateOutputWriter outputStore = new NewBrokersCertificateOutputWriter(brokerCertsSecretResource);
 
 //        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(clock,
