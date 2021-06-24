@@ -275,7 +275,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 // Roll everything if a new CA is added to the trust store.
                 .compose(state -> state.rollingUpdateForNewCaKey())
 
-                // Prep ZK
                 .compose(state -> state.getZookeeperDescription())
                 .compose(state -> state.zkModelWarnings())
                 .compose(state -> state.zkManualPodCleaning())
@@ -291,8 +290,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.zkAncillaryCm())
                 .compose(state -> state.zkNodesSecret())
                 .compose(state -> state.zkPodDisruptionBudget())
-                .compose(state -> state.kafkaPodDisruptionBudget())
-                // Prep Kafka
+
+
+
+
                 .compose(state -> state.checkKafkaSpec())
                 .compose(state -> state.kafkaModelWarnings())
                 .compose(state -> state.kafkaManualPodCleaning())
@@ -313,37 +314,25 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaIngressesReady())
                 .compose(state -> state.kafkaIngressesV1Beta1Ready())
                 .compose(state -> state.kafkaGenerateCertificates(this::dateSupplier))
+                .compose(state -> state.clusterCaIssueBrokerCertificates(this::dateSupplier))
                 .compose(state -> state.customListenerCertificates())
                 .compose(state -> state.kafkaAncillaryCm())
                 .compose(state -> state.kafkaBrokersSecret())
                 .compose(state -> state.kafkaJmxSecret())
+                .compose(state -> state.kafkaPodDisruptionBudget())
 
-                // This has to run after all possible rolling updates which might move the pods to different nodes
-                .compose(state -> state.kafkaNodePortExternalListenerStatus())
-                .compose(state -> state.kafkaCustomCertificatesToStatus())
-                // Prep EO
                 .compose(state -> state.getEntityOperatorDescription())
-                .compose(state -> state.entityOperatorRole())
-                .compose(state -> state.entityTopicOperatorRole())
-                .compose(state -> state.entityUserOperatorRole())
-                .compose(state -> state.entityOperatorServiceAccount())
-                .compose(state -> state.entityOperatorTopicOpRoleBindingForRole())
-                .compose(state -> state.entityOperatorUserOpRoleBindingForRole())
-                .compose(state -> state.entityOperatorTopicOpAncillaryCm())
-                .compose(state -> state.entityOperatorUserOpAncillaryCm())
                 .compose(state -> state.entityOperatorSecret(this::dateSupplier))
-                // Prep CC
+                .compose(state -> state.clusterCaIssueEntityOperatorCertificate(this::dateSupplier))
                 .compose(state -> state.getCruiseControlDescription())
-                .compose(state -> state.cruiseControlNetPolicy())
-                .compose(state -> state.cruiseControlServiceAccount())
-                .compose(state -> state.cruiseControlAncillaryCm())
                 .compose(state -> state.cruiseControlSecret(this::dateSupplier))
-                // Prep Exporter
+                .compose(state -> state.clusterCaIssueCruiseControlCertificate(this::dateSupplier))
                 .compose(state -> state.getKafkaExporterDescription())
-                .compose(state -> state.kafkaExporterServiceAccount())
                 .compose(state -> state.kafkaExporterSecret(this::dateSupplier))
+                .compose(state -> state.clusterCaIssueKafkaExporterCertificate(this::dateSupplier))
 
-                // And now we can create pods
+                // By this point ZK nodes need to trust all client certs that will be presented to them.
+                // (ZK, Kafka, TopicOperator, UserOperator, ClusterOperator, CC)
                 .compose(state -> state.zkStatefulSet())
                 .compose(state -> state.zkScalingDown())
                 .compose(state -> state.zkRollingUpdate())
@@ -354,6 +343,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.zkHeadlessServiceEndpointReadiness())
                 .compose(state -> state.zkPersistentClaimDeletion())
 
+                // By this point all brokers need to trust all client certs that will be presented to them..
+                // (Kafka, TopicOperator, UserOperator, ClusterOperator, CC, KafkaExporter)
                 .compose(state -> state.kafkaStatefulSet())
                 .compose(state -> state.kafkaRollToAddOrRemoveVolumes())
                 .compose(state -> state.kafkaRollingUpdate())
@@ -364,13 +355,31 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaGetClusterId())
                 .compose(state -> state.kafkaPersistentClaimDeletion())
 
+                // This has to run after all possible rolling updates which might move the pods to different nodes
+                .compose(state -> state.kafkaNodePortExternalListenerStatus())
+                .compose(state -> state.kafkaCustomCertificatesToStatus())
+
+
+                .compose(state -> state.entityOperatorRole())
+                .compose(state -> state.entityTopicOperatorRole())
+                .compose(state -> state.entityUserOperatorRole())
+                .compose(state -> state.entityOperatorServiceAccount())
+                .compose(state -> state.entityOperatorTopicOpRoleBindingForRole())
+                .compose(state -> state.entityOperatorUserOpRoleBindingForRole())
+                .compose(state -> state.entityOperatorTopicOpAncillaryCm())
+                .compose(state -> state.entityOperatorUserOpAncillaryCm())
+
                 .compose(state -> state.entityOperatorDeployment())
                 .compose(state -> state.entityOperatorReady())
 
+                .compose(state -> state.cruiseControlNetPolicy())
+                .compose(state -> state.cruiseControlServiceAccount())
+                .compose(state -> state.cruiseControlAncillaryCm())
                 .compose(state -> state.cruiseControlDeployment())
                 .compose(state -> state.cruiseControlService())
                 .compose(state -> state.cruiseControlReady())
 
+                .compose(state -> state.kafkaExporterServiceAccount())
                 .compose(state -> state.kafkaExporterDeployment())
                 .compose(state -> state.kafkaExporterReady())
 
@@ -605,6 +614,61 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
                 try {
                     clusterPki.issueZkCertificates(kafkaAssembly);
+                } catch (CertificateException e) {
+                    return Future.failedFuture(e);
+                }
+            }
+            return Future.succeededFuture(this);
+        }
+
+        Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
+            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
+                try {
+                    clusterPki.issueKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames);
+                } catch (CertificateException e) {
+                    return Future.failedFuture(e);
+                }
+            }
+            return Future.succeededFuture(this);
+        }
+
+        Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
+            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
+                try {
+                    clusterPki.issueEoCertificate(kafkaAssembly);
+                } catch (CertificateException e) {
+                    return Future.failedFuture(e);
+                }
+            }
+            return Future.succeededFuture(this);
+        }
+
+        Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
+            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
+                try {
+                    clusterPki.issueCoCertificate(kafkaAssembly);
+                } catch (CertificateException e) {
+                    return Future.failedFuture(e);
+                }
+            }
+            return Future.succeededFuture(this);
+        }
+
+        Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
+            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
+                try {
+                    clusterPki.issueKafkaExporterCertificates(kafkaAssembly);
+                } catch (CertificateException e) {
+                    return Future.failedFuture(e);
+                }
+            }
+            return Future.succeededFuture(this);
+        }
+
+        Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
+            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
+                try {
+                    clusterPki.issueCcCertificate(kafkaAssembly);
                 } catch (CertificateException e) {
                     return Future.failedFuture(e);
                 }

@@ -154,6 +154,31 @@ public class JbodStorageTest {
                     Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
                         return Future.succeededFuture(this);
                     }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+
+                    @Override
+                    Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
                 };
             }
         };
