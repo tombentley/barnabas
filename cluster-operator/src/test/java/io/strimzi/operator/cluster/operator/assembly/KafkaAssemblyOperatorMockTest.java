@@ -333,6 +333,10 @@ public class KafkaAssemblyOperatorMockTest {
                         return Future.succeededFuture(this);
                     }
 
+                    @Override
+                    Future<ReconciliationState> rollingUpdateForPki() {
+                        return Future.succeededFuture(this);
+                    }
                 };
             }
         };

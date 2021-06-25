@@ -273,7 +273,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.getKafkaClusterDescription())
                 .compose(state -> state.prepareVersionChange())
                 // Roll everything if a new CA is added to the trust store.
-                .compose(state -> state.rollingUpdateForNewCaKey())
+                .compose(state -> state.rollingUpdateForNewCaKey(state.clusterCa.keyReplaced(), state.clientsCa.keyReplaced()))
 
                 .compose(state -> state.getZookeeperDescription())
                 .compose(state -> state.zkModelWarnings())
@@ -330,6 +330,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.getKafkaExporterDescription())
                 .compose(state -> state.kafkaExporterSecret(this::dateSupplier))
                 .compose(state -> state.clusterCaIssueKafkaExporterCertificate(this::dateSupplier))
+                .compose(state -> state.rollingUpdateForPki())
+                .compose(state -> state.clusterPkiTrust())
 
                 // By this point ZK nodes need to trust all client certs that will be presented to them.
                 // (ZK, Kafka, TopicOperator, UserOperator, ClusterOperator, CC)
@@ -679,6 +681,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return Future.succeededFuture(this);
         }
 
+        Future<ReconciliationState> rollingUpdateForPki() {
+            return rollingUpdateForNewCaKey(clusterPki.newTrust(), false);
+        }
+
         Future<ReconciliationState> clusterPkiTrust() {
             try {
                 clusterPki.trust();
@@ -834,13 +840,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          * Note this is only necessary when the CA certificate has changed due to a new CA key.
          * It is not necessary when the CA certificate is replace while retaining the existing key.
          */
-        Future<ReconciliationState> rollingUpdateForNewCaKey() {
-            List<String> reason = new ArrayList<>(4);
+        Future<ReconciliationState> rollingUpdateForNewCaKey(boolean clusterCaKeyReplaced, boolean clientsCaKeyReplaced) {
+            List<String> reason = new ArrayList<>(2);
             // TODO is it really correct that this is only needed for new keys? What about expiring certs in the certpath?
-            if (this.clusterCa.keyReplaced()) {
+            if (clusterCaKeyReplaced) {
                 reason.add("trust new cluster CA certificate signed by new key");
             }
-            if (this.clientsCa.keyReplaced()) {
+            if (clientsCaKeyReplaced) {
                 reason.add("trust new clients CA certificate signed by new key");
             }
             if (!reason.isEmpty()) {
@@ -849,7 +855,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     LOGGER.debugCr(reconciliation, "Rolling Pod {} to {}", pod.getMetadata().getName(), reason);
                     return reason;
                 };
-                if (this.clusterCa.keyReplaced()) {
+                if (clusterCaKeyReplaced) {
                     zkRollFuture = zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
                         .compose(sts -> zkSetOperations.maybeRollingUpdate(reconciliation, sts, rollPodAndLogReason,
                         clusterCa.caCertSecret(),

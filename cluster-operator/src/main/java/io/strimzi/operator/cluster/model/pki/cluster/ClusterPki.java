@@ -381,7 +381,10 @@ public class ClusterPki {
     public void trust() throws CertificateEncodingException {
         Set<TrustRoot> newState = trustPrivateState.load().values().stream().map(trustRoot -> {
             if (newTrustRoots.contains(trustRoot)) {
-                return trustRoot;
+                // TODO this is fishy:
+                // a) what is enforcing the valid transitions
+                // b) why the need for the resourceVersion argument, then the TrustRoot already knows its rv?
+                return trustRoot.toTrusted(trustRoot.resourceVersion());
             } else {
                 return trustRoot.toZombie();
             }

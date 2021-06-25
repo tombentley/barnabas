@@ -736,6 +736,11 @@ public class KafkaAssemblyOperatorTest {
                     Future<ReconciliationState> clusterPkiTrust() {
                         return Future.succeededFuture(this);
                     }
+
+                    @Override
+                    Future<ReconciliationState> rollingUpdateForPki() {
+                        return Future.succeededFuture(this);
+                    }
                 };
             }
         };
@@ -1376,6 +1381,11 @@ public class KafkaAssemblyOperatorTest {
                     Future<ReconciliationState> clusterPkiTrust() {
                         return Future.succeededFuture(this);
                     }
+
+                    @Override
+                    Future<ReconciliationState> rollingUpdateForPki() {
+                        return Future.succeededFuture(this);
+                    }
                 };
             }
         };
@@ -1537,6 +1547,11 @@ public class KafkaAssemblyOperatorTest {
                     Future<ReconciliationState> clusterPkiTrust() {
                         return Future.succeededFuture(this);
                     }
+
+                    @Override
+                    Future<ReconciliationState> rollingUpdateForPki() {
+                        return Future.succeededFuture(this);
+                    }
                 };
             }
         };
@@ -1664,6 +1679,11 @@ public class KafkaAssemblyOperatorTest {
 
                     @Override
                     Future<ReconciliationState> clusterPkiTrust() {
+                        return Future.succeededFuture(this);
+                    }
+
+                    @Override
+                    Future<ReconciliationState> rollingUpdateForPki() {
                         return Future.succeededFuture(this);
                     }
                 };
