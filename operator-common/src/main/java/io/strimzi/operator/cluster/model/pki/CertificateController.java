@@ -31,8 +31,15 @@ import org.apache.logging.log4j.Logger;
  * implementing all the transitions of the {@link CertificateStatus} state machine, and some of the transitions
  * of the {@link TrustState} state machine.
  *
- * The state of certificates is made persistent (in Kube) via the {@link CertificateStatusStore}, so that the
+ * Because a certificate might be issued with a new, untrusted, root CA certificate certificates cannot always
+ * be used immediately: Trust in the new root CA certificate may have to be established first.
+ * The caller of {@link #reconcile(RequiredCertificate)} needs to inspect the result and possibly establish trust
+ * in the trust anchor before deploying the issued certificate for use.
+ *
+ * The state of issued certificates is made persistent (in Kube) via the {@link CertificateStatusStore}, so that the
  * current state of each certificate's state machine is persisted across restarts of the operator process.
+ *
+ * The trustedness of CA certificates is determined by the {@link TrustPrivateState}.
  */
 public class CertificateController {
 
@@ -63,8 +70,8 @@ public class CertificateController {
     }
 
     /**
-     * Reconcile the given requirement for an end-entity certificate.
-     * Broadly speaking one of the following things may happen as a result:
+     * <p>Reconcile the given requirement for an end-entity certificate.
+     * Broadly speaking one of the following things may happen as a result:</p>
      * <ul>
      *     <li>No op, the certificate and chain already exists and is valid to no new certificates need to be issued.
      *         The certificate status starts, and remains, in {@link CertificateState#IN_USE}.
@@ -90,8 +97,9 @@ public class CertificateController {
      *         The caller will need to ensure the new root CA certificate is trusted (e.g. by restarting the pods which will see the issued certificate as a client certificate)
      *         and then make the end-entity certificate available for use (e.g. by restarting the pods which use the end-entity certificate).</li>
      * </ul>
-     * The actual transitions can be more complicated than that. For instance, it might happen that issuance takes
-     * a while, so {@link WaitingForIssuance} might be returned for some number of calls.
+     * <p>The actual transitions can be more complicated than that. For instance, it might happen that issuance takes
+     * a while, so {@link WaitingForIssuance} might be returned for some number of calls.</p>
+     *
      * @param requiredCertificate The required certificate.
      * @return The reconciliation result.
      * @throws CertificateException Cert ex
@@ -288,7 +296,9 @@ public class CertificateController {
                                               RequiredCertificate requiredCertificate,
                                               IssuedCertificate issued, TrustRoot trustRoot) {
         status = status.toInUse();
-        // store in output store
+        // store in output store before we change the status to in-use
+        // this is so that we can't get into an unrecoverable state if the operator were to crash,
+        // e.g. while writing the issued certificates.
         for (var writer : certificateOutputWriters) {
             try {
                 // TODO This can add and replace certs, but what about removing old certs?
