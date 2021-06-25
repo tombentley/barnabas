@@ -4,6 +4,9 @@
  */
 package io.strimzi.operator.cluster.model.pki.cluster;
 
+import java.io.IOException;
+import java.util.Base64;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.Secret;
@@ -27,26 +30,38 @@ import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
 public class BrokersCertificateStatusStore implements CertificateStatusStore {
 
     protected final ObjectMapper mapper;
+    private String zkName;
     private final Resource<Secret> zkSecretResource;
+    private String brokersName;
     protected final Resource<Secret> brokerSecretResource;
+    private String eoName;
     protected final Resource<Secret> eeSecretResource;
+    private String coName;
     protected final Resource<Secret> coSecretResource;
+    private String keName;
     protected final Resource<Secret> keSecretResource;
+    private String ccName;
     protected final Resource<Secret> ccSecretResource;
 
     public BrokersCertificateStatusStore(ObjectMapper mapper,
-                                         Resource<Secret> zkSecretResource,
-                                         Resource<Secret> brokerSecretResource,
-                                         Resource<Secret> eeSecretResource,
-                                         Resource<Secret> coSecretResource,
-                                         Resource<Secret> keSecretResource,
-                                         Resource<Secret> ccSecretResource) {
+                                         String zkName, Resource<Secret> zkSecretResource,
+                                         String brokersName, Resource<Secret> brokerSecretResource,
+                                         String eoName, Resource<Secret> eeSecretResource,
+                                         String coName, Resource<Secret> coSecretResource,
+                                         String keName, Resource<Secret> keSecretResource,
+                                         String ccName, Resource<Secret> ccSecretResource) {
         this.mapper = mapper;
+        this.zkName = zkName;
         this.zkSecretResource = zkSecretResource;
+        this.brokersName = brokersName;
         this.brokerSecretResource = brokerSecretResource;
+        this.eoName = eoName;
         this.eeSecretResource = eeSecretResource;
+        this.coName = coName;
         this.coSecretResource = coSecretResource;
+        this.keName = keName;
         this.keSecretResource = keSecretResource;
+        this.ccName = ccName;
         this.ccSecretResource = ccSecretResource;
     }
 
@@ -57,13 +72,14 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
         if (secret == null || secret.getData() == null || secret.getData().isEmpty()) {
             return CertificateStatus.createNew(subjectIdentity);
         } else {
-            String s = secret.getData().get(stateKey(subjectIdentity));
-            if (s == null) {
+            String src = secret.getData().get(stateKey(subjectIdentity));
+            if (src == null) {
                 return CertificateStatus.createNew(subjectIdentity);
             } else {
                 try {
+                    byte[] s = Base64.getDecoder().decode(src);
                     return mapper.readValue(s, CertificateStatus.class);
-                } catch (JsonProcessingException e) {
+                } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
             }
@@ -84,6 +100,24 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
             return "kafka-exporter.state";
         } else if (id instanceof CruiseControlIdentity) {
             return "cruise-control.state";
+        } else {
+            throw new IllegalStateException("Unknown identity " + id);
+        }
+    }
+
+    String secretName(SubjectIdentity id) {
+        if (id instanceof BrokerIdentity) {
+            return brokersName;
+        } else if (id instanceof ZooKeeperNodeIdentity) {
+            return zkName;
+        } else if (id instanceof EntityOperatorIdentity) {
+            return eoName;
+        } else if (id instanceof ClusterOperatorIdentity) {
+            return coName;
+        } else if (id instanceof KafkaExporterIdentity) {
+            return keName;
+        } else if (id instanceof CruiseControlIdentity) {
+            return ccName;
         } else {
             throw new IllegalStateException("Unknown identity " + id);
         }
@@ -112,10 +146,11 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
     public void storeStatus(CertificateStatus c) {
         SubjectIdentity subjectIdentity = c.subjectIdentity();
         Resource<Secret> secretResource = secretResource(subjectIdentity);
+        String secretName = secretName(subjectIdentity);
         Secret secret = secretResource.get();
-        SecretBuilder builder = secret != null ? new SecretBuilder(secret) : new SecretBuilder();
+        SecretBuilder builder = secret != null ? new SecretBuilder(secret) : new SecretBuilder().withNewMetadata().withName(secretName).endMetadata();
         try {
-            builder.addToData(stateKey(subjectIdentity), mapper.writeValueAsString(c));
+            builder.addToData(stateKey(subjectIdentity), Base64.getEncoder().encodeToString(mapper.writeValueAsBytes(c)));
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }

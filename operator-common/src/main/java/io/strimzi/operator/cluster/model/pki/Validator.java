@@ -146,6 +146,9 @@ public class Validator {
 
     public Result validate(List<X509Certificate> chain, Set<TrustAnchor> trustAnchors) {
         Instant now = clock.instant();
+        if (trustAnchors.isEmpty()) {
+            return Result.noTrustAnchor();
+        }
         return validate(now, pkixParameters(trustAnchors), chain);
     }
 

@@ -80,7 +80,7 @@ public enum CertificateState {
             case "not-needed":
                 return NOT_NEEDED;
             default:
-                throw new IllegalArgumentException();
+                throw new IllegalArgumentException(id);
         }
     }
 

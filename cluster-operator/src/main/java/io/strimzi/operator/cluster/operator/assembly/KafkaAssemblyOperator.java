@@ -607,7 +607,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             this.clusterPki = new ClusterPki(reconciliation, client, certManager, namespace, KafkaCluster.kafkaClusterName(name));
             try {
                 if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
-                    this.clusterPki.bootstrapCa(kafkaAssembly.getSpec().getClusterCa());
+                    this.clusterPki.bootstrapCa(kafkaAssembly.getSpec().getClusterCa(), ownerReference());
                 }
                 return Future.succeededFuture(this);
             } catch (CertificateException e) {
@@ -729,14 +729,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                 clientsCaKeySecret = secret;
                             }
                         }
-                        OwnerReference ownerRef = new OwnerReferenceBuilder()
-                                .withApiVersion(kafkaAssembly.getApiVersion())
-                                .withKind(kafkaAssembly.getKind())
-                                .withName(kafkaAssembly.getMetadata().getName())
-                                .withUid(kafkaAssembly.getMetadata().getUid())
-                                .withBlockOwnerDeletion(false)
-                                .withController(false)
-                                .build();
+                        OwnerReference ownerRef = ownerReference();
 
                         CertificateAuthority clusterCaConfig = kafkaAssembly.getSpec().getClusterCa();
 
@@ -818,6 +811,17 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return resultPromise.future();
         }
 
+        private OwnerReference ownerReference() {
+            return new OwnerReferenceBuilder()
+                    .withApiVersion(kafkaAssembly.getApiVersion())
+                    .withKind(kafkaAssembly.getKind())
+                    .withName(kafkaAssembly.getMetadata().getName())
+                    .withUid(kafkaAssembly.getMetadata().getUid())
+                    .withBlockOwnerDeletion(false)
+                    .withController(false)
+                    .build();
+        }
+
         /**
          * Utility method for checking the Secret existence when custom CA is used. The custom CA is configured but the
          * secrets do not exist, it will throw InvalidConfigurationException.
@@ -857,18 +861,28 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 };
                 if (clusterCaKeyReplaced) {
                     zkRollFuture = zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
-                        .compose(sts -> zkSetOperations.maybeRollingUpdate(reconciliation, sts, rollPodAndLogReason,
-                        clusterCa.caCertSecret(),
-                        oldCoSecret));
+                        .compose(sts -> {
+                            if (sts != null) {
+                                zkSetOperations.maybeRollingUpdate(reconciliation, sts, rollPodAndLogReason,
+                                        clusterCa.caCertSecret(), oldCoSecret);
+                            }
+                            return Future.succeededFuture();
+                        });
                 } else {
                     zkRollFuture = Future.succeededFuture();
                 }
                 return zkRollFuture
                         .compose(i -> kafkaSetOperations.getAsync(namespace, KafkaCluster.kafkaClusterName(name)))
-                        .compose(sts -> new KafkaRoller(reconciliation, vertx, podOperations, 1_000, operationTimeoutMs,
-                            () -> new BackOff(250, 2, 10), sts, clusterCa.caCertSecret(), oldCoSecret, adminClientProvider,
-                            kafkaCluster.getBrokersConfiguration(), kafkaLogging, kafkaCluster.getKafkaVersion(), true)
-                            .rollingRestart(rollPodAndLogReason))
+                        .compose(sts -> {
+                            if (sts != null) {
+                                return new KafkaRoller(reconciliation, vertx, podOperations, 1_000, operationTimeoutMs,
+                                    () -> new BackOff(250, 2, 10), sts, clusterCa.caCertSecret(), oldCoSecret, adminClientProvider,
+                                    kafkaCluster.getBrokersConfiguration(), kafkaLogging, kafkaCluster.getKafkaVersion(), true)
+                                    .rollingRestart(rollPodAndLogReason);
+                            } else {
+                                return Future.succeededFuture();
+                            }
+                        })
                         .compose(i -> rollDeploymentIfExists(EntityOperator.entityOperatorName(name), reason.toString()))
                         .compose(i -> rollDeploymentIfExists(KafkaExporter.kafkaExporterName(name), reason.toString()))
                         .compose(i -> rollDeploymentIfExists(CruiseControl.cruiseControlName(name), reason.toString()))
@@ -3695,14 +3709,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     .withKubernetesPartOf(reconciliation.name())
                     .withKubernetesManagedBy(AbstractModel.STRIMZI_CLUSTER_OPERATOR_NAME);
 
-            OwnerReference ownerRef = new OwnerReferenceBuilder()
-                    .withApiVersion(kafkaAssembly.getApiVersion())
-                    .withKind(kafkaAssembly.getKind())
-                    .withName(kafkaAssembly.getMetadata().getName())
-                    .withUid(kafkaAssembly.getMetadata().getUid())
-                    .withBlockOwnerDeletion(false)
-                    .withController(false)
-                    .build();
+            OwnerReference ownerRef = ownerReference();
 
             Secret secret = ModelUtils.buildSecret(reconciliation, clusterCa, clusterCa.clusterOperatorSecret(), namespace,
                     ClusterOperator.secretName(name), "cluster-operator", "cluster-operator",

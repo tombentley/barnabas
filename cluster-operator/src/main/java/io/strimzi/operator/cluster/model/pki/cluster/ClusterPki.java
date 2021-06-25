@@ -17,7 +17,6 @@ import java.util.stream.Collectors;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.jsontype.NamedType;
 import io.fabric8.kubernetes.api.model.OwnerReference;
-import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
@@ -58,7 +57,7 @@ import static io.strimzi.operator.cluster.model.EntityOperator.entityOperatorNam
  * Controls the internal cluster PKI within the CO.
  * Basic flow:
  * <dl>
- *     <dt>{@link #bootstrapCa(CertificateAuthority)}</dt>
+ *     <dt>{@link #bootstrapCa(CertificateAuthority, OwnerReference)}</dt>
  *     <dd>This will create the `cluster-ca` Secret and populate it with the CA details.</dd>
  *     
  *     <dt>{@code #issue*Certificates()}</dt>
@@ -116,24 +115,20 @@ public class ClusterPki {
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(ClusterPki.class.getName());
 
     private final Clock clock = Clock.systemUTC();
-    private final KubernetesClient client;
     private final String namespace;
     private final String cluster;
-    private final CertManager certManager;
     private final List<CertificateOutputWriter> certOutputWriters;
-    private Resource<Secret> caKeySecretResource;
 
     private CertificateIssuer issuer;
     private final CertificateStatusStore certificateStatusStore;
     private final TrustPrivateState trustPrivateState;
     private TrustController trustController;
 
-    public ClusterPki(Reconciliation reconciliation, KubernetesClient client,
+    public ClusterPki(Reconciliation reconciliation,
+                      KubernetesClient client,
                       CertManager certManager,
                       String namespace, String cluster) {
         this.reconciliation = Objects.requireNonNull(reconciliation);
-        this.client = Objects.requireNonNull(client);
-        this.certManager = Objects.requireNonNull(certManager);
         this.namespace = Objects.requireNonNull(namespace);
         this.cluster = Objects.requireNonNull(cluster);
 
@@ -141,14 +136,13 @@ public class ClusterPki {
                 client.secrets().inNamespace(namespace),
                 certManager);
 
-        this.caKeySecretResource = client.secrets().inNamespace(namespace).withName(KafkaResources.clusterCaKeySecretName(cluster));
         this.certificateStatusStore = new BrokersCertificateStatusStore(MAPPER,
-                client.secrets().inNamespace(namespace).withName(ZookeeperCluster.nodesSecretName(cluster)),
-                client.secrets().inNamespace(namespace).withName(KafkaCluster.brokersSecretName(cluster)),
-                client.secrets().inNamespace(namespace).withName(EntityOperator.secretName(cluster)),
-                client.secrets().inNamespace(namespace).withName(ClusterOperator.secretName(cluster)),
-                client.secrets().inNamespace(namespace).withName(KafkaExporter.secretName(cluster)),
-                client.secrets().inNamespace(namespace).withName(CruiseControl.secretName(cluster))
+                ZookeeperCluster.nodesSecretName(cluster), client.secrets().inNamespace(namespace).withName(ZookeeperCluster.nodesSecretName(cluster)),
+                KafkaCluster.brokersSecretName(cluster), client.secrets().inNamespace(namespace).withName(KafkaCluster.brokersSecretName(cluster)),
+                EntityOperator.secretName(cluster), client.secrets().inNamespace(namespace).withName(EntityOperator.secretName(cluster)),
+                ClusterOperator.secretName(cluster), client.secrets().inNamespace(namespace).withName(ClusterOperator.secretName(cluster)),
+                KafkaExporter.secretName(cluster), client.secrets().inNamespace(namespace).withName(KafkaExporter.secretName(cluster)),
+                CruiseControl.secretName(cluster), client.secrets().inNamespace(namespace).withName(CruiseControl.secretName(cluster))
                 );
         this.certOutputWriters = List.of(
                 new ZookeeperCertificateOutputWriter(client.secrets().inNamespace(namespace)
@@ -160,7 +154,7 @@ public class ClusterPki {
                 cc(client.secrets().inNamespace(namespace).withName(CruiseControl.secretName(cluster))),
                 ke(client.secrets().inNamespace(namespace).withName(KafkaExporterResources.secretName(cluster)))
         );
-        this.trustPrivateState = new TrustPrivateState(client.secrets().inNamespace(namespace).withName("")); // TODO fix the name
+        this.trustPrivateState = new TrustPrivateState(cluster + "-cluster-pki-state", client.secrets().inNamespace(namespace).withName(cluster + "-cluster-pki-state")); // TODO fix the name
 
         this.trustController = new TrustController(trustPrivateState,
                 List.of(new LegacyTrustOutputWriter(client.secrets().inNamespace(namespace)
@@ -170,22 +164,17 @@ public class ClusterPki {
     /**
      * Create the CA according to the certificateAuthority
      * @param clusterCa The Kafka CR CA.
+     * @param ownerReference The owner reference
      * @throws CertificateException if problems.
      */
-    public void bootstrapCa(CertificateAuthority clusterCa) throws CertificateException {
+    public void bootstrapCa(CertificateAuthority clusterCa, OwnerReference ownerReference) throws CertificateException {
         if (clusterCa == null) {
             clusterCa = new CertificateAuthority();
             clusterCa.setValidityDays(365);
             clusterCa.setRenewalDays(30);
         }
-        OwnerReference ownerReference;
-        if (clusterCa.isGenerateSecretOwnerReference()) {
-            ownerReference = new OwnerReferenceBuilder().build();
-        } else {
-            ownerReference = null;
-        }
         long t0 = System.nanoTime();
-        issuer = chain.reconcile(reconciliation, Chain.clusterCaFromCrd(cluster, clusterCa), ownerReference);
+        issuer = chain.reconcile(reconciliation, Chain.clusterCaFromCrd(cluster, clusterCa), clusterCa.isGenerateSecretOwnerReference() ? ownerReference : null);
         LOGGER.debugCr(reconciliation, "Chain reconciliation took {}ms",
                 (System.nanoTime() - t0) / 1_000_000.0);
         controller = controller(clusterCa);

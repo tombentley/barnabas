@@ -121,7 +121,7 @@ public enum TrustState {
             case "zombie":
                 return ZOMBIE;
             default:
-                throw new IllegalArgumentException();
+                throw new IllegalArgumentException(id);
         }
     }
 

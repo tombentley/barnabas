@@ -6,8 +6,10 @@ package io.strimzi.operator.cluster.model.pki;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.util.Base64;
 import java.util.Map;
 import java.util.Set;
 
@@ -31,7 +33,7 @@ public class TrustPrivateStateTest {
     @Test
     public void test1() throws CertificateException, IOException {
         Resource<Secret> secretResource = new MockKube().build().secrets().inNamespace("ns").withName("trust");
-        TrustPrivateState tps = new TrustPrivateState(secretResource);
+        TrustPrivateState tps = new TrustPrivateState("trust", secretResource);
         TrustRoot root1 = TrustRoot.untrusted(getX509Certificate("/CLUSTER_CERT.pem"));
         TrustRoot root2 = TrustRoot.untrusted(getX509Certificate("/CLIENTS_CERT.pem")).toTrusted("123");
         Map<Fingerprint, TrustRoot> stored = Map.of(root1.fingerprint(), root1,
@@ -40,13 +42,21 @@ public class TrustPrivateStateTest {
 
         assertEquals(
                 Set.of("7B779A0F752941046382D8135F0D4891CA593CFA.crt",
-                    "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt"),
+                        "7B779A0F752941046382D8135F0D4891CA593CFA.state",
+                        "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt",
+                    "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state"),
                 secretResource.get().getData().keySet());
 
+        assertEquals("trusted",
+                new String(Base64.getDecoder().decode(
+                        secretResource.get().getData().get("7B779A0F752941046382D8135F0D4891CA593CFA.state")),
+                        StandardCharsets.US_ASCII));
+
         assertEquals(
-                Map.of("7B779A0F752941046382D8135F0D4891CA593CFA.state", "trusted",
-                        "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state", "untrusted"),
-                secretResource.get().getStringData());
+                "untrusted",
+                new String(Base64.getDecoder().decode(
+                        secretResource.get().getData().get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")),
+                        StandardCharsets.US_ASCII));
 
         Map<Fingerprint, TrustRoot> loaded = tps.load();
         assertEquals(stored, loaded);

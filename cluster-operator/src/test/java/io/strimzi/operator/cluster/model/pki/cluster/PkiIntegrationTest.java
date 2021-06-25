@@ -5,6 +5,8 @@
 package io.strimzi.operator.cluster.model.pki.cluster;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.time.Clock;
@@ -17,7 +19,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.jsontype.NamedType;
 import io.fabric8.kubernetes.api.model.Secret;
@@ -103,7 +104,7 @@ class PkiIntegrationTest {
 
         trustPrivateStateName = KafkaResources.clusterCaKeySecretName(CLUSTER);
         trustPrivateStateResource = client.secrets().inNamespace(NAMESPACE).withName(trustPrivateStateName);
-        trustPrivateState = new TrustPrivateState(trustPrivateStateResource);
+        trustPrivateState = new TrustPrivateState(trustPrivateStateName, trustPrivateStateResource);
 
         trustSecretName = CLUSTER + "-cluster-ca-trust";
         trustSecretResource = client.secrets().inNamespace(NAMESPACE).withName(trustSecretName);
@@ -120,8 +121,12 @@ class PkiIntegrationTest {
 
     private void initCc(int caValidity, int certValidity, int certRenewal) throws CertificateException {
         BrokersCertificateStatusStore statusStore = new BrokersCertificateStatusStore(mapper,
-                null, brokerCertsSecretResource,
-                null, null, null, null);
+                null, null,
+                brokerCertsSecretName, brokerCertsSecretResource,
+                null, null,
+                null, null,
+                null, null,
+                null, null);
         NewBrokersCertificateOutputWriter outputStore = new NewBrokersCertificateOutputWriter(brokerCertsSecretResource);
 
 //        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(clock,
@@ -153,7 +158,7 @@ class PkiIntegrationTest {
 
     @SuppressWarnings({"checkstyle:LocalVariableName", "checkstyle:MethodLength"})
     @Test
-    public void testLifecycle() throws CertificateException, JsonProcessingException {
+    public void testLifecycle() throws CertificateException, IOException {
         int caValidity = 30;
         int certValidity = 15;
         int certRenewal = 5;
@@ -180,7 +185,7 @@ class PkiIntegrationTest {
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
-                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("broker-0.state")),
                 secretsKeySets(),
                 "Expected new Secrets " + trustSecretName + " and " + brokerCertsSecretName);
@@ -194,7 +199,7 @@ class PkiIntegrationTest {
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
-                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("broker-0.state"),
                         trustSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
@@ -212,7 +217,7 @@ class PkiIntegrationTest {
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
-                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
                         trustSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
@@ -226,7 +231,7 @@ class PkiIntegrationTest {
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
-                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
                         trustSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
@@ -244,7 +249,7 @@ class PkiIntegrationTest {
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
-                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
                         trustSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
@@ -259,7 +264,7 @@ class PkiIntegrationTest {
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
-                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
                         trustSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
@@ -274,7 +279,7 @@ class PkiIntegrationTest {
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
-                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
                         trustSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
@@ -295,7 +300,7 @@ class PkiIntegrationTest {
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
-                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
                         trustSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
@@ -306,7 +311,7 @@ class PkiIntegrationTest {
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
-                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt"),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
                         trustSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
@@ -322,7 +327,8 @@ class PkiIntegrationTest {
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
-                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint1 + ".crt"),
+                        trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state",
+                                rootFingerprint1 + ".crt", rootFingerprint1 + ".state"),
                         brokerCertsSecretName, Set.of("broker-0.state", "broker-0.p12", "broker-0.password"),
                         trustSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
@@ -371,18 +377,13 @@ class PkiIntegrationTest {
         Map<String, String> data = secret.getData();
         assertNotNull(data);
         assertEquals(
-                Set.of(fingerprint + ".crt"),
+                Set.of(fingerprint + ".crt", fingerprint + ".state"),
                 data.keySet());
         String c = data.get(fingerprint + ".crt");
         assertTrue(c != null && c.length() > 100);
-        Map<String, String> stringData = secret.getStringData();
-        assertNotNull(stringData);
-        assertEquals(
-                Set.of(fingerprint + ".state"),
-                stringData.keySet());
-        String s = stringData.get(fingerprint + ".state");
-        assertEquals("trusted", s);
-        assertEquals(Set.of(fingerprint + ".crt"), trustPrivateStateResource.get().getData().keySet());
+        String s = data.get(fingerprint + ".state");
+        assertEquals("trusted", new String(Base64.getDecoder().decode(s), StandardCharsets.US_ASCII));
+        assertEquals(Set.of(fingerprint + ".crt", fingerprint + ".state"), trustPrivateStateResource.get().getData().keySet());
 
     }
 
@@ -396,26 +397,22 @@ class PkiIntegrationTest {
         Map<String, String> data = secret.getData();
         assertNotNull(data);
         assertEquals(
-                Set.of(fingerprint + ".crt"),
+                Set.of(fingerprint + ".crt", fingerprint + ".state"),
                 data.keySet());
         String c = data.get(fingerprint + ".crt");
         assertTrue(c != null && c.length() > 100);
-        Map<String, String> stringData = secret.getStringData();
-        assertNotNull(stringData);
-        assertEquals(
-                Set.of(fingerprint + ".state"),
-                stringData.keySet());
-        String s = stringData.get(fingerprint + ".state");
-        assertEquals("trusted", s);
-        assertEquals(Set.of(fingerprint + ".crt"), trustPrivateStateResource.get().getData().keySet());
+        String s = data.get(fingerprint + ".state");
+        assertEquals("trusted", new String(Base64.getDecoder().decode(s), StandardCharsets.US_ASCII));
+        assertEquals(Set.of(fingerprint + ".crt", fingerprint + ".state"), trustPrivateStateResource.get().getData().keySet());
     }
 
-    private void assertCertificateStatus(String secretItem, CertificateState state, String expectedIssuedFingerprint, String expectedIssuerFingerprint) throws JsonProcessingException {
+    private void assertCertificateStatus(String secretItem, CertificateState state, String expectedIssuedFingerprint, String expectedIssuerFingerprint) throws IOException {
         Secret brokerSecret = brokerCertsSecretResource.get();
         assertNotNull(brokerSecret);
         assertNotNull(brokerSecret.getData());
 
-        CertificateStatus certificateStatus = mapper.readValue(brokerSecret.getData().get(secretItem), CertificateStatus.class);
+        CertificateStatus certificateStatus = mapper.readValue(
+                Base64.getDecoder().decode(brokerSecret.getData().get(secretItem)), CertificateStatus.class);
         Assertions.assertEquals(state, certificateStatus.state());
         assertEquals(new BrokerIdentity(0), certificateStatus.subjectIdentity());
         assertNull(certificateStatus.tokenBytes());

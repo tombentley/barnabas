@@ -4,6 +4,7 @@
  */
 package io.strimzi.operator.cluster.model.pki;
 
+import java.nio.charset.StandardCharsets;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
@@ -35,7 +36,6 @@ import org.apache.logging.log4j.Logger;
  *   name: $CLUSTER-$CA
  * data:
  *   $FINGERPRINT.crt: ... # contains key and cert
- * stringData:
  *   $FINGERPRINT.state: ... # is the current state
  * </code></pre>
  * <p>where there may be multiple fingerprints present.</p>
@@ -73,15 +73,19 @@ import org.apache.logging.log4j.Logger;
  */
 public class TrustPrivateState {
 
-    private static final Pattern PATTERN;
+    private static final Pattern CRT_PATTERN;
+    private static final Pattern STATE_PATTERN;
     static {
-        PATTERN = Pattern.compile("(?<fingerprint>[0-9A-Z]{" + Fingerprint.HEX_LENGTH + "})\\.crt");
+        CRT_PATTERN = Pattern.compile("(?<fingerprint>[0-9A-Z]{" + Fingerprint.HEX_LENGTH + "})\\.crt");
+        STATE_PATTERN = Pattern.compile("(?<fingerprint>[0-9A-Z]{" + Fingerprint.HEX_LENGTH + "})\\.state");
     }
     private static final Logger LOGGER = LogManager.getLogger(TrustPrivateState.class);
 
+    private String resourceName;
     private final Resource<Secret> secretResource;
 
-    public TrustPrivateState(Resource<Secret> secretResource) {
+    public TrustPrivateState(String resourceName, Resource<Secret> secretResource) {
+        this.resourceName = Objects.requireNonNull(resourceName);
         this.secretResource = Objects.requireNonNull(secretResource);
     }
     /*
@@ -98,14 +102,13 @@ public class TrustPrivateState {
         } else {
             Map<Fingerprint, TrustRoot> result = new HashMap<>();
             Map<String, String> data = secret.getData();
-            Map<String, String> stringData = secret.getStringData();
             for (var entry : data.entrySet()) {
-                Matcher matcher = PATTERN.matcher(entry.getKey());
+                Matcher matcher = CRT_PATTERN.matcher(entry.getKey());
                 if (matcher.matches()) {
                     Fingerprint claimedFingerprint = new Fingerprint(matcher.group("fingerprint"));
                     if (!result.containsKey(claimedFingerprint)) {
-                        String stateStr = stringData.get(claimedFingerprint + ".state");
-                        TrustState state = stateStr != null ? TrustState.fromId(stateStr) : null;
+                        String stateStr = data.get(claimedFingerprint + ".state");
+                        TrustState state = stateStr != null ? TrustState.fromId(new String(Base64.getDecoder().decode(stateStr), StandardCharsets.UTF_8)) : null;
                         String crt = entry.getValue();
                         if (crt != null && state != null) {
                             try {
@@ -138,7 +141,7 @@ public class TrustPrivateState {
                                     secret.getMetadata().getName(), secret.getMetadata().getNamespace());
                         }
                     }
-                } else {
+                } else if (!STATE_PATTERN.matcher(entry.getKey()).matches()) {
                     LOGGER.warn("Secret contains unexpected entry:" +
                                     "entry: {}, secret: {}, namespace: {}",
                             entry.getKey(),
@@ -160,7 +163,6 @@ public class TrustPrivateState {
             return;
         }
         Map<String, String> data = new HashMap<>(trustRoots.size());
-        Map<String, String> stringData = new HashMap<>(trustRoots.size());
         String resourceVersion = null;
         for (var entry : trustRoots.entrySet()) {
             Fingerprint fingerprint = entry.getKey();
@@ -174,7 +176,7 @@ public class TrustPrivateState {
             if (fingerprint.equals(trustRoot.fingerprint())) {
                 try {
                     data.put(fingerprint + ".crt", Base64.getEncoder().encodeToString(PkiUtils.asPemBytes(trustRoot.x509())));
-                    stringData.put(fingerprint + ".state", trustRoot.state().id());
+                    data.put(fingerprint + ".state", Base64.getEncoder().encodeToString(trustRoot.state().id().getBytes(StandardCharsets.UTF_8)));
                 } catch (CertificateEncodingException e) {
                     throw new RuntimeException(e);
                 }
@@ -184,8 +186,11 @@ public class TrustPrivateState {
         }
         Secret secret = secretResource.get();
         if (secret == null) {
-            secretResource.create(new SecretBuilder().withData(data)
-                        .withStringData(stringData)
+            secretResource.create(new SecretBuilder()
+                    .withNewMetadata()
+                        .withName(resourceName)
+                    .endMetadata()
+                    .withData(data)
                     .build());
         } else {
             if (resourceVersion == null) {
@@ -198,9 +203,6 @@ public class TrustPrivateState {
                     .endMetadata();
             for (var e : data.entrySet()) {
                 secretBuilder.addToData(e.getKey(), e.getValue());
-            }
-            for (var e : stringData.entrySet()) {
-                secretBuilder.addToStringData(e.getKey(), e.getValue());
             }
             secretReplaceable.replace(
                     secretBuilder.build());
@@ -224,16 +226,14 @@ public class TrustPrivateState {
                 }
             }
             Map<String, String> data = secret.getData();
-            Map<String, String> stringData = secret.getStringData();
             data.keySet().removeAll(trustRoots.keySet().stream().map(fingerprint1 -> fingerprint1.toString() + ".crt").collect(Collectors.toSet()));
-            stringData.keySet().removeAll(trustRoots.keySet().stream().map(fingerprint1 -> fingerprint1.toString() + ".state").collect(Collectors.toSet()));
+            data.keySet().removeAll(trustRoots.keySet().stream().map(fingerprint1 -> fingerprint1.toString() + ".state").collect(Collectors.toSet()));
             secretResource.lockResourceVersion(resourceVersion).replace(
                     new SecretBuilder(secret)
                             .editMetadata()
                                 .withResourceVersion(resourceVersion)
                             .endMetadata()
                             .withData(data)
-                            .withStringData(stringData)
                             .build());
         }
     }

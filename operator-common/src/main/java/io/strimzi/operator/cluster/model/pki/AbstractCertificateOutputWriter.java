@@ -5,6 +5,7 @@
 package io.strimzi.operator.cluster.model.pki;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyStoreException;
 import java.security.cert.CertificateException;
 import java.security.spec.InvalidKeySpecException;
@@ -52,11 +53,11 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
 
                 String certKey = certKey(id);
                 if (certKey != null) {
-                    builder.addToData(certKey, PkiUtils.asPemCertChain(certificate.completeChain()));
+                    builder.addToData(certKey, Base64.getEncoder().encodeToString(PkiUtils.asPemCertChain(certificate.completeChain()).getBytes(StandardCharsets.US_ASCII)));
                 }
                 String keyKey = keyKey(id);
                 if (keyKey != null) {
-                    builder.addToData(keyKey, PkiUtils.asPemKey(certificate.privateKey()));
+                    builder.addToData(keyKey, Base64.getEncoder().encodeToString(PkiUtils.asPemKey(certificate.privateKey()).getBytes(StandardCharsets.US_ASCII)));
                 }
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
