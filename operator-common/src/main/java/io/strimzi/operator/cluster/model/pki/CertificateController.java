@@ -19,6 +19,10 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import io.strimzi.certs.Subject;
+import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult.OkIssued;
+import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult.OkNoop;
+import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult.WaitingForIssuance;
+import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult.WaitingForTrust;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -58,6 +62,40 @@ public class CertificateController {
         this.requestedValidity = Objects.requireNonNull(requestedValidity);
     }
 
+    /**
+     * Reconcile the given requirement for an end-entity certificate.
+     * Broadly speaking one of the following things may happen as a result:
+     * <ul>
+     *     <li>No op, the certificate and chain already exists and is valid to no new certificates need to be issued.
+     *         The certificate status starts, and remains, in {@link CertificateState#IN_USE}.
+     *         {@link OkNoop} is returned.
+     *         The caller doesn't need to do anything.</li>
+     *
+     *     <li>The end-entity certificate and/or one of the non-trusted CA certificates in the chain needs to be reissued.
+     *         The certificate status starts in  {@link CertificateState#IN_USE}
+     *         but the invalidity it detected so transitions to {@link CertificateState#REQUESTED}
+     *         then to {@link CertificateState#IN_USE} (not to {@link CertificateState#PENDING}
+     *         because the root is trusted already)
+     *         There is no change in the trusted CA certificates, so {@link OkIssued}
+     *         is returned.
+     *         The caller will need to make the certificate available for use
+     *         (e.g. by restarting the pods which use the end-entity certificate).</li>
+     *
+     *     <li>The root CA certificate needs to be (re-)issued.
+     *         The certificate status starts in {@link CertificateState#NEW} or {@link CertificateState#IN_USE} but the invalidity it detected
+     *         so transitions to {@link CertificateState#REQUESTED}
+     *         then to {@link CertificateState#PENDING}
+     *         Because there is a change in the trusted CA certificates,
+     *         {@link WaitingForTrust} will be returned.
+     *         The caller will need to ensure the new root CA certificate is trusted (e.g. by restarting the pods which will see the issued certificate as a client certificate)
+     *         and then make the end-entity certificate available for use (e.g. by restarting the pods which use the end-entity certificate).</li>
+     * </ul>
+     * The actual transitions can be more complicated than that. For instance, it might happen that issuance takes
+     * a while, so {@link WaitingForIssuance} might be returned for some number of calls.
+     * @param requiredCertificate The required certificate.
+     * @return The reconciliation result.
+     * @throws CertificateException Cert ex
+     */
     public CertificateReconcileResult reconcile(RequiredCertificate requiredCertificate) throws CertificateException {
         // TODO need a clean way to handle the NOT_NEEDED case.
         // Maybe that's a delete(SubjectIdentity) method.
@@ -105,7 +143,7 @@ public class CertificateController {
         var issuedOpt = issuer.pollForRequestedCertificate(status.tokenBytes());
         if (issuedOpt.isEmpty()) {
             // Not issued yet: Wait for another reconciliation
-            return CertificateReconcileResult.waitingForIssuance();
+            return new WaitingForIssuance();
         }
         IssuedCertificate issued = issuedOpt.get();
         Subject subject = requiredCertificate.subjectAndSan();
@@ -142,7 +180,7 @@ public class CertificateController {
                             requiredCertificate.subjectIdentity(),
                             trustRoot.state());
                     status = handleNew(status, requiredCertificate);
-                    return CertificateReconcileResult.issuedBad();
+                    return new CertificateReconcileResult.IssuedBad();
                 }
                 default:
                     throw new IllegalStateException();
@@ -159,7 +197,7 @@ public class CertificateController {
         switch (result.type()) {
             case OK:
                 // The issued certificate is signed by an already trusted CA cert
-                return deploy(status.toPending(issued), requiredCertificate, issued);
+                return deploy(status.toPending(issued), requiredCertificate, issued, trustRoot);
             case WILL_EXPIRE: {
                 LOGGER.warn("Newly issued certificate for {} is currently valid but will soon expire." +
                                 "This suggests misconfiguration between the requested validity period of the certificate " +
@@ -168,14 +206,13 @@ public class CertificateController {
                                 "(misaligned issuer configuration and CR renewalPeriod)." +
                                 " Will try to issue another end entity certificate for this subject.",
                         requiredCertificate.subjectIdentity());
-                status = handleNew(status, requiredCertificate);
-                return CertificateReconcileResult.issuedBad();
+                // fall through
             }
             case HAS_EXPIRED:
                 // fall through
             case OTHER: {
                 status = handleNew(status, requiredCertificate);
-                return CertificateReconcileResult.issuedBad();
+                return new CertificateReconcileResult.IssuedBad();
             }
             case NO_TRUST_ANCHOR:
                 // This should be impossible, it's in the trusted state according to the secret,
@@ -203,12 +240,12 @@ public class CertificateController {
                 LOGGER.error("The certificate issued for {} has expired before trust " +
                         "was established for its root CA certificate", requiredCertificate.subjectIdentity());
                 status = handleNew(status, requiredCertificate);
-                return CertificateReconcileResult.issuedBad();
+                return new CertificateReconcileResult.IssuedBad();
             case OTHER:
                 LOGGER.error("The certificate issued for {} has some unexpected error {}, reissuing",
                         requiredCertificate.subjectIdentity(), result);
                 status = handleNew(status, requiredCertificate);
-                return CertificateReconcileResult.issuedBad();
+                return new CertificateReconcileResult.IssuedBad();
             case NO_TRUST_ANCHOR:
                 // This should simply not happen
                 throw new AssertionError();
@@ -231,15 +268,17 @@ public class CertificateController {
             case OK:
             case WILL_EXPIRE: // it may be about to expire, but it's better than nothing
                 // deploy it for use
-                return deploy(status, requiredCertificate, issued);
+                Fingerprint fingerprint = PkiUtils.fingerprint(result.anchor().getTrustedCert());
+                TrustRoot trustRoot = trustState.get(fingerprint).toPhaseOut();
+                return deploy(status, requiredCertificate, issued, trustRoot);
             case NO_TRUST_ANCHOR:
                 // It's still not trusted yet: we have to wait
-                return CertificateReconcileResult.waitingForTrust(TrustRoot.untrusted(issued.rootCaCertificate()));
+                return new WaitingForTrust(TrustRoot.untrusted(issued.rootCaCertificate()));
             case HAS_EXPIRED:
             case OTHER:
                 status = handleNew(status, requiredCertificate);
                 // TODO should loop, but return for now
-                return CertificateReconcileResult.pendingBad();
+                return new CertificateReconcileResult.PendingBad();
             default:
                 throw new IllegalStateException();
         }
@@ -247,7 +286,7 @@ public class CertificateController {
 
     private CertificateReconcileResult deploy(CertificateStatus status,
                                               RequiredCertificate requiredCertificate,
-                                              IssuedCertificate issued) {
+                                              IssuedCertificate issued, TrustRoot trustRoot) {
         status = status.toInUse();
         // store in output store
         for (var writer : certificateOutputWriters) {
@@ -259,7 +298,7 @@ public class CertificateController {
             }
         }
         certificateStatusStore.storeStatus(status);
-        return CertificateReconcileResult.okIssued();
+        return new OkIssued(trustRoot);
     }
 
     private CertificateReconcileResult handleInUse(CertificateStatus status,
@@ -269,23 +308,27 @@ public class CertificateController {
         IssuedCertificate issued = status.issuedCertificate(); // Alternative load the chain from the p12
         Validator.Result result = validator.validate(issued, trustAnchors(trustState, TrustState.TRUSTED, TrustState.PHASE_OUT));
         switch (result.type()) {
-            case OK:
+            case OK: {
                 // still valid: do nothing (this is the common case once a cluster is bootstrapped)
-                return CertificateReconcileResult.okNoop();
+                Fingerprint fingerprint = PkiUtils.fingerprint(result.anchor().getTrustedCert());
+                TrustRoot trustRoot = trustState.get(fingerprint).toPhaseOut();
+                return new OkNoop(trustRoot);
+            }
             case OTHER:
             case NO_TRUST_ANCHOR:
             case HAS_EXPIRED:
                 LOGGER.error("Oh dear we shouldn't normally get here");
                 // fall thru
-            case WILL_EXPIRE:
+            case WILL_EXPIRE: {
                 status = handleNew(status, requiredCertificate);
                 if (result.isRootExpiring()) {
                     Fingerprint fingerprint = PkiUtils.fingerprint(result.anchor().getTrustedCert());
-                    TrustRoot phasedOutTrustRoot = trustState.get(fingerprint).toPhaseOut();
-                    trustPrivateState.transition(Map.of(fingerprint, phasedOutTrustRoot));
+                    TrustRoot trustRoot = trustState.get(fingerprint).toPhaseOut();
+                    trustPrivateState.transition(Map.of(fingerprint, trustRoot));
                 }
                 //return CertificateReconcileResult.waitingForIssuance();
                 return handleRequested(status, requiredCertificate, trustState);
+            }
             default:
                 throw new IllegalStateException();
         }
@@ -297,7 +340,7 @@ public class CertificateController {
         status = status.toPending(issued);
         certificateStatusStore.storeStatus(status);
         trustPrivateState.transition(Map.of(untrustedTrustRoot.fingerprint(), untrustedTrustRoot));
-        return CertificateReconcileResult.waitingForTrust(untrustedTrustRoot);
+        return new WaitingForTrust(untrustedTrustRoot);
     }
 
     private Set<TrustAnchor> trustAnchors(Map<Fingerprint, TrustRoot> trustState, TrustState... s) {

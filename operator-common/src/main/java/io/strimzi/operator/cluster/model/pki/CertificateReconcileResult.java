@@ -9,93 +9,194 @@ import java.util.Objects;
 /**
  * The result of a certificate reconciliation attempt, i.e. the result type of
  * {@link CertificateController#reconcile(RequiredCertificate)}.
- * This consists of a {@link State} and optional {@link TrustRoot} representing the CA certificate that must be trusted.
  */
-public class CertificateReconcileResult {
+public abstract class CertificateReconcileResult {
 
-    public enum State {
-        /** The requested certificate has been requested, but not yet issued. */
-        WAITING_FOR_ISSUANCE,
-        /** The issued certificate was bad, we can request another one, but it's likely that doing so won't help */
-        ISSUED_BAD,
-        /** The issued certificate is not yet trusted */
-        WAITING_FOR_TRUST,
-        /** An issued certificate has gone bad before it could be trusted */
-        PENDING_BAD,
-        /** An issued certificate is still trusted */
-        OK_NOOP,
-        /** A certificate was (re-)issued and is already trusted */
-        OK_ISSUED
+    private CertificateReconcileResult() {
+
     }
 
-    // true if there's nothing to do.
-    // false if there's something to do.
-    private final State state;
-    // A list of trust anchors which need to be reconciled
-    private final TrustRoot trustRoot;
+    /**
+     * The requested certificate has been requested, but not yet issued.
+     */
+    public static final class WaitingForIssuance extends CertificateReconcileResult {
+        public WaitingForIssuance() {
 
-    private static final CertificateReconcileResult OK_NOOP = new CertificateReconcileResult(State.OK_NOOP, null);
-    private static final CertificateReconcileResult OK_ISSUED = new CertificateReconcileResult(State.OK_ISSUED, null);
-
-    private CertificateReconcileResult(State state, TrustRoot trustRoot) {
-        this.state = Objects.requireNonNull(state);
-        this.trustRoot = trustRoot;
-    }
-
-    public static CertificateReconcileResult waitingForIssuance() {
-        return new CertificateReconcileResult(State.WAITING_FOR_ISSUANCE, null);
-    }
-
-    public static CertificateReconcileResult okNoop() {
-        return CertificateReconcileResult.OK_NOOP;
-    }
-
-    public static CertificateReconcileResult okIssued() {
-        return CertificateReconcileResult.OK_ISSUED;
-    }
-
-    public static CertificateReconcileResult waitingForTrust(TrustRoot trustRoot) {
-        if (trustRoot == null) {
-            throw new IllegalArgumentException("Can't have empty trustAnchors when WAITING_FOR_TRUST");
         }
-        return new CertificateReconcileResult(State.WAITING_FOR_TRUST, trustRoot);
+
+        @Override
+        public String toString() {
+            return "WaitingForIssuance{}";
+        }
+
+        @Override
+        public int hashCode() {
+            return 1;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return obj instanceof WaitingForIssuance;
+        }
     }
 
-    public static CertificateReconcileResult issuedBad() {
-        return new CertificateReconcileResult(State.ISSUED_BAD, null);
+    /**
+     * The issued certificate was bad, we can request another one,
+     * but it's likely that doing so won't help.
+     */
+    public static final class IssuedBad extends CertificateReconcileResult {
+        public IssuedBad() {
+
+        }
+
+        @Override
+        public String toString() {
+            return "IssuedBad{}";
+        }
+
+        @Override
+        public int hashCode() {
+            return 2;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return obj instanceof IssuedBad;
+        }
     }
 
-    public static CertificateReconcileResult pendingBad() {
-        return new CertificateReconcileResult(State.PENDING_BAD, null);
+    /**
+     * An issued certificate has gone bad before it could be trusted.
+     */
+    public static final class PendingBad extends CertificateReconcileResult {
+        public PendingBad() {
+
+        }
+
+        @Override
+        public String toString() {
+            return "PendingBad{}";
+        }
+
+        @Override
+        public int hashCode() {
+            return 3;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return obj instanceof PendingBad;
+        }
     }
 
-    public State state() {
-        return state;
+    /**
+     * The issued certificate is not yet trusted.
+     * There <strong>is</strong> a {@link #trustRoot()} associated with results in this state.
+     */
+    public static final class WaitingForTrust extends CertificateReconcileResult {
+        private final TrustRoot trustRoot;
+
+        public WaitingForTrust(TrustRoot trustRoot) {
+            Objects.requireNonNull(trustRoot);
+            this.trustRoot = trustRoot;
+        }
+
+        public TrustRoot trustRoot() {
+            return trustRoot;
+        }
+
+        @Override
+        public String toString() {
+            return "WaitingForTrust(" +
+                    "trustRoot=" + trustRoot +
+                    ')';
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            WaitingForTrust that = (WaitingForTrust) o;
+            return Objects.equals(trustRoot, that.trustRoot);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(trustRoot);
+        }
     }
 
-    public TrustRoot trustRoot() {
-        return trustRoot;
+    /**
+     * A previously-issued certificate is still trusted.
+     * There is no {@link #trustRoot()} associated with results in this state.
+     */
+    public static final class OkNoop extends CertificateReconcileResult {
+        private final TrustRoot trustRoot;
+
+        public OkNoop(TrustRoot trustRoot) {
+            Objects.requireNonNull(trustRoot);
+            this.trustRoot = trustRoot;
+        }
+
+        public TrustRoot trustRoot() {
+            return trustRoot;
+        }
+
+        @Override
+        public String toString() {
+            return "OkNoop(" +
+                    "trustRoot=" + trustRoot +
+                    ')';
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            OkNoop okNoop = (OkNoop) o;
+            return Objects.equals(trustRoot, okNoop.trustRoot);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(trustRoot);
+        }
     }
 
-    @Override
-    public String toString() {
-        return "CertificateReconcileResult(" +
-                "ok=" + state +
-                ", trustRoot=" + trustRoot +
-                ')';
-    }
+    /**
+     * A certificate was (re-)issued and is already trusted.
+     * There is no {@link #trustRoot()} associated with results in this state.
+     */
+    public static final class OkIssued extends CertificateReconcileResult {
+        private final TrustRoot trustRoot;
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        CertificateReconcileResult that = (CertificateReconcileResult) o;
-        return state == that.state &&
-                Objects.equals(trustRoot, that.trustRoot);
-    }
+        public OkIssued(TrustRoot trustRoot) {
+            Objects.requireNonNull(trustRoot);
+            this.trustRoot = trustRoot;
+        }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(state, trustRoot);
+        public TrustRoot trustRoot() {
+            return trustRoot;
+        }
+
+        @Override
+        public String toString() {
+            return "OkIssued(" +
+                    "trustRoot=" + trustRoot +
+                    ')';
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            OkIssued okIssued = (OkIssued) o;
+            return Objects.equals(trustRoot, okIssued.trustRoot);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(trustRoot);
+        }
     }
 }

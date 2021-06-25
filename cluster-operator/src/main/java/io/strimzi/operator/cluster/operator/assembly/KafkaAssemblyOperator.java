@@ -352,6 +352,9 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaPodsReady())
                 .compose(state -> state.kafkaServiceEndpointReady())
                 .compose(state -> state.kafkaHeadlessServiceEndpointReady())
+
+                .compose(state -> state.clusterPkiTrust())
+
                 .compose(state -> state.kafkaGetClusterId())
                 .compose(state -> state.kafkaPersistentClaimDeletion())
 
@@ -672,6 +675,15 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 } catch (CertificateException e) {
                     return Future.failedFuture(e);
                 }
+            }
+            return Future.succeededFuture(this);
+        }
+
+        Future<ReconciliationState> clusterPkiTrust() {
+            try {
+                clusterPki.trust();
+            } catch (CertificateEncodingException e) {
+                return Future.failedFuture(e);
             }
             return Future.succeededFuture(this);
         }

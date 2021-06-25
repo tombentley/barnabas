@@ -78,7 +78,7 @@ import static io.strimzi.operator.cluster.model.EntityOperator.entityOperatorNam
  *     <dd>or whatever action is needed for the certs to actually be used.</dd>
  * </dl>
  */
-@SuppressWarnings("checkstyle:ClassDataAbstractionCoupling")
+@SuppressWarnings({"checkstyle:ClassDataAbstractionCoupling", "checkstyle:ClassFanOutComplexity"})
 public class ClusterPki {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -94,6 +94,8 @@ public class ClusterPki {
     private final Chain chain;
     private final Reconciliation reconciliation;
     private CertificateController controller;
+    private Set<TrustRoot> newTrustRoots;
+    private Set<TrustRoot> usedTrustRoots;
 
     private static CertificateOutputWriter co(Resource<Secret> secretResource) {
         return new AbstractCertificateOutputWriter<>(ClusterOperatorIdentity.class, secretResource, "cluster-operator") { };
@@ -184,8 +186,11 @@ public class ClusterPki {
         }
         long t0 = System.nanoTime();
         issuer = chain.reconcile(reconciliation, Chain.clusterCaFromCrd(cluster, clusterCa), ownerReference);
-        LOGGER.debugCr(reconciliation, "Chain reconciliation took {}ms", (System.nanoTime() - t0) / 1_000_000.0);
+        LOGGER.debugCr(reconciliation, "Chain reconciliation took {}ms",
+                (System.nanoTime() - t0) / 1_000_000.0);
         controller = controller(clusterCa);
+        newTrustRoots = new HashSet<>();
+        usedTrustRoots = new HashSet<>();
     }
 
 
@@ -193,50 +198,41 @@ public class ClusterPki {
         Objects.requireNonNull(this.controller);
         long t0 = System.nanoTime();
         // possibly create a bunch of pending certificates
-        Set<TrustRoot> neededRoots = new HashSet<>();
         int zkReplicas = kafka.getSpec().getZookeeper().getReplicas() + 1;
         for (int nodeId = 1; nodeId < zkReplicas; nodeId++) {
-            CertificateReconcileResult reconcile = controller.reconcile(zkSubject(namespace, cluster, nodeId));
-            neededRoots.add(reconcile.trustRoot());
+            collect(controller.reconcile(zkSubject(namespace, cluster, nodeId)));
         }
-        trust(neededRoots);
-        LOGGER.debugCr(reconciliation, "ZK certificate issuance took {}ms", (System.nanoTime() - t0) / 1_000_000.0);
-    }
-
-    private void trust(Set<TrustRoot> neededRoots) throws CertificateEncodingException {
-        Set<TrustRoot> newState = trustPrivateState.load().values().stream().map(trustRoot -> {
-            if (neededRoots.contains(trustRoot)) {
-                return trustRoot;
-            } else {
-                return trustRoot.toZombie();
-            }
-        }).collect(Collectors.toSet());
-        trustController.reconcile(newState);
+        LOGGER.debugCr(reconciliation, "ZK certificate issuance took {}ms",
+                (System.nanoTime() - t0) / 1_000_000.0);
     }
 
     public void issueKafkaCertificates(Kafka kafka,
                                     Set<String> externalBootstrapAddresses,
                                     Map<Integer, Set<String>> externalAddresses) throws CertificateException {
         Objects.requireNonNull(this.controller);
-        Set<TrustRoot> neededRoots = new HashSet<>();
+        long t0 = System.nanoTime();
         int kafkaReplicas = kafka.getSpec().getKafka().getReplicas();
         for (int brokerId = 0; brokerId < kafkaReplicas; brokerId++) {
-            CertificateReconcileResult reconcile = controller.reconcile(
-                    brokerSubject(namespace, cluster, brokerId, externalBootstrapAddresses, externalAddresses));
-            neededRoots.add(reconcile.trustRoot());
+            collect(controller.reconcile(
+                    brokerSubject(namespace, cluster, brokerId,
+                            externalBootstrapAddresses, externalAddresses)));
         }
-        trust(neededRoots);
+        LOGGER.debugCr(reconciliation, "Kafka certificate issuance took {}ms",
+                (System.nanoTime() - t0) / 1_000_000.0);
     }
 
     public void issueEoCertificate(Kafka kafka) throws CertificateException {
         Objects.requireNonNull(this.controller);
         io.strimzi.api.kafka.model.EntityOperatorSpec entityOperator = kafka.getSpec().getEntityOperator();
         if (entityOperator != null) {
-            trust(Set.of(controller.reconcile(new RequiredCertificate(new EntityOperatorIdentity(),
+            long t0 = System.nanoTime();
+            collect(controller.reconcile(new RequiredCertificate(new EntityOperatorIdentity(),
                     new Subject.Builder()
                             .withCommonName(entityOperatorName(cluster))
                             .withOrganizationName(Ca.IO_STRIMZI)
-                            .build())).trustRoot()));
+                            .build())));
+            LOGGER.debugCr(reconciliation, "EO certificate issuance took {}ms",
+                    (System.nanoTime() - t0) / 1_000_000.0);
         }
     }
 
@@ -244,44 +240,69 @@ public class ClusterPki {
         Objects.requireNonNull(this.controller);
         io.strimzi.api.kafka.model.KafkaExporterSpec i = kafka.getSpec().getKafkaExporter();
         if (i != null) {
-            trust(Set.of(controller.reconcile(new RequiredCertificate(new KafkaExporterIdentity(),
+            long t0 = System.nanoTime();
+            collect(controller.reconcile(new RequiredCertificate(new KafkaExporterIdentity(),
                     new Subject.Builder()
                             .withCommonName(KafkaExporterResources.deploymentName(cluster))
                             .withOrganizationName(Ca.IO_STRIMZI)
-                            .build())).trustRoot()));
+                            .build())));
+            LOGGER.debugCr(reconciliation, "Kafka Exporter certificate issuance took {}ms",
+                    (System.nanoTime() - t0) / 1_000_000.0);
         }
     }
 
     public void issueCcCertificate(Kafka kafka) throws CertificateException {
         Objects.requireNonNull(this.controller);
         if (kafka.getSpec().getCruiseControl() != null) {
-            trust(Set.of(controller.reconcile(new RequiredCertificate(new CruiseControlIdentity(),
+            // TODO collect all the certs which we're waiting for trust on
+            long t0 = System.nanoTime();
+            collect(controller.reconcile(new RequiredCertificate(new CruiseControlIdentity(),
                     new Subject.Builder()
                             .withCommonName(CruiseControlResources.deploymentName(cluster))
                             .withOrganizationName(Ca.IO_STRIMZI)
-                            .build())).trustRoot()));
+                            .build())));
+            LOGGER.debugCr(reconciliation, "Cruise Control certificate issuance took {}ms",
+                    (System.nanoTime() - t0) / 1_000_000.0);
         }
     }
 
     public void issueCoCertificate(Kafka kafka) throws CertificateException {
         Objects.requireNonNull(this.controller);
-        trust(Set.of(controller.reconcile(new RequiredCertificate(new ClusterOperatorIdentity(),
+        long t0 = System.nanoTime();
+        collect(controller.reconcile(new RequiredCertificate(new ClusterOperatorIdentity(),
                 new Subject.Builder()
                         .withCommonName("cluster-operator")
                         .withOrganizationName(Ca.IO_STRIMZI)
-                        .build())).trustRoot()));
-
+                        .build())));
+        LOGGER.debugCr(reconciliation, "Cluster Operator certificate issuance took {}ms",
+                (System.nanoTime() - t0) / 1_000_000.0);
         // TODO It will figure out the unused certs too, somehow.
         // It should return something which we can feed to the KafkaRoller predicate
         // And also ZK etc.
     }
 
+    private void collect(CertificateReconcileResult result) {
+        LOGGER.debugCr(reconciliation, "Certificate reconciliation result {}", result);
+        if (result instanceof CertificateReconcileResult.WaitingForIssuance) {
+        } else if (result instanceof CertificateReconcileResult.IssuedBad) {
+        } else if (result instanceof CertificateReconcileResult.PendingBad) {
+        } else if (result instanceof CertificateReconcileResult.WaitingForTrust) {
+            newTrustRoots.add(((CertificateReconcileResult.WaitingForTrust) result).trustRoot());
+            usedTrustRoots.add(((CertificateReconcileResult.WaitingForTrust) result).trustRoot());
+        } else if (result instanceof CertificateReconcileResult.OkIssued) {
+            usedTrustRoots.add(((CertificateReconcileResult.OkIssued) result).trustRoot());
+        } else if (result instanceof CertificateReconcileResult.OkNoop) {
+            usedTrustRoots.add(((CertificateReconcileResult.OkNoop) result).trustRoot());
+        } else {
+            throw new IllegalStateException("Unknown subclass " + result);
+        }
+    }
+
     private CertificateController controller(CertificateAuthority clusterCa) {
         Validator validator = new Validator(clock, clusterCa.getRenewalDays());
-        CertificateController controller = new CertificateController(trustPrivateState, certificateStatusStore,
+        return new CertificateController(trustPrivateState, certificateStatusStore,
                 certOutputWriters, issuer,
                 validator, clusterCa.getValidityDays());
-        return controller;
     }
 
     static RequiredCertificate brokerSubject(String namespace,
@@ -353,10 +374,23 @@ public class ClusterPki {
     }
 
     // Kafka roller will then run
+    public boolean newTrust() {
+        return !newTrustRoots.isEmpty();
+    }
+
+    public void trust() throws CertificateEncodingException {
+        Set<TrustRoot> newState = trustPrivateState.load().values().stream().map(trustRoot -> {
+            if (newTrustRoots.contains(trustRoot)) {
+                return trustRoot;
+            } else {
+                return trustRoot.toZombie();
+            }
+        }).collect(Collectors.toSet());
+        // If a new CA cert was used this will
+        trustController.reconcile(newState);
+    }
     
     public void deployCertificates() {
         // This will deploy the pending certificates 
     }
-    
-    // Kafka roller will then need to run
 }

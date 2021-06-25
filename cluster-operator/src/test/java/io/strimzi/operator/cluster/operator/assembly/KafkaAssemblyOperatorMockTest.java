@@ -327,6 +327,12 @@ public class KafkaAssemblyOperatorMockTest {
                     Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
                         return Future.succeededFuture(this);
                     }
+
+                    @Override
+                    Future<ReconciliationState> clusterPkiTrust() {
+                        return Future.succeededFuture(this);
+                    }
+
                 };
             }
         };
