@@ -16,17 +16,17 @@ public class ZookeeperCertificateOutputWriter extends AbstractCertificateOutputW
 
     @Override
     protected String p12Key(ZooKeeperNodeIdentity id) {
-        return "node-" + id.nodeId() + ".p12";
+        return "my-cluster-zookeeper-" + id.nodeId() + ".p12";
     }
 
     @Override
     protected String passwordKey(ZooKeeperNodeIdentity id) {
-        return "node-" + id.nodeId() + ".password";
+        return "my-cluster-zookeeper-" + id.nodeId() + ".password";
     }
 
     @Override
     protected String certKey(ZooKeeperNodeIdentity id) {
-        return "node-" + id.nodeId() + ".crt";
+        return "my-cluster-zookeeper-" + id.nodeId() + ".crt";
     }
 
     @Override

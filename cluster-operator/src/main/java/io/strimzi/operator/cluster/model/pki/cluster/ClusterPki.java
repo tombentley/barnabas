@@ -7,11 +7,14 @@ package io.strimzi.operator.cluster.model.pki.cluster;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.time.Clock;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +45,7 @@ import io.strimzi.operator.cluster.model.pki.CertificateOutputWriter;
 import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult;
 import io.strimzi.operator.cluster.model.pki.CertificateStatusStore;
 import io.strimzi.operator.cluster.model.pki.Chain;
+import io.strimzi.operator.cluster.model.pki.Fingerprint;
 import io.strimzi.operator.cluster.model.pki.LegacyTrustOutputWriter;
 import io.strimzi.operator.cluster.model.pki.RequiredCertificate;
 import io.strimzi.operator.cluster.model.pki.TrustController;
@@ -80,6 +84,8 @@ import static io.strimzi.operator.cluster.model.EntityOperator.entityOperatorNam
 @SuppressWarnings({"checkstyle:ClassDataAbstractionCoupling", "checkstyle:ClassFanOutComplexity"})
 public class ClusterPki {
 
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(ClusterPki.class.getName());
+
     private static final ObjectMapper MAPPER = new ObjectMapper();
     static {
         MAPPER.registerSubtypes(
@@ -95,25 +101,7 @@ public class ClusterPki {
     private CertificateController controller;
     private Set<TrustRoot> newTrustRoots;
     private Set<TrustRoot> usedTrustRoots;
-
-    private static CertificateOutputWriter co(Resource<Secret> secretResource) {
-        return new AbstractCertificateOutputWriter<>(ClusterOperatorIdentity.class, secretResource, "cluster-operator") { };
-    }
-
-    private static CertificateOutputWriter cc(Resource<Secret> secretResource) {
-        return new AbstractCertificateOutputWriter<>(CruiseControlIdentity.class, secretResource, "cluster-operator") { };
-    }
-
-    private static CertificateOutputWriter eo(Resource<Secret> secretResource) {
-        return new AbstractCertificateOutputWriter<>(EntityOperatorIdentity.class, secretResource, "entity-operator") { };
-    }
-
-    private static CertificateOutputWriter ke(Resource<Secret> secretResource) {
-        return new AbstractCertificateOutputWriter<>(KafkaExporterIdentity.class, secretResource, "kafka-exporter") { };
-    }
-
-    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(ClusterPki.class.getName());
-
+    private Collection<TrustRoot> existingTrust;
     private final Clock clock = Clock.systemUTC();
     private final String namespace;
     private final String cluster;
@@ -123,6 +111,22 @@ public class ClusterPki {
     private final CertificateStatusStore certificateStatusStore;
     private final TrustPrivateState trustPrivateState;
     private TrustController trustController;
+
+    private static CertificateOutputWriter co(Resource<Secret> secretResource) {
+        return new AbstractCertificateOutputWriter<>(ClusterOperatorIdentity.class, secretResource, "cluster-operator") { };
+    }
+
+    private static CertificateOutputWriter cc(Resource<Secret> secretResource) {
+        return new AbstractCertificateOutputWriter<>(CruiseControlIdentity.class, secretResource, "cruise-control") { };
+    }
+
+    private static CertificateOutputWriter eo(Resource<Secret> secretResource) {
+        return new AbstractCertificateOutputWriter<>(EntityOperatorIdentity.class, secretResource, "entity-operator") { };
+    }
+
+    private static CertificateOutputWriter ke(Resource<Secret> secretResource) {
+        return new AbstractCertificateOutputWriter<>(KafkaExporterIdentity.class, secretResource, "kafka-exporter") { };
+    }
 
     public ClusterPki(Reconciliation reconciliation,
                       KubernetesClient client,
@@ -136,7 +140,7 @@ public class ClusterPki {
                 client.secrets().inNamespace(namespace),
                 certManager);
 
-        this.certificateStatusStore = new BrokersCertificateStatusStore(MAPPER,
+        this.certificateStatusStore = new BrokersCertificateStatusStore(MAPPER, null,
                 ZookeeperCluster.nodesSecretName(cluster), client.secrets().inNamespace(namespace).withName(ZookeeperCluster.nodesSecretName(cluster)),
                 KafkaCluster.brokersSecretName(cluster), client.secrets().inNamespace(namespace).withName(KafkaCluster.brokersSecretName(cluster)),
                 EntityOperator.secretName(cluster), client.secrets().inNamespace(namespace).withName(EntityOperator.secretName(cluster)),
@@ -158,7 +162,7 @@ public class ClusterPki {
 
         this.trustController = new TrustController(trustPrivateState,
                 List.of(new LegacyTrustOutputWriter(client.secrets().inNamespace(namespace)
-                        .withName(ZookeeperCluster.nodesSecretName(cluster)))));
+                        .withName(KafkaResources.clusterCaCertificateSecretName(cluster)))));
     }
 
     /**
@@ -174,12 +178,18 @@ public class ClusterPki {
             clusterCa.setRenewalDays(30);
         }
         long t0 = System.nanoTime();
-        issuer = chain.reconcile(reconciliation, Chain.clusterCaFromCrd(cluster, clusterCa), clusterCa.isGenerateSecretOwnerReference() ? ownerReference : null);
+        issuer = chain.reconcile(reconciliation, Chain.clusterCaFromCrd(cluster, clusterCa),
+                clusterCa.isGenerateSecretOwnerReference() ? ownerReference : null);
         LOGGER.debugCr(reconciliation, "Chain reconciliation took {}ms",
                 (System.nanoTime() - t0) / 1_000_000.0);
-        controller = controller(clusterCa);
+        Validator validator = new Validator(clock, clusterCa.getRenewalDays());
+        controller = new CertificateController(trustPrivateState, certificateStatusStore,
+                certOutputWriters, issuer,
+                validator, clusterCa.getValidityDays(),
+                clusterCa.isGenerateSecretOwnerReference() ? ownerReference : null);
         newTrustRoots = new HashSet<>();
         usedTrustRoots = new HashSet<>();
+        existingTrust = new HashSet<>(trustPrivateState.load().values());
     }
 
 
@@ -287,13 +297,6 @@ public class ClusterPki {
         }
     }
 
-    private CertificateController controller(CertificateAuthority clusterCa) {
-        Validator validator = new Validator(clock, clusterCa.getRenewalDays());
-        return new CertificateController(trustPrivateState, certificateStatusStore,
-                certOutputWriters, issuer,
-                validator, clusterCa.getValidityDays());
-    }
-
     static RequiredCertificate brokerSubject(String namespace,
                                             String cluster,
                                             int brokerId,
@@ -367,17 +370,23 @@ public class ClusterPki {
         return !newTrustRoots.isEmpty();
     }
 
+    // TODO this needs a test
     public void trust() throws CertificateEncodingException {
+        Comparator<TrustRoot> comparator = Comparator.<TrustRoot, Fingerprint>comparing(x -> x.fingerprint());
         Set<TrustRoot> newState = trustPrivateState.load().values().stream().map(trustRoot -> {
             if (newTrustRoots.contains(trustRoot)) {
                 // TODO this is fishy:
                 // a) what is enforcing the valid transitions
                 // b) why the need for the resourceVersion argument, then the TrustRoot already knows its rv?
+                // c) why is it only toTrusted that needs the rv?
                 return trustRoot.toTrusted(trustRoot.resourceVersion());
             } else {
-                return trustRoot.toZombie();
+                return trustRoot;
             }
-        }).collect(Collectors.toSet());
+        }).collect(Collectors.toCollection(() -> new TreeSet<>(comparator)));
+        Set<TrustRoot> toPhaseOut = new TreeSet<>(comparator);
+        toPhaseOut.removeAll(usedTrustRoots);
+        newState.addAll(toPhaseOut.stream().map(TrustRoot::toPhaseOut).collect(Collectors.toSet()));
         // If a new CA cert was used this will
         trustController.reconcile(newState);
     }

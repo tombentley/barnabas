@@ -220,11 +220,23 @@ public final class PkiUtils {
         }
     }
 
+    /***
+     * Return all the SAN of DNS name type in the given certificate
+     * @param x509Certificate The certificate
+     * @return all the SAN of DNS name type
+     * @throws CertificateParsingException If the cert was bad
+     */
     public static Set<String> dnsNames(X509Certificate x509Certificate) throws CertificateParsingException {
         Integer dnsType = Integer.valueOf(2);
         return sansOfType(x509Certificate, dnsType);
     }
 
+    /***
+     * Return all the SAN of IP address type in the given certificate
+     * @param x509Certificate The certificate
+     * @return all the SAN of IP address type
+     * @throws CertificateParsingException If the cert was bad
+     */
     public static Set<String> ipAddresses(X509Certificate x509Certificate) throws CertificateParsingException {
         Integer dnsType = Integer.valueOf(7);
         return sansOfType(x509Certificate, dnsType);

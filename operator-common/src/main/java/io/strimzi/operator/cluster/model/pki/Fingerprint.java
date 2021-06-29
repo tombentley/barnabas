@@ -16,7 +16,7 @@ import java.util.Objects;
  * (such as RBAC on Secrets) to ensure the controllers are isolated from attackers seeking to introduce certificates
  * whose digests collide. A stronger digest could be used, but SHA-1 is convenient since it's what OpenSSL uses.
  */
-class Fingerprint {
+public class Fingerprint implements Comparable<Fingerprint> {
     static final int BYTE_LENGTH = 20;
     static final int HEX_LENGTH = 40;
     private final byte[] bytes;
@@ -81,5 +81,10 @@ class Fingerprint {
             resultChars[i + 1] = hexChars[v & 0x0F];
         }
         return new String(resultChars);
+    }
+
+    @Override
+    public int compareTo(Fingerprint o) {
+        return Arrays.compare(this.bytes, o.bytes);
     }
 }

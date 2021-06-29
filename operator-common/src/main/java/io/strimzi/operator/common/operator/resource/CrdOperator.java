@@ -105,6 +105,7 @@ public class CrdOperator<C extends KubernetesClient,
         return updateStatusAsync(reconciliation, resource, null);
     }
 
+    @SuppressWarnings("unchecked")
     public Future<T> updateStatusAsync(Reconciliation reconciliation, T resource, String withResourceVersion) {
         Promise<T> blockingPromise = Promise.promise();
 
@@ -118,12 +119,18 @@ public class CrdOperator<C extends KubernetesClient,
                 if (withResourceVersion != null) {
                     result = ((Resource<T>) tResource.withResourceVersion(withResourceVersion)).updateStatus(resource);
                 } else {
-                    result = tResource.updateStatus(resource);
+                    T t = tResource.get();
+                    if (t != null) {
+                        t.setStatus(resource.getStatus());
+                    } else {
+                        t = resource;
+                    }
+                    result = tResource.updateStatus(t);
                 }
                 LOGGER.debugCr(reconciliation, "Status of {} {} in namespace {} has been updated", resourceKind, name, namespace);
                 future.complete(result);
             } catch (Exception e) {
-                LOGGER.debugCr(reconciliation, "Caught exception while updating status of {} {} in namespace {}", resourceKind, name, namespace, e);
+                LOGGER.errorCr(reconciliation, "Caught exception while updating status of {} {} in namespace {}", resourceKind, name, namespace, e);
                 future.fail(e);
             }
         }, true, blockingPromise);
