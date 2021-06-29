@@ -35,13 +35,13 @@ class NewBrokersCertificateOutputWriterTest extends OpensslCaTestHarness {
 
     @Test
     public void testWriteIssued() throws IOException, CertificateException, InvalidKeySpecException, KeyStoreException {
-        writer.writeIssued(new BrokerIdentity(0), issuedCertificate());
+        writer.writeIssued(new BrokerIdentity(0), issuedCertificate(), null);
         assertEquals(
                 Set.of(
                         "broker-0.p12", "broker-0.password"),
                 secretResource.get().getData().keySet());
 
-        writer.writeIssued(new BrokerIdentity(1), issuedCertificate());
+        writer.writeIssued(new BrokerIdentity(1), issuedCertificate(), null);
         assertEquals(
                 Set.of(
                     "broker-0.p12", "broker-0.password",

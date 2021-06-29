@@ -10,9 +10,11 @@ import java.security.KeyStoreException;
 import java.security.cert.CertificateException;
 import java.security.spec.InvalidKeySpecException;
 import java.util.Base64;
+import java.util.List;
 import java.util.Objects;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.dsl.Resource;
@@ -33,13 +35,16 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
 
     @SuppressWarnings("unchecked")
     @Override
-    public void writeIssued(SubjectIdentity subjectIdentity, IssuedCertificate certificate)
+    public void writeIssued(SubjectIdentity subjectIdentity,
+                            IssuedCertificate certificate,
+                            OwnerReference ownerReference)
             throws CertificateException, InvalidKeySpecException, KeyStoreException, IOException {
         Objects.requireNonNull(subjectIdentity);
         if (cls.isInstance(subjectIdentity)) {
             Id id = (Id) subjectIdentity;
             Secret secret = secretResource.get();
-            SecretBuilder builder = secret != null ? new SecretBuilder(secret) : new SecretBuilder();
+            SecretBuilder builder = (secret != null ? new SecretBuilder(secret) : new SecretBuilder())
+                    .editOrNewMetadata().withOwnerReferences(ownerReference == null ? List.of() : List.of(ownerReference)).endMetadata();
             try {
                 String p12Key = p12Key(id);
                 String passwordKey = passwordKey(id);

@@ -104,7 +104,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
             assertEquals(subjectIdentity, i.getArgument(0));
             observedIssuedCertificates.add(i.getArgument(1));
             return null;
-        }).when(certificateOutputWriter).writeIssued(any(), any());
+        }).when(certificateOutputWriter).writeIssued(any(), any(), any());
 
         issuer = mock(CertificateIssuer.class);
 
@@ -116,7 +116,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
                 List.of(certificateOutputWriter),
                 issuer,
                 validator,
-                requestedValidity);
+                requestedValidity, null);
     }
 
     /** Test the transition NEW -> REQUESTED, where the issuer doesn't reply synchronously */

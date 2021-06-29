@@ -120,7 +120,7 @@ class PkiIntegrationTest {
     }
 
     private void initCc(int caValidity, int certValidity, int certRenewal) throws CertificateException {
-        BrokersCertificateStatusStore statusStore = new BrokersCertificateStatusStore(mapper,
+        BrokersCertificateStatusStore statusStore = new BrokersCertificateStatusStore(mapper, null,
                 null, null,
                 brokerCertsSecretName, brokerCertsSecretResource,
                 null, null,
@@ -149,7 +149,7 @@ class PkiIntegrationTest {
         cc = new CertificateController(
                 trustPrivateState, statusStore,
                 List.of(outputStore),
-                issuer, new Validator(clock, certRenewal), certValidity);
+                issuer, new Validator(clock, certRenewal), certValidity, null);
     }
 
     @AfterEach

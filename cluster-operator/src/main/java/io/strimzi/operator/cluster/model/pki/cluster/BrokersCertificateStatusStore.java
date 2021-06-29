@@ -6,9 +6,11 @@ package io.strimzi.operator.cluster.model.pki.cluster;
 
 import java.io.IOException;
 import java.util.Base64;
+import java.util.List;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.dsl.Resource;
@@ -30,6 +32,7 @@ import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
 public class BrokersCertificateStatusStore implements CertificateStatusStore {
 
     protected final ObjectMapper mapper;
+    private final OwnerReference ownerReference;
     private String zkName;
     private final Resource<Secret> zkSecretResource;
     private String brokersName;
@@ -43,7 +46,9 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
     private String ccName;
     protected final Resource<Secret> ccSecretResource;
 
+    @SuppressWarnings("checkstyle:ParameterNumber")
     public BrokersCertificateStatusStore(ObjectMapper mapper,
+                                         OwnerReference ownerReference,
                                          String zkName, Resource<Secret> zkSecretResource,
                                          String brokersName, Resource<Secret> brokerSecretResource,
                                          String eoName, Resource<Secret> eeSecretResource,
@@ -51,6 +56,7 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
                                          String keName, Resource<Secret> keSecretResource,
                                          String ccName, Resource<Secret> ccSecretResource) {
         this.mapper = mapper;
+        this.ownerReference = ownerReference;
         this.zkName = zkName;
         this.zkSecretResource = zkSecretResource;
         this.brokersName = brokersName;
@@ -148,7 +154,9 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
         Resource<Secret> secretResource = secretResource(subjectIdentity);
         String secretName = secretName(subjectIdentity);
         Secret secret = secretResource.get();
-        SecretBuilder builder = secret != null ? new SecretBuilder(secret) : new SecretBuilder().withNewMetadata().withName(secretName).endMetadata();
+        SecretBuilder builder = secret != null ? new SecretBuilder(secret) : new SecretBuilder()
+                .withNewMetadata().withName(secretName).endMetadata();
+        builder.editOrNewMetadata().withOwnerReferences(this.ownerReference == null ? List.of() : List.of(ownerReference)).endMetadata();
         try {
             builder.addToData(stateKey(subjectIdentity), Base64.getEncoder().encodeToString(mapper.writeValueAsBytes(c)));
         } catch (JsonProcessingException e) {

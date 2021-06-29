@@ -18,6 +18,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.strimzi.certs.Subject;
 import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult.OkIssued;
 import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult.OkNoop;
@@ -51,13 +52,15 @@ public class CertificateController {
     private final List<CertificateOutputWriter> certificateOutputWriters;
     private final CertificateIssuer issuer;
     private final int requestedValidity;
+    private final OwnerReference ownerReference;
 
 
     public CertificateController(TrustPrivateState trustPrivateState,
                                  CertificateStatusStore certificateStatusStore,
                                  List<CertificateOutputWriter> certificateOutputWriters,
                                  CertificateIssuer issuer,
-                                 Validator validator, int requestedValidity) {
+                                 Validator validator, int requestedValidity,
+                                 OwnerReference ownerReference) {
         // TODO we're just passing in the issuer, but really that has its own little state machine
         // or at least some state mgmt for knowing when we need to regenerate???
         // Or is it a recursive use of the trust controller and certificate controller?
@@ -67,6 +70,7 @@ public class CertificateController {
         this.issuer = Objects.requireNonNull(issuer);
         this.validator = Objects.requireNonNull(validator);
         this.requestedValidity = Objects.requireNonNull(requestedValidity);
+        this.ownerReference = ownerReference;
     }
 
     /**
@@ -302,7 +306,8 @@ public class CertificateController {
         for (var writer : certificateOutputWriters) {
             try {
                 // TODO This can add and replace certs, but what about removing old certs?
-                writer.writeIssued(requiredCertificate.subjectIdentity(), issued);
+                writer.writeIssued(requiredCertificate.subjectIdentity(), issued,
+                        ownerReference);
             } catch (CertificateException | InvalidKeySpecException | KeyStoreException | IOException e) {
                 throw new RuntimeException(e);
             }
