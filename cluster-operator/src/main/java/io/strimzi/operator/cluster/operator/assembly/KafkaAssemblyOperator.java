@@ -474,8 +474,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private ConfigMap jmxTransConfigMap = null;
         private Deployment jmxTransDeployment = null;
         private ClusterPki clusterPki;
-        private Secret clusterCaCerts;
-        private Secret clientsCaCerts;
 
         ReconciliationState(Reconciliation reconciliation, Kafka kafkaAssembly) {
             this.reconciliation = reconciliation;
@@ -784,13 +782,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                         List<Future> secretReconciliations = new ArrayList<>(2);
 
                         if (clusterCaConfig == null || clusterCaConfig.isGenerateCertificateAuthority())   {
-                            Future clusterSecretReconciliation = secretOperations.reconcile(reconciliation, reconciliation.namespace(), clusterCaCertName, this.clusterCaCerts)
+                            Future clusterSecretReconciliation = secretOperations.reconcile(reconciliation, reconciliation.namespace(), clusterCaCertName, this.clusterCa.caCertSecret())
                                     .compose(ignored -> secretOperations.reconcile(reconciliation, reconciliation.namespace(), clusterCaKeyName, this.clusterCa.caKeySecret()));
                             secretReconciliations.add(clusterSecretReconciliation);
                         }
 
                         if (clientsCaConfig == null || clientsCaConfig.isGenerateCertificateAuthority())   {
-                            Future clientsSecretReconciliation = secretOperations.reconcile(reconciliation, reconciliation.namespace(), clientsCaCertName, this.clientsCaCerts)
+                            Future clientsSecretReconciliation = secretOperations.reconcile(reconciliation, reconciliation.namespace(), clientsCaCertName, this.clientsCa.caCertSecret())
                                 .compose(ignored -> secretOperations.reconcile(reconciliation, reconciliation.namespace(), clientsCaKeyName, this.clientsCa.caKeySecret()));
                             secretReconciliations.add(clientsSecretReconciliation);
                         }
@@ -807,8 +805,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             }
                         });
 
-                        this.clusterCaCerts = clusterCa.caCertSecret();
-                        this.clientsCaCerts = clientsCa.caCertSecret();
+
                     } catch (Throwable e) {
                         future.fail(e);
                     }
@@ -873,7 +870,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                         .compose(sts -> {
                             if (sts != null) {
                                 zkSetOperations.maybeRollingUpdate(reconciliation, sts, rollPodAndLogReason,
-                                        clusterCaCerts, oldCoSecret);
+                                        clusterCa.caCertSecret(), oldCoSecret);
                             }
                             return Future.succeededFuture();
                         });
@@ -885,7 +882,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                         .compose(sts -> {
                             if (sts != null) {
                                 return new KafkaRoller(reconciliation, vertx, podOperations, 1_000, operationTimeoutMs,
-                                    () -> new BackOff(250, 2, 10), sts, clusterCaCerts, oldCoSecret, adminClientProvider,
+                                    () -> new BackOff(250, 2, 10), sts, clusterCa.caCertSecret(), oldCoSecret, adminClientProvider,
                                     kafkaCluster.getBrokersConfiguration(), kafkaLogging, kafkaCluster.getKafkaVersion(), true)
                                     .rollingRestart(rollPodAndLogReason);
                             } else {
@@ -3699,12 +3696,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         private int getClusterCaCertGeneration() {
-            return Annotations.intAnnotation(clusterCaCerts, Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION,
+            return Annotations.intAnnotation(clusterCa.caCertSecret(), Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION,
                     Ca.INIT_GENERATION);
         }
 
         private int getClientsCaCertGeneration() {
-            return Annotations.intAnnotation(clientsCaCerts, Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION,
+            return Annotations.intAnnotation(clientsCa.caCertSecret(), Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION,
                     Ca.INIT_GENERATION);
         }
 
@@ -3787,7 +3784,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             if (certificate == null)    {
                 // When custom certificate is not used, use the current CA certificate
                 Base64.Decoder decoder = Base64.getDecoder();
-                certificate = new String(decoder.decode(clusterCaCerts.getData().get("ca.crt")), StandardCharsets.US_ASCII);
+                certificate = new String(decoder.decode(clusterCa.caCertSecret().getData().get("ca.crt")), StandardCharsets.US_ASCII);
             }
 
             List<ListenerStatus> listeners = kafkaStatus.getListeners();
