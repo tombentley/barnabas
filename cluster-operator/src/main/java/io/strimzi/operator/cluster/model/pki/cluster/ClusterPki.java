@@ -113,19 +113,23 @@ public class ClusterPki {
     private TrustController trustController;
 
     private CertificateOutputWriter co(NamedResource<Secret> secretResource) {
-        return new AbstractCertificateOutputWriter<>(reconciliation, ClusterOperatorIdentity.class, secretResource, "cluster-operator") { };
+        return new AbstractCertificateOutputWriter<>(reconciliation, ClusterOperatorIdentity.class,
+                secretResource, "cluster-operator") { };
     }
 
     private CertificateOutputWriter cc(NamedResource<Secret> secretResource) {
-        return new AbstractCertificateOutputWriter<>(reconciliation, CruiseControlIdentity.class, secretResource, "cruise-control") { };
+        return new AbstractCertificateOutputWriter<>(reconciliation, CruiseControlIdentity.class,
+                secretResource, "cruise-control") { };
     }
 
     private CertificateOutputWriter eo(NamedResource<Secret> secretResource) {
-        return new AbstractCertificateOutputWriter<>(reconciliation, EntityOperatorIdentity.class, secretResource, "entity-operator") { };
+        return new AbstractCertificateOutputWriter<>(reconciliation, EntityOperatorIdentity.class,
+                secretResource, "entity-operator") { };
     }
 
     private CertificateOutputWriter ke(NamedResource<Secret> secretResource) {
-        return new AbstractCertificateOutputWriter<>(reconciliation, KafkaExporterIdentity.class, secretResource, "kafka-exporter") { };
+        return new AbstractCertificateOutputWriter<>(reconciliation, KafkaExporterIdentity.class,
+                secretResource, "kafka-exporter") { };
     }
 
     public ClusterPki(Reconciliation reconciliation,

@@ -164,10 +164,10 @@ public class IssuedCertificate {
         KeyStore ks = KeyStore.getInstance("PKCS12");
         try {
             ks.load(null, null);
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e); // should never happen, since PKCS12 is a standard part of the JRE
-        } catch (CertificateException e) {
-            throw new RuntimeException(e); // should never happen, since the keystore is empty
+        } catch (NoSuchAlgorithmException | CertificateException e) {
+            // NoSuchAlgorithmException should never happen, since PKCS12 is a standard part of the JRE
+            // CertificateException should never happen, since the keystore is empty
+            throw new RuntimeException(e);
         }
         List<X509Certificate> certificateChain = issuedCert.completeChain();
         String alias = fingerprint(issuedCert.issuedCertificate()).toString();

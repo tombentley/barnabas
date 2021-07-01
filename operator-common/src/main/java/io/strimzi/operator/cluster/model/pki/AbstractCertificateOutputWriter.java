@@ -56,7 +56,7 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
                 if (p12Key != null && passwordKey != null) {
                     String password = pg.generate();
                     builder.addToData(p12Key, Base64.getEncoder().encodeToString(certificate.toPkcs12(password.toCharArray())));
-                    builder.addToData(passwordKey, password);
+                    builder.addToData(passwordKey, Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.US_ASCII)));
                 } else if (p12Key != null || passwordKey != null) {
                     throw new RuntimeException("p12 requires a password: password and p12 must be either both used, or both not used");
                 }
