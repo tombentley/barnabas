@@ -8,7 +8,6 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateEncodingException;
-import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.text.ParseException;
 import java.util.ArrayList;
@@ -22,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.TreeSet;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -110,11 +110,11 @@ import io.strimzi.operator.common.AdminClientProvider;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.BackOff;
 import io.strimzi.operator.common.InvalidConfigurationException;
-import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.MetricsAndLogging;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationException;
+import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.operator.resource.AbstractScalableResourceOperator;
@@ -183,7 +183,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
     private final KubernetesClient client;
     private final CertManager certManager;
     private final PasswordGenerator passwordGenerator;
-    private boolean newMode = false;
+    private boolean newMode = true;
 
     /**
      * @param vertx The Vertx instance
@@ -332,6 +332,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
                 .compose(state -> newMode ? state.rollingUpdateForPki() : Future.succeededFuture(state))
                 .compose(state -> newMode ? state.clusterPkiTrust() : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterCaIssueZkCertificates(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterCaIssueBrokerCertificates(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterCaIssueEntityOperatorCertificate(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterCaIssueCruiseControlCertificate(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterCaIssueKafkaExporterCertificate(this::dateSupplier) : Future.succeededFuture(state))
 
                 // By this point ZK nodes need to trust all client certs that will be presented to them.
                 // (ZK, Kafka, TopicOperator, UserOperator, ClusterOperator, CC)
@@ -603,83 +608,75 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return Future.succeededFuture(this);
         }
 
+        Future<ReconciliationState> async(Supplier<Date> dateSupplier, Callable<Void> callable) {
+            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
+                Promise<ReconciliationState> promise = Promise.promise();
+                vertx.createSharedWorkerExecutor("kubernetes-ops-pool").executeBlocking(
+                    fut -> {
+                        try {
+                            callable.call();
+                            fut.complete(this);
+                        } catch (Exception e) {
+                            fut.fail(e);
+                        }
+                    },
+                    true,
+                    promise);
+                return promise.future();
+            } else {
+                return Future.succeededFuture(this);
+            }
+        }
+
         Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
             this.clusterPki = new ClusterPki(reconciliation, client, certManager, namespace,
                     name, ownerReference());
-            try {
-                if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
-                    this.clusterPki.bootstrapCa(kafkaAssembly.getSpec().getClusterCa());
-                }
-                return Future.succeededFuture(this);
-            } catch (CertificateException e) {
-                return Future.failedFuture(e);
-            }
+            return async(dateSupplier, () -> {
+                this.clusterPki.bootstrapCa(kafkaAssembly.getSpec().getClusterCa());
+                return null;
+            });
         }
 
         Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
-            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
-                try {
-                    clusterPki.issueZkCertificates(kafkaAssembly);
-                } catch (CertificateException e) {
-                    return Future.failedFuture(e);
-                }
-            }
-            return Future.succeededFuture(this);
+            return async(dateSupplier, () -> {
+                clusterPki.issueZkCertificates(kafkaAssembly);
+                return null;
+            });
         }
 
         Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
-            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
-                try {
-                    clusterPki.issueKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames);
-                } catch (CertificateException e) {
-                    return Future.failedFuture(e);
-                }
-            }
-            return Future.succeededFuture(this);
+            return async(dateSupplier, () -> {
+                clusterPki.issueKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames);
+                return null;
+            });
         }
 
         Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
-            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
-                try {
-                    clusterPki.issueEoCertificate(kafkaAssembly);
-                } catch (CertificateException e) {
-                    return Future.failedFuture(e);
-                }
-            }
-            return Future.succeededFuture(this);
+            return async(dateSupplier, () -> {
+                clusterPki.issueEoCertificate(kafkaAssembly);
+                return null;
+            });
         }
 
         Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
-            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
-                try {
-                    clusterPki.issueCoCertificate(kafkaAssembly);
-                } catch (CertificateException e) {
-                    return Future.failedFuture(e);
-                }
-            }
-            return Future.succeededFuture(this);
+            return async(dateSupplier, () -> {
+                clusterPki.issueCoCertificate(kafkaAssembly);
+                return null;
+            });
         }
 
         Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
-            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
-                try {
-                    clusterPki.issueKafkaExporterCertificates(kafkaAssembly);
-                } catch (CertificateException e) {
-                    return Future.failedFuture(e);
-                }
-            }
-            return Future.succeededFuture(this);
+            return async(dateSupplier, () -> {
+                clusterPki.issueKafkaExporterCertificates(kafkaAssembly);
+                return null;
+            });
         }
 
         Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
-            if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
-                try {
-                    clusterPki.issueCcCertificate(kafkaAssembly);
-                } catch (CertificateException e) {
-                    return Future.failedFuture(e);
-                }
-            }
-            return Future.succeededFuture(this);
+            return async(dateSupplier, () -> {
+                clusterPki.issueCcCertificate(kafkaAssembly);
+                return null;
+            });
         }
 
         Future<ReconciliationState> rollingUpdateForPki() {
