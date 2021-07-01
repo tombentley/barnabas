@@ -12,8 +12,8 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 
 /**
  * <p>Implements the Trust State Machine by consuming a set of trust roots with their desired states
@@ -34,12 +34,14 @@ import org.apache.logging.log4j.Logger;
  */
 public class TrustController {
 
-    private static final Logger LOGGER = LogManager.getLogger(TrustController.class);
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(TrustController.class);
 
-    private TrustPrivateState privateState;
-    private List<TrustOutputWriter> outputWriters;
+    private final Reconciliation reconciliation;
+    private final TrustPrivateState privateState;
+    private final List<TrustOutputWriter> outputWriters;
 
-    public TrustController(TrustPrivateState privateState, List<TrustOutputWriter> outputWriters) {
+    public TrustController(Reconciliation reconciliation, TrustPrivateState privateState, List<TrustOutputWriter> outputWriters) {
+        this.reconciliation = reconciliation;
         this.privateState = privateState;
         this.outputWriters = outputWriters;
     }
@@ -110,12 +112,12 @@ public class TrustController {
     }
 
     private TrustRoot added(TrustRoot root) {
-        LOGGER.debug("Adding {}", root);
+        LOGGER.debugCr(reconciliation, "Adding {} in state {}", root.fingerprint(), root.state());
         return root;
     }
 
     private Fingerprint deleted(TrustRoot root) {
-        LOGGER.debug("Removing {}", root);
+        LOGGER.debugCr(reconciliation, "Removing {} in state {}", root.fingerprint(), root.state());
         return root.fingerprint();
     }
 
@@ -149,7 +151,7 @@ public class TrustController {
                 break;
 
         }
-        LOGGER.debug("Transitioning {} to {}", currentRoot, desiredState);
+        LOGGER.debugCr(reconciliation, "Transitioning {} from {} to {}", currentRoot.fingerprint(), currentState, desiredState);
         return new TrustRoot(desiredRoot.x509(), desiredState, currentRoot.resourceVersion());
     }
 }

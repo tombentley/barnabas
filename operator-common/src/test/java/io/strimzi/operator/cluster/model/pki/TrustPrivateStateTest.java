@@ -32,8 +32,9 @@ public class TrustPrivateStateTest {
 
     @Test
     public void test1() throws CertificateException, IOException {
-        Resource<Secret> secretResource = new MockKube().build().secrets().inNamespace("ns").withName("trust");
-        TrustPrivateState tps = new TrustPrivateState("trust", secretResource);
+        var op = new MockKube().build().secrets().inNamespace("ns");
+        Resource<Secret> secretResource = op.withName("trust");
+        TrustPrivateState tps = new TrustPrivateState(null, new NamedResource<>(op, "trust"));
         TrustRoot root1 = TrustRoot.untrusted(getX509Certificate("/CLUSTER_CERT.pem"));
         TrustRoot root2 = TrustRoot.untrusted(getX509Certificate("/CLIENTS_CERT.pem")).toTrusted("123");
         Map<Fingerprint, TrustRoot> stored = Map.of(root1.fingerprint(), root1,

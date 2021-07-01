@@ -16,6 +16,7 @@ import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
 import io.strimzi.api.kafka.model.KafkaResources;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.mockkube.MockKube;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,8 @@ class InternalCertificateIssuerStoreTest {
     public void setup() {
         client = new MockKube().build();
         secretResource = client.secrets().inNamespace("namespace").withName(KafkaResources.clusterCaKeySecretName("cluster"));
-        issuer = new StrimziCertificateIssuerStore(Clock.systemUTC(), secretResource);
+        issuer = new StrimziCertificateIssuerStore(new Reconciliation("test", "Kafka", "ns", "n"),
+                Clock.systemUTC(), secretResource);
     }
 
     @Test

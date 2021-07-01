@@ -16,6 +16,9 @@ public class BrokerIdentity extends SubjectIdentity {
     @JsonCreator
     public BrokerIdentity(
             @JsonProperty("brokerId") int brokerId) {
+        if (brokerId < 0) {
+            throw new IllegalArgumentException();
+        }
         this.brokerId = brokerId;
     }
 

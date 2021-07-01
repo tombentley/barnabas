@@ -14,6 +14,7 @@ import java.time.Clock;
 
 import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.certs.Subject;
+import io.strimzi.operator.common.Reconciliation;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -26,7 +27,9 @@ class IssuedCertificateTest {
     void pkcs12RoundTrip() throws InvalidKeySpecException, CertificateException, NoSuchAlgorithmException, KeyStoreException, IOException, UnrecoverableEntryException {
         Subject caSubject = new Subject.Builder()
             .withCommonName("test ca").build();
-        InternalCertificateIssuer rootIssuer = InternalCertificateIssuer.createRootIssuer(Clock.systemUTC(), new OpenSslCertManager(), caSubject, 10);
+        InternalCertificateIssuer rootIssuer = InternalCertificateIssuer.createRootIssuer(
+                new Reconciliation("", "", "", ""),
+                Clock.systemUTC(), new OpenSslCertManager(), caSubject, 10);
         Subject leafSubject = new Subject.Builder()
             .withCommonName("leaf ca").build();
         byte[] token = rootIssuer.requestCertificate(leafSubject, 10);

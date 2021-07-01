@@ -11,6 +11,7 @@ import java.time.temporal.ChronoUnit;
 
 import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.certs.Subject;
+import io.strimzi.operator.common.Reconciliation;
 import org.junit.jupiter.api.Test;
 
 import static java.time.Instant.now;
@@ -24,7 +25,9 @@ class InternalCertificateIssuerTest {
     void simpleCa() throws CertificateException {
         Subject caSubject = new Subject.Builder()
             .withCommonName("my root CA").build();
-        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(Clock.systemUTC(), new OpenSslCertManager(), caSubject, 10);
+        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(
+                new Reconciliation("test", "Kafka", "ns", "n"),
+                Clock.systemUTC(), new OpenSslCertManager(), caSubject, 10);
         Subject clientSubject = new Subject.Builder()
             .withCommonName("my client").build();
         byte[] token = issuer.requestCertificate(clientSubject, 100);

@@ -17,17 +17,22 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
-import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.operator.common.PasswordGenerator;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 
 public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity> implements CertificateOutputWriter {
 
-    private final Resource<Secret> secretResource;
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(AbstractCertificateOutputWriter.class);
+
+    private final Reconciliation reconciliation;
+    private final NamedResource<Secret> secretResource;
     private final PasswordGenerator pg = new PasswordGenerator(12);
     private final Class<Id> cls;
     private final String baseEntryName;
 
-    public AbstractCertificateOutputWriter(Class<Id> cls, Resource<Secret> secretResource, String baseEntryName) {
+    public AbstractCertificateOutputWriter(Reconciliation reconciliation, Class<Id> cls, NamedResource<Secret> secretResource, String baseEntryName) {
+        this.reconciliation = reconciliation;
         this.secretResource = Objects.requireNonNull(secretResource);
         this.cls = Objects.requireNonNull(cls);
         this.baseEntryName = baseEntryName;
@@ -42,8 +47,8 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
         Objects.requireNonNull(subjectIdentity);
         if (cls.isInstance(subjectIdentity)) {
             Id id = (Id) subjectIdentity;
-            Secret secret = secretResource.get();
-            SecretBuilder builder = (secret != null ? new SecretBuilder(secret) : new SecretBuilder())
+            Secret existingSecret = secretResource.get();
+            SecretBuilder builder = (existingSecret != null ? new SecretBuilder(existingSecret) : new SecretBuilder())
                     .editOrNewMetadata().withOwnerReferences(ownerReference == null ? List.of() : List.of(ownerReference)).endMetadata();
             try {
                 String p12Key = p12Key(id);
@@ -67,10 +72,21 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
             }
-            if (secret == null) {
-                secretResource.create(builder.build());
+            Secret newSecret = builder.build();
+            if (existingSecret == null) {
+                LOGGER.debugCr(reconciliation, "Storing certificate {} issued to {} in new secret {}",
+                        certificate.issuedFingerprint(),
+                        subjectIdentity,
+                        secretResource);
+                secretResource.create(newSecret);
             } else {
-                secretResource.lockResourceVersion(secret.getMetadata().getResourceVersion()).replace(builder.build());
+                LOGGER.debugCr(reconciliation, "Storing certificate {} issued to {} in existing secret {}",
+                        certificate.issuedFingerprint(),
+                        subjectIdentity,
+                        secretResource);
+                secretResource
+                        .lockResourceVersion(existingSecret.getMetadata().getResourceVersion())
+                        .replace(newSecret);
             }
         }
     }

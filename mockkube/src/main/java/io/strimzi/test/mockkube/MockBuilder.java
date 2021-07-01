@@ -299,7 +299,7 @@ class MockBuilder<T extends HasMetadata,
         mockPatch(resourceName, resource);
         when(resource.lockResourceVersion(anyString())).thenAnswer(i -> {
             String matchVersion = i.getArgument(0);
-            Replaceable<T> replaceable = mock(Replaceable.class);
+            Replaceable<T> replaceable = mock(Resource.class); // not Replaceable because it's convenient for NamedResource to downcast
             when(replaceable.replace(any())).thenAnswer(i2 -> {
                 T resource2 = i2.getArgument(0);
                 return doReplace(resourceName, matchVersion, resource2);

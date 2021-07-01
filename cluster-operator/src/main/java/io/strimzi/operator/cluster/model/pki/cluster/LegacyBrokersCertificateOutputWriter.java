@@ -5,8 +5,9 @@
 package io.strimzi.operator.cluster.model.pki.cluster;
 
 import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
+import io.strimzi.operator.cluster.model.pki.NamedResource;
+import io.strimzi.operator.common.Reconciliation;
 
 /**
  * Writes a secret like:
@@ -27,8 +28,8 @@ import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
  */
 public class LegacyBrokersCertificateOutputWriter extends AbstractCertificateOutputWriter<BrokerIdentity> {
 
-    public LegacyBrokersCertificateOutputWriter(Resource<Secret> secretResource) {
-        super(BrokerIdentity.class, secretResource, null);
+    public LegacyBrokersCertificateOutputWriter(Reconciliation reconciliation, NamedResource<Secret> secretResource) {
+        super(reconciliation, BrokerIdentity.class, secretResource, null);
     }
 
     @Override

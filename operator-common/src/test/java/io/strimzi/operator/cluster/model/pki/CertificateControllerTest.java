@@ -19,6 +19,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import io.strimzi.certs.Subject;
+import io.strimzi.operator.common.Reconciliation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -111,6 +112,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         validator = mock(Validator.class);
 
         controller = new CertificateController(
+                new Reconciliation("test", "Kafka", "ns", "n"),
                 trustPrivateState,
                 certificateStatusStore,
                 List.of(certificateOutputWriter),
@@ -225,7 +227,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     /** Test the transition PENDING -> IN_USE, where the root is now trusted */
     @Test
     public void testPendingToInUseWhenRootIsTrusted() throws CertificateException {
-        trustPrivateStateMap.put(PkiUtils.fingerprint(issued.rootCaCertificate()),
+        trustPrivateStateMap.put(issued.rootCaFingerprint(),
                 TrustRoot.untrusted(issued.rootCaCertificate()).toTrusted("123"));
 
         doPendingToInUse(TrustState.TRUSTED);
@@ -234,7 +236,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     /** Test the transition PENDING -> IN_USE, where the root is in phase out, but there's no need to renew */
     @Test
     public void testPendingToInUseWhenRootIsPhaseOut() throws CertificateException {
-        trustPrivateStateMap.put(PkiUtils.fingerprint(issued.rootCaCertificate()),
+        trustPrivateStateMap.put(issued.rootCaFingerprint(),
                 TrustRoot.untrusted(issued.rootCaCertificate()).toTrusted("123").toPhaseOut());
 
         doPendingToInUse(TrustState.PHASE_OUT);
@@ -272,7 +274,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     @Test
     public void testInUseToNotNeeded() throws CertificateException {
         TrustRoot value = TrustRoot.untrusted(issued.rootCaCertificate()).toTrusted("123");
-        trustPrivateStateMap.put(PkiUtils.fingerprint(issued.rootCaCertificate()),
+        trustPrivateStateMap.put(issued.rootCaFingerprint(),
                 value);
 
         storedStatuses.put(subjectIdentity, inUseStatus(issued));

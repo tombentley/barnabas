@@ -11,12 +11,14 @@ import java.security.cert.X509Certificate;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.dsl.Replaceable;
@@ -81,12 +83,12 @@ public class TrustPrivateState {
     }
     private static final Logger LOGGER = LogManager.getLogger(TrustPrivateState.class);
 
-    private String resourceName;
-    private final Resource<Secret> secretResource;
+    private final NamedResource<Secret> secretResource;
+    private final OwnerReference ownerReference;
 
-    public TrustPrivateState(String resourceName, Resource<Secret> secretResource) {
-        this.resourceName = Objects.requireNonNull(resourceName);
+    public TrustPrivateState(OwnerReference ownerReference, NamedResource<Secret> secretResource) {
         this.secretResource = Objects.requireNonNull(secretResource);
+        this.ownerReference = ownerReference;
     }
     /*
      * API should probably be existing LOAD
@@ -188,7 +190,7 @@ public class TrustPrivateState {
         if (secret == null) {
             secretResource.create(new SecretBuilder()
                     .withNewMetadata()
-                        .withName(resourceName)
+                        .withOwnerReferences(ownerReference == null ? List.of() : List.of(ownerReference))
                     .endMetadata()
                     .withData(data)
                     .build());

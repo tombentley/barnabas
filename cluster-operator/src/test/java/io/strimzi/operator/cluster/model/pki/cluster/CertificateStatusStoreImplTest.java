@@ -16,7 +16,9 @@ import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.operator.cluster.model.pki.CertificateState;
 import io.strimzi.operator.cluster.model.pki.CertificateStatus;
 import io.strimzi.operator.cluster.model.pki.IssuedCertificate;
+import io.strimzi.operator.cluster.model.pki.NamedResource;
 import io.strimzi.operator.cluster.model.pki.TrustPrivateStateTest;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.mockkube.MockKube;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,23 +26,25 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-class BrokersCertificateStatusStoreTest {
+class CertificateStatusStoreImplTest {
 
     private Resource<Secret> secretResource;
-    private BrokersCertificateStatusStore writer;
+    private CertificateStatusStoreImpl writer;
 
     @BeforeEach
     public void setup() {
-        secretResource = new MockKube().build().secrets().inNamespace("ns").withName("n");
+        var op = new MockKube().build().secrets().inNamespace("ns");
+        secretResource = op.withName("n");
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerSubtypes(new NamedType(BrokerIdentity.class, "broker"));
-        writer = new BrokersCertificateStatusStore(mapper, null,
-                null, null,
-                "n", secretResource,
-                null, null,
-                null, null,
-                null, null,
-                null, null);
+        writer = new CertificateStatusStoreImpl(new Reconciliation("test", "Kafka", "ns", "n"), mapper, null,
+                 "n",
+                 null,
+                 new NamedResource<>(op, "n"),
+                 null,
+                 null,
+                 null,
+                 null);
     }
 
     @Test

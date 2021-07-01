@@ -12,7 +12,9 @@ import java.util.Set;
 
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.dsl.Resource;
+import io.strimzi.operator.cluster.model.pki.NamedResource;
 import io.strimzi.operator.cluster.model.pki.OpensslCaTestHarness;
+import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.mockkube.MockKube;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,9 +28,15 @@ class NewBrokersCertificateOutputWriterTest extends OpensslCaTestHarness {
 
     @BeforeEach
     public void setup() {
-        secretResource = new MockKube().build().secrets().inNamespace("ns")
-                .withName("n");
-        writer = new NewBrokersCertificateOutputWriter(secretResource);
+        String ns = "ns";
+        String cluster = "cluster";
+        String secretName = "n";
+        var op = new MockKube().build().secrets().inNamespace(ns);
+        secretResource = op
+                .withName(secretName);
+        writer = new NewBrokersCertificateOutputWriter(new Reconciliation("test", "Kafka", ns, cluster),
+                cluster,
+                new NamedResource<Secret>(op, secretName));
     }
 
 
@@ -38,14 +46,14 @@ class NewBrokersCertificateOutputWriterTest extends OpensslCaTestHarness {
         writer.writeIssued(new BrokerIdentity(0), issuedCertificate(), null);
         assertEquals(
                 Set.of(
-                        "broker-0.p12", "broker-0.password"),
+                        "cluster-kafka-0.p12", "cluster-kafka-0.password", "cluster-kafka-0.crt", "cluster-kafka-0.key"),
                 secretResource.get().getData().keySet());
 
         writer.writeIssued(new BrokerIdentity(1), issuedCertificate(), null);
         assertEquals(
                 Set.of(
-                    "broker-0.p12", "broker-0.password",
-                    "broker-1.p12", "broker-1.password"),
+                    "cluster-kafka-0.p12", "cluster-kafka-0.password", "cluster-kafka-0.crt", "cluster-kafka-0.key",
+                    "cluster-kafka-1.p12", "cluster-kafka-1.password", "cluster-kafka-1.crt", "cluster-kafka-1.key"),
                 secretResource.get().getData().keySet());
     }
 }

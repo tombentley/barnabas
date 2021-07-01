@@ -25,6 +25,7 @@ import io.strimzi.api.kafka.model.CertificateAuthority;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.certs.Subject;
+import io.strimzi.operator.common.Reconciliation;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -49,8 +50,10 @@ public class StrimziCertificateIssuerStore {
 
     private final Resource<Secret> caSecretResource;
     private final Clock clock;
+    private final Reconciliation reconciliation;
 
-    public StrimziCertificateIssuerStore(Clock clock, Resource<Secret> caSecretResource) {
+    public StrimziCertificateIssuerStore(Reconciliation reconciliation, Clock clock, Resource<Secret> caSecretResource) {
+        this.reconciliation = reconciliation;
         this.clock = Objects.requireNonNull(clock);
         this.caSecretResource = Objects.requireNonNull(caSecretResource);
     }
@@ -117,7 +120,7 @@ public class StrimziCertificateIssuerStore {
             }
         }
         pathToRoot.add(issuingCert);
-        return new InternalCertificateIssuer(clock, new OpenSslCertManager(), pathToRoot, issuingKey, issuingCert);
+        return new InternalCertificateIssuer(reconciliation, clock, new OpenSslCertManager(), pathToRoot, issuingKey, issuingCert);
     }
 
     private InternalCertificateIssuer createIssuer(CertificateAuthority certificateAuthority, OwnerReference ownerRef) throws CertificateEncodingException {
@@ -133,7 +136,8 @@ public class StrimziCertificateIssuerStore {
         if (validityDays <= 0) {
             validityDays = CertificateAuthority.DEFAULT_CERTS_VALIDITY_DAYS;
         }
-        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(clock, new OpenSslCertManager(), caSubject, validityDays);
+        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(
+                reconciliation, clock, new OpenSslCertManager(), caSubject, validityDays);
         // store in Secrets
         SecretBuilder secretBuilder = new SecretBuilder();
         if (ownerRef != null) {

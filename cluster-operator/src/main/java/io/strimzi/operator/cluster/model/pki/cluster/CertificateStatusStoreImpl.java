@@ -13,10 +13,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
-import io.fabric8.kubernetes.client.dsl.Resource;
+import io.strimzi.operator.cluster.model.KafkaCluster;
+import io.strimzi.operator.cluster.model.ZookeeperCluster;
 import io.strimzi.operator.cluster.model.pki.CertificateStatus;
 import io.strimzi.operator.cluster.model.pki.CertificateStatusStore;
+import io.strimzi.operator.cluster.model.pki.NamedResource;
 import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 
 /**
  * Stores CertificateStatuses in Kube Secret with the following structure:
@@ -29,51 +33,47 @@ import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
  *   broker-$NUM.state: ...    # The complete state, as JSON
  * </code></pre>
  */
-public class BrokersCertificateStatusStore implements CertificateStatusStore {
+public class CertificateStatusStoreImpl implements CertificateStatusStore {
+
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(CertificateStatusStoreImpl.class);
 
     protected final ObjectMapper mapper;
     private final OwnerReference ownerReference;
-    private String zkName;
-    private final Resource<Secret> zkSecretResource;
-    private String brokersName;
-    protected final Resource<Secret> brokerSecretResource;
-    private String eoName;
-    protected final Resource<Secret> eeSecretResource;
-    private String coName;
-    protected final Resource<Secret> coSecretResource;
-    private String keName;
-    protected final Resource<Secret> keSecretResource;
-    private String ccName;
-    protected final Resource<Secret> ccSecretResource;
+    private final NamedResource<Secret> zkSecretResource;
+    private final NamedResource<Secret> brokerSecretResource;
+    private final NamedResource<Secret> eeSecretResource;
+    private final NamedResource<Secret> coSecretResource;
+    private final NamedResource<Secret> keSecretResource;
+    private final NamedResource<Secret> ccSecretResource;
+    private final Reconciliation reconciliation;
+    private final String cluster;
 
     @SuppressWarnings("checkstyle:ParameterNumber")
-    public BrokersCertificateStatusStore(ObjectMapper mapper,
-                                         OwnerReference ownerReference,
-                                         String zkName, Resource<Secret> zkSecretResource,
-                                         String brokersName, Resource<Secret> brokerSecretResource,
-                                         String eoName, Resource<Secret> eeSecretResource,
-                                         String coName, Resource<Secret> coSecretResource,
-                                         String keName, Resource<Secret> keSecretResource,
-                                         String ccName, Resource<Secret> ccSecretResource) {
+    public CertificateStatusStoreImpl(Reconciliation reconciliation,
+                                      ObjectMapper mapper,
+                                      OwnerReference ownerReference,
+                                      String cluster,
+                                      NamedResource<Secret> zkSecretResource,
+                                      NamedResource<Secret> brokerSecretResource,
+                                      NamedResource<Secret> eeSecretResource,
+                                      NamedResource<Secret> coSecretResource,
+                                      NamedResource<Secret> keSecretResource,
+                                      NamedResource<Secret> ccSecretResource) {
+        this.reconciliation = reconciliation;
         this.mapper = mapper;
         this.ownerReference = ownerReference;
-        this.zkName = zkName;
+        this.cluster = cluster;
         this.zkSecretResource = zkSecretResource;
-        this.brokersName = brokersName;
         this.brokerSecretResource = brokerSecretResource;
-        this.eoName = eoName;
         this.eeSecretResource = eeSecretResource;
-        this.coName = coName;
         this.coSecretResource = coSecretResource;
-        this.keName = keName;
         this.keSecretResource = keSecretResource;
-        this.ccName = ccName;
         this.ccSecretResource = ccSecretResource;
     }
 
     @Override
     public CertificateStatus loadStatus(SubjectIdentity subjectIdentity) {
-        Resource<Secret> secretResource = secretResource(subjectIdentity);
+        NamedResource<Secret> secretResource = secretResource(subjectIdentity);
         Secret secret = secretResource.get();
         if (secret == null || secret.getData() == null || secret.getData().isEmpty()) {
             return CertificateStatus.createNew(subjectIdentity);
@@ -95,9 +95,9 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
 
     String stateKey(SubjectIdentity id) {
         if (id instanceof BrokerIdentity) {
-            return "broker-" + ((BrokerIdentity) id).brokerId() + ".state";
+            return KafkaCluster.kafkaPodName(cluster, ((BrokerIdentity) id).brokerId()) + ".state";
         } else if (id instanceof ZooKeeperNodeIdentity) {
-            return "node-" + ((ZooKeeperNodeIdentity) id).nodeId() + ".state";
+            return ZookeeperCluster.zookeeperPodName(cluster, ((ZooKeeperNodeIdentity) id).nodeId()) + ".state";
         } else if (id instanceof EntityOperatorIdentity) {
             return "entity-operator.state";
         } else if (id instanceof ClusterOperatorIdentity) {
@@ -111,25 +111,7 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
         }
     }
 
-    String secretName(SubjectIdentity id) {
-        if (id instanceof BrokerIdentity) {
-            return brokersName;
-        } else if (id instanceof ZooKeeperNodeIdentity) {
-            return zkName;
-        } else if (id instanceof EntityOperatorIdentity) {
-            return eoName;
-        } else if (id instanceof ClusterOperatorIdentity) {
-            return coName;
-        } else if (id instanceof KafkaExporterIdentity) {
-            return keName;
-        } else if (id instanceof CruiseControlIdentity) {
-            return ccName;
-        } else {
-            throw new IllegalStateException("Unknown identity " + id);
-        }
-    }
-
-    Resource<Secret> secretResource(SubjectIdentity id) {
+    NamedResource<Secret> secretResource(SubjectIdentity id) {
         if (id instanceof BrokerIdentity) {
             return brokerSecretResource;
         } else if (id instanceof ZooKeeperNodeIdentity) {
@@ -151,17 +133,17 @@ public class BrokersCertificateStatusStore implements CertificateStatusStore {
     @Override
     public void storeStatus(CertificateStatus c) {
         SubjectIdentity subjectIdentity = c.subjectIdentity();
-        Resource<Secret> secretResource = secretResource(subjectIdentity);
-        String secretName = secretName(subjectIdentity);
+        NamedResource<Secret> secretResource = secretResource(subjectIdentity);
         Secret secret = secretResource.get();
-        SecretBuilder builder = secret != null ? new SecretBuilder(secret) : new SecretBuilder()
-                .withNewMetadata().withName(secretName).endMetadata();
+        SecretBuilder builder = secret != null ? new SecretBuilder(secret) : new SecretBuilder();
         builder.editOrNewMetadata().withOwnerReferences(this.ownerReference == null ? List.of() : List.of(ownerReference)).endMetadata();
         try {
             builder.addToData(stateKey(subjectIdentity), Base64.getEncoder().encodeToString(mapper.writeValueAsBytes(c)));
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
+        LOGGER.debugCr(reconciliation, "Storing certificate: identity: {}, state: {}, secret: {}",
+                c.subjectIdentity(), c.state(), secretResource);
         secretResource.createOrReplace(builder.build());
     }
 }

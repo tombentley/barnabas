@@ -5,14 +5,15 @@
 package io.strimzi.operator.cluster.model.pki.clients;
 
 import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
+import io.strimzi.operator.cluster.model.pki.NamedResource;
+import io.strimzi.operator.common.Reconciliation;
 
 
 public class KafkaUserCertificateOutputWriter extends AbstractCertificateOutputWriter<KafkaUserIdentity> {
 
-    public KafkaUserCertificateOutputWriter(Class<KafkaUserIdentity> cls, Resource<Secret> secretResource) {
-        super(cls, secretResource, "user");
+    public KafkaUserCertificateOutputWriter(Reconciliation reconciliation, Class<KafkaUserIdentity> cls, NamedResource<Secret> secretResource) {
+        super(reconciliation, cls, secretResource, "user");
     }
 
     // TODO a user secret also contains the trusted CA certificate(s)

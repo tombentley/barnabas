@@ -38,6 +38,8 @@ public class IssuedCertificate {
     private final X509Certificate issuedCertificate;
     private final List<X509Certificate> intermediateChain;
     private final X509Certificate rootCaCertificate;
+    private final Fingerprint issuedFingerprint;
+    private final Fingerprint rootCaFingerprint;
 
     public IssuedCertificate(byte[] key,
                              X509Certificate issuedCertificate,
@@ -45,9 +47,11 @@ public class IssuedCertificate {
                              X509Certificate rootCaCertificate) {
         this.key = Objects.requireNonNull(key);
         this.issuedCertificate = Objects.requireNonNull(issuedCertificate);
+        this.issuedFingerprint = PkiUtils.fingerprint(issuedCertificate);
         this.intermediateChain = Objects.requireNonNull(intermediateChain);
         // note the root Ca cert may be null once transitioned to in_use/serialization round trip
         this.rootCaCertificate = rootCaCertificate;
+        this.rootCaFingerprint = rootCaCertificate != null ? PkiUtils.fingerprint(rootCaCertificate) : null;
     }
 
     @JsonCreator
@@ -94,6 +98,14 @@ public class IssuedCertificate {
     }
 
     /**
+     * The fingerprint of the {@link #issuedCertificate()}.
+     * @return The fingerprint.
+     */
+    public Fingerprint issuedFingerprint() {
+        return issuedFingerprint;
+    }
+
+    /**
      * The certificate chain for all the intermediate CA certificates between the
      * {@linkplain #issuedCertificate() issued certificate} and the
      * {@linkplain #rootCaCertificate()} root CA certificate
@@ -122,6 +134,14 @@ public class IssuedCertificate {
      */
     public X509Certificate rootCaCertificate() {
         return rootCaCertificate;
+    }
+
+    /**
+     * The fingerprint of the {@link #rootCaCertificate()}.
+     * @return The fingerprint.
+     */
+    public Fingerprint rootCaFingerprint() {
+        return rootCaFingerprint;
     }
 
     /**
@@ -203,7 +223,7 @@ public class IssuedCertificate {
 
         if (entry instanceof KeyStore.PrivateKeyEntry) {
             KeyStore.PrivateKeyEntry pkentry = (KeyStore.PrivateKeyEntry) entry;
-            @SuppressWarnings("unchecked")
+            @SuppressWarnings({"unchecked", "rawtypes"})
             List<X509Certificate> certificates = (List) Arrays.asList(pkentry.getCertificateChain());
             // TODO eugh
             byte[] encode = Base64.getEncoder().encode(pkentry.getPrivateKey().getEncoded());
@@ -218,9 +238,9 @@ public class IssuedCertificate {
     public String toString() {
         return "IssuedCertificate(" +
                 // Don't include key
-                ", issuedCertificate=" + PkiUtils.fingerprint(issuedCertificate) +
+                ", issuedCertificate=" + issuedFingerprint() +
                 ", intermediateChain=" + intermediateChain.stream().map(x -> PkiUtils.fingerprint(x).toString()).collect(Collectors.joining(",")) +
-                ", rootCaCertificate=" + PkiUtils.fingerprint(rootCaCertificate) +
+                ", rootCaCertificate=" + rootCaFingerprint() +
                 ')';
     }
 

@@ -32,8 +32,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.strimzi.certs.CertManager;
 import io.strimzi.certs.Subject;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.operator.common.ReconciliationLogger;
 
 import static io.strimzi.operator.common.Util.delete;
 
@@ -46,7 +46,7 @@ import static io.strimzi.operator.common.Util.delete;
  */
 public class InternalCertificateIssuer implements CertificateIssuer {
 
-    private static final Logger LOGGER = LogManager.getLogger(InternalCertificateIssuer.class);
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(InternalCertificateIssuer.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Clock clock;
@@ -60,6 +60,7 @@ public class InternalCertificateIssuer implements CertificateIssuer {
     private final Instant soonestNotAfter;
     // the trust root
     private final X509Certificate trustRoot;
+    private final Reconciliation reconciliation;
 
     public static class Token {
 
@@ -112,7 +113,8 @@ public class InternalCertificateIssuer implements CertificateIssuer {
      * @param issuingCert The cert of the CA which will be used to issue certificates.
      */
     @SuppressWarnings("unchecked")
-    InternalCertificateIssuer(Clock clock, CertManager certManager, List<X509Certificate> pathFromTrusted, byte[] issuingKey, X509Certificate issuingCert) {
+    InternalCertificateIssuer(Reconciliation reconciliation, Clock clock, CertManager certManager, List<X509Certificate> pathFromTrusted, byte[] issuingKey, X509Certificate issuingCert) {
+        this.reconciliation = reconciliation;
         this.clock = Objects.requireNonNull(clock);
         this.certManager = Objects.requireNonNull(certManager);
         this.issuingCert = Objects.requireNonNull(issuingCert);
@@ -177,14 +179,17 @@ public class InternalCertificateIssuer implements CertificateIssuer {
 
     /**
      * Create a new root CA cert and key using the given {@code certManager}.
+     * @param reconciliation The reconciliation.
      * @param clock The clock.
      * @param certManager The cert manager to use.
      * @param subject The subject for the root CA certificate.
      * @param validityDays The validity period for the root CA certificate.
      * @return An issuer instance.
      */
-    public static InternalCertificateIssuer createRootIssuer(Clock clock, CertManager certManager, Subject subject, int validityDays) {
-        LOGGER.debug("Creating StrimziCertificateIssuer with CA subject {} and root cert validity {}", subject, validityDays);
+    public static InternalCertificateIssuer createRootIssuer(
+            Reconciliation reconciliation,
+            Clock clock, CertManager certManager, Subject subject, int validityDays) {
+        LOGGER.debugCr(reconciliation, "Creating StrimziCertificateIssuer with CA subject {} and root cert validity {}", subject, validityDays);
         Path keyPath = null;
         Path certPath = null;
         byte[] key;
@@ -203,7 +208,7 @@ public class InternalCertificateIssuer implements CertificateIssuer {
             delete(keyPath);
             delete(certPath);
         }
-        return new InternalCertificateIssuer(clock, certManager, List.of(cert), key, cert);
+        return new InternalCertificateIssuer(reconciliation, clock, certManager, List.of(cert), key, cert);
     }
 
 
@@ -235,6 +240,7 @@ public class InternalCertificateIssuer implements CertificateIssuer {
 
     @Override
     public byte[] requestCertificate(Subject subject, int requestedValidityDays) throws CertificateIssuanceException {
+        LOGGER.debugCr(reconciliation, "Certificate requested: subject: {}, validity: {}", subject, requestedValidityDays);
         try {
             byte[] issuedKey;
             byte[] csr;
@@ -260,7 +266,7 @@ public class InternalCertificateIssuer implements CertificateIssuer {
         try {
             Token token = MAPPER.readValue(tokenBytes, Token.class);
             int actualValidity = adjustValidity(token.requestedValidityDays());
-            LOGGER.debug("Issuing certificate: subject: {}, requestedValidity: {}, actualValidity: {}", token.subject(), token.requestedValidityDays(), actualValidity);
+            LOGGER.debugCr(reconciliation, "Issuing certificate: subject: {}, requestedValidity: {}, actualValidity: {}", token.subject(), token.requestedValidityDays(), actualValidity);
 
             X509Certificate issuedCertificate;
 

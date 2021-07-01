@@ -108,7 +108,8 @@ public abstract class CertificateReconcileResult {
         @Override
         public String toString() {
             return "WaitingForTrust(" +
-                    "trustRoot=" + trustRoot +
+                    "trustRoot.fingerprint=" + trustRoot.fingerprint() +
+                    ", trustRoot.state=" + trustRoot.state() +
                     ')';
         }
 
@@ -145,7 +146,8 @@ public abstract class CertificateReconcileResult {
         @Override
         public String toString() {
             return "OkNoop(" +
-                    "trustRoot=" + trustRoot +
+                    "trustRoot.fingerprint=" + trustRoot.fingerprint() +
+                    ", trustRoot.state=" + trustRoot.state() +
                     ')';
         }
 
@@ -182,7 +184,8 @@ public abstract class CertificateReconcileResult {
         @Override
         public String toString() {
             return "OkIssued(" +
-                    "trustRoot=" + trustRoot +
+                    "trustRoot.fingerprint=" + trustRoot.fingerprint() +
+                    ", trustRoot.state=" + trustRoot.state() +
                     ')';
         }
 

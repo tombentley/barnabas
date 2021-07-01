@@ -35,7 +35,7 @@ public final class PkiUtils {
     public static final String BEGIN_CERTIFICATE = "-----BEGIN CERTIFICATE-----";
     public static final String END_CERTIFICATE = "-----END CERTIFICATE-----";
 
-    public static final String BEGIN_PRIVATE_KEY = "-----BEGIN PRIVAT KEY-----";
+    public static final String BEGIN_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----";
     public static final String END_PRIVATE_KEY = "-----END PRIVATE KEY-----";
 
     private PkiUtils() {
@@ -111,10 +111,9 @@ public final class PkiUtils {
     }
 
     public static String asPemKey(byte[] key) {
-        Base64.Encoder encoder = Base64.getEncoder();
-        return BEGIN_PRIVATE_KEY + '\n' +
-                encoder.encodeToString(key) +
-                '\n' + END_PRIVATE_KEY;
+        return //BEGIN_PRIVATE_KEY + '\n' +
+                new String(key, StandardCharsets.US_ASCII); //+
+                //'\n' + END_PRIVATE_KEY;
     }
 
     public static ByteBuffer asPemBuffer(X509Certificate x509) throws CertificateEncodingException {

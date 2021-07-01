@@ -16,8 +16,9 @@ public class ZooKeeperNodeIdentity extends SubjectIdentity {
     @JsonCreator
     public ZooKeeperNodeIdentity(
             @JsonProperty("nodeId") int nodeId) {
-        if (nodeId <= 0)
+        if (nodeId < 0) {
             throw new IllegalArgumentException();
+        }
         this.nodeId = nodeId;
     }
 

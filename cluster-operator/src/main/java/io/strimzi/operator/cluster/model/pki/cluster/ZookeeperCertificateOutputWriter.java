@@ -5,32 +5,37 @@
 package io.strimzi.operator.cluster.model.pki.cluster;
 
 import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.client.dsl.Resource;
+import io.strimzi.operator.cluster.model.ZookeeperCluster;
 import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
+import io.strimzi.operator.cluster.model.pki.NamedResource;
+import io.strimzi.operator.common.Reconciliation;
 
 public class ZookeeperCertificateOutputWriter extends AbstractCertificateOutputWriter<ZooKeeperNodeIdentity> {
 
-    public ZookeeperCertificateOutputWriter(Resource<Secret> secretResource) {
-        super(ZooKeeperNodeIdentity.class, secretResource, null);
+    private final String cluster;
+
+    public ZookeeperCertificateOutputWriter(Reconciliation reconciliation, String cluster, NamedResource<Secret> secretResource) {
+        super(reconciliation, ZooKeeperNodeIdentity.class, secretResource, null);
+        this.cluster = cluster;
     }
 
     @Override
     protected String p12Key(ZooKeeperNodeIdentity id) {
-        return "my-cluster-zookeeper-" + id.nodeId() + ".p12";
+        return ZookeeperCluster.zookeeperPodName(cluster, id.nodeId()) + ".p12";
     }
 
     @Override
     protected String passwordKey(ZooKeeperNodeIdentity id) {
-        return "my-cluster-zookeeper-" + id.nodeId() + ".password";
+        return ZookeeperCluster.zookeeperPodName(cluster, id.nodeId()) + ".password";
     }
 
     @Override
     protected String certKey(ZooKeeperNodeIdentity id) {
-        return "my-cluster-zookeeper-" + id.nodeId() + ".crt";
+        return ZookeeperCluster.zookeeperPodName(cluster, id.nodeId()) + ".crt";
     }
 
     @Override
     protected String keyKey(ZooKeeperNodeIdentity id) {
-        return "node-" + id.nodeId() + ".key";
+        return ZookeeperCluster.zookeeperPodName(cluster, id.nodeId()) + ".key";
     }
 }

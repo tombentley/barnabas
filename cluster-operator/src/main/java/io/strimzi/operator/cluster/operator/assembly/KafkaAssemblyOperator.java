@@ -287,13 +287,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.zkService())
                 .compose(state -> state.zkHeadlessService())
                 .compose(state -> newMode ? Future.succeededFuture(state) : state.zkGenerateCertificates(this::dateSupplier))
-                .compose(state -> !newMode ? Future.succeededFuture(state) : state.clusterCaIssueZkCertificates(this::dateSupplier))
+
                 .compose(state -> state.zkAncillaryCm())
                 .compose(state -> newMode ? Future.succeededFuture(state) : state.zkNodesSecret())
                 .compose(state -> state.zkPodDisruptionBudget())
-
-
-
 
                 .compose(state -> state.checkKafkaSpec())
                 .compose(state -> state.kafkaModelWarnings())
@@ -315,7 +312,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaIngressesReady())
                 .compose(state -> state.kafkaIngressesV1Beta1Ready())
                 .compose(state -> newMode ? Future.succeededFuture(state) : state.kafkaGenerateCertificates(this::dateSupplier))
-                .compose(state -> !newMode ? Future.succeededFuture(state) : state.clusterCaIssueBrokerCertificates(this::dateSupplier))
+                .compose(state -> newMode ? state.clusterCaIssueZkCertificates(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterCaIssueBrokerCertificates(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterCaIssueEntityOperatorCertificate(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterCaIssueCruiseControlCertificate(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterCaIssueKafkaExporterCertificate(this::dateSupplier) : Future.succeededFuture(state))
                 .compose(state -> state.customListenerCertificates())
                 .compose(state -> state.kafkaAncillaryCm())
                 .compose(state -> newMode ? Future.succeededFuture(state) : state.kafkaBrokersSecret())
@@ -323,16 +324,14 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaPodDisruptionBudget())
 
                 .compose(state -> state.getEntityOperatorDescription())
-                .compose(state -> newMode ? Future.succeededFuture(state) : state.entityOperatorSecret(this::dateSupplier))
-                .compose(state -> !newMode ? Future.succeededFuture(state) : state.clusterCaIssueEntityOperatorCertificate(this::dateSupplier))
                 .compose(state -> state.getCruiseControlDescription())
-                .compose(state -> newMode ? Future.succeededFuture(state) : state.cruiseControlSecret(this::dateSupplier))
-                .compose(state -> !newMode ? Future.succeededFuture(state) : state.clusterCaIssueCruiseControlCertificate(this::dateSupplier))
                 .compose(state -> state.getKafkaExporterDescription())
+                .compose(state -> newMode ? Future.succeededFuture(state) : state.entityOperatorSecret(this::dateSupplier))
+                .compose(state -> newMode ? Future.succeededFuture(state) : state.cruiseControlSecret(this::dateSupplier))
                 .compose(state -> newMode ? Future.succeededFuture(state) : state.kafkaExporterSecret(this::dateSupplier))
-                .compose(state -> !newMode ? Future.succeededFuture(state) : state.clusterCaIssueKafkaExporterCertificate(this::dateSupplier))
-                .compose(state -> !newMode ? Future.succeededFuture(state) : state.rollingUpdateForPki())
-                .compose(state -> !newMode ? Future.succeededFuture(state) : state.clusterPkiTrust())
+
+                .compose(state -> newMode ? state.rollingUpdateForPki() : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterPkiTrust() : Future.succeededFuture(state))
 
                 // By this point ZK nodes need to trust all client certs that will be presented to them.
                 // (ZK, Kafka, TopicOperator, UserOperator, ClusterOperator, CC)
@@ -356,7 +355,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaServiceEndpointReady())
                 .compose(state -> state.kafkaHeadlessServiceEndpointReady())
 
-                .compose(state -> state.clusterPkiTrust())
+                .compose(state -> !newMode ? Future.succeededFuture(state) : state.clusterPkiTrust())
 
                 .compose(state -> state.kafkaGetClusterId())
                 .compose(state -> state.kafkaPersistentClaimDeletion())
@@ -606,10 +605,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
             this.clusterPki = new ClusterPki(reconciliation, client, certManager, namespace,
-                    name);
+                    name, ownerReference());
             try {
                 if (isMaintenanceTimeWindowsSatisfied(dateSupplier)) {
-                    this.clusterPki.bootstrapCa(kafkaAssembly.getSpec().getClusterCa(), ownerReference());
+                    this.clusterPki.bootstrapCa(kafkaAssembly.getSpec().getClusterCa());
                 }
                 return Future.succeededFuture(this);
             } catch (CertificateException e) {

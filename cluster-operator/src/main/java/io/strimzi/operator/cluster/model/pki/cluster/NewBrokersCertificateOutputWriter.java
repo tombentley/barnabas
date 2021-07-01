@@ -5,8 +5,10 @@
 package io.strimzi.operator.cluster.model.pki.cluster;
 
 import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.client.dsl.Resource;
+import io.strimzi.operator.cluster.model.KafkaCluster;
 import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
+import io.strimzi.operator.cluster.model.pki.NamedResource;
+import io.strimzi.operator.common.Reconciliation;
 
 /**
  * Writes a secret like:
@@ -25,28 +27,31 @@ import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
  */
 public class NewBrokersCertificateOutputWriter extends AbstractCertificateOutputWriter<BrokerIdentity> {
 
-    NewBrokersCertificateOutputWriter(Resource<Secret> secretResource) {
-        super(BrokerIdentity.class, secretResource, null);
+    private final String cluster;
+
+    NewBrokersCertificateOutputWriter(Reconciliation reconciliation, String cluster, NamedResource<Secret> secretResource) {
+        super(reconciliation, BrokerIdentity.class, secretResource, null);
+        this.cluster = cluster;
     }
 
     @Override
     protected String p12Key(BrokerIdentity id) {
-        return "broker-" + id.brokerId() + ".p12";
+        return KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".p12";
     }
 
     @Override
     protected String passwordKey(BrokerIdentity id) {
-        return "broker-" + id.brokerId() + ".password";
+        return KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".password";
     }
 
     @Override
     protected String certKey(BrokerIdentity id) {
-        return null;
+        return KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".crt";
     }
 
     @Override
     protected String keyKey(BrokerIdentity id) {
-        return null;
+        return KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".key";
     }
 
 }

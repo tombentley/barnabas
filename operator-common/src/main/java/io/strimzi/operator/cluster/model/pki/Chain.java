@@ -315,7 +315,7 @@ public class Chain {
             prevKey = certificate.key;
         }
 
-        return new InternalCertificateIssuer(clock, certManager, partialCertChain, certificate.key, certificate.cert);
+        return new InternalCertificateIssuer(reconciliation, clock, certManager, partialCertChain, certificate.key, certificate.cert);
     }
 
     private void storeCertAndKey(String certificateSecret, String certificateId,

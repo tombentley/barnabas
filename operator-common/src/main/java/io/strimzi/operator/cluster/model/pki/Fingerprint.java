@@ -21,7 +21,7 @@ public class Fingerprint implements Comparable<Fingerprint> {
     static final int HEX_LENGTH = 40;
     private final byte[] bytes;
 
-    Fingerprint(byte[] bytes) {
+    public Fingerprint(byte[] bytes) {
         Objects.requireNonNull(bytes);
         if (bytes.length != BYTE_LENGTH) {
             throw new IllegalArgumentException("Wrong length: " + bytes.length);
@@ -41,7 +41,7 @@ public class Fingerprint implements Comparable<Fingerprint> {
         }
     }
 
-    Fingerprint(String hex) {
+    public Fingerprint(String hex) {
         if (hex.length() != HEX_LENGTH) {
             throw new IllegalArgumentException("Wrong number of characters in hex fingerprint: " + hex.length());
         }
