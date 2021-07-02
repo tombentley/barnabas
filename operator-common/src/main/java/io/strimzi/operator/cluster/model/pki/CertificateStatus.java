@@ -101,8 +101,12 @@ public class CertificateStatus {
     }
 
     @JsonProperty("pending")
-    public IssuedCertificate getIssuedCertificate() {
-        return issuedCertificate;
+    public IssuedCertificate issuedCertificate() {
+        if (state == CertificateState.PENDING || state == CertificateState.IN_USE) {
+            return issuedCertificate;
+        } else {
+            throw new IllegalStateException(toString());
+        }
     }
 
     public Instant notBefore() {
@@ -145,13 +149,5 @@ public class CertificateStatus {
         int result = Objects.hash(state, subjectIdentity, issuedCertificate, fingerprint);
         result = 31 * result + Arrays.hashCode(token);
         return result;
-    }
-
-    public IssuedCertificate issuedCertificate() {
-        if (state == CertificateState.PENDING || state == CertificateState.IN_USE) {
-            return issuedCertificate;
-        } else {
-            throw new IllegalStateException(toString());
-        }
     }
 }

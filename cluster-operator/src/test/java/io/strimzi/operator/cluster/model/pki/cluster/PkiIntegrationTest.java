@@ -129,10 +129,10 @@ class PkiIntegrationTest {
                  null,
                  null,
                  null);
-        NewBrokersCertificateOutputWriter outputStore = new NewBrokersCertificateOutputWriter(
+        BrokersCertificateOutputWriter outputStore = new BrokersCertificateOutputWriter(
                 reconciliation,
                 CLUSTER,
-                new NamedResource<>(client.secrets().inNamespace(NAMESPACE), brokerCertsSecretName));
+                new NamedResource<>(client.secrets().inNamespace(NAMESPACE), brokerCertsSecretName), true, true);
 
 //        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(clock,
 //                new OpenSslCertManager(clock), new Subject.Builder().withCommonName("My CA").build(), caValidity);

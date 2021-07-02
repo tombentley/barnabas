@@ -20,38 +20,47 @@ import io.strimzi.operator.common.Reconciliation;
  *   # Entries for the current secret
  *   broker-$NUM.p12: ...      # PKCS #12 archive file for storing current certificates and keys
  *   broker-$NUM.password: ... # Password for protecting the PKCS #12 archive file.
+ *   broker-$NUM.crt: ...      # PEM encoded DER certificate
+ *   broker-$NUM.key: ...      # PEM encoded DER key
  * </code></pre>
  * for consumption by broker containers.
  *
- * @see LegacyBrokersCertificateOutputWriter for the old-style support
  */
-public class NewBrokersCertificateOutputWriter extends AbstractCertificateOutputWriter<BrokerIdentity> {
+public class BrokersCertificateOutputWriter extends AbstractCertificateOutputWriter<BrokerIdentity> {
 
     private final String cluster;
+    private final boolean includePem;
+    private final boolean includeP12;
 
-    NewBrokersCertificateOutputWriter(Reconciliation reconciliation, String cluster, NamedResource<Secret> secretResource) {
+    BrokersCertificateOutputWriter(Reconciliation reconciliation,
+                                   String cluster,
+                                   NamedResource<Secret> secretResource,
+                                   boolean includePem,
+                                   boolean includeP12) {
         super(reconciliation, BrokerIdentity.class, secretResource, null);
         this.cluster = cluster;
+        this.includePem = includePem;
+        this.includeP12 = includeP12;
     }
 
     @Override
     protected String p12Key(BrokerIdentity id) {
-        return KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".p12";
+        return includeP12 ? KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".p12" : null;
     }
 
     @Override
     protected String passwordKey(BrokerIdentity id) {
-        return KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".password";
+        return includeP12 ? KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".password" : null;
     }
 
     @Override
     protected String certKey(BrokerIdentity id) {
-        return KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".crt";
+        return includePem ? KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".crt" : null;
     }
 
     @Override
     protected String keyKey(BrokerIdentity id) {
-        return KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".key";
+        return includePem ? KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".key" : null;
     }
 
 }

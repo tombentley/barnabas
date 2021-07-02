@@ -155,10 +155,10 @@ public class ClusterPki {
                 new NamedResource<>(client.secrets().inNamespace(namespace), CruiseControl.secretName(cluster))
                 );
         this.certOutputWriters = List.of(
-                new ZookeeperCertificateOutputWriter(reconciliation, cluster, new NamedResource<>(client.secrets().inNamespace(namespace),
-                        ZookeeperCluster.nodesSecretName(cluster))),
-                new NewBrokersCertificateOutputWriter(reconciliation, cluster, new NamedResource<>(client.secrets().inNamespace(namespace),
-                        KafkaCluster.brokersSecretName(cluster))),
+                new ZookeeperCertificateOutputWriter(reconciliation, cluster,
+                        new NamedResource<>(client.secrets().inNamespace(namespace), ZookeeperCluster.nodesSecretName(cluster))),
+                new BrokersCertificateOutputWriter(reconciliation, cluster, new NamedResource<>(client.secrets().inNamespace(namespace),
+                        KafkaCluster.brokersSecretName(cluster)), true, true),
                 eo(new NamedResource<>(client.secrets().inNamespace(namespace), KafkaResources.entityOperatorSecretName(cluster))),
                 co(new NamedResource<>(client.secrets().inNamespace(namespace), ClusterOperator.secretName(cluster))),
                 cc(new NamedResource<>(client.secrets().inNamespace(namespace), CruiseControl.secretName(cluster))),

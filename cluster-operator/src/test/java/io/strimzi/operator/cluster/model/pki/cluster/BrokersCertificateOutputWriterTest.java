@@ -21,10 +21,10 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-class NewBrokersCertificateOutputWriterTest extends OpensslCaTestHarness {
+class BrokersCertificateOutputWriterTest extends OpensslCaTestHarness {
 
     private Resource<Secret> secretResource;
-    private NewBrokersCertificateOutputWriter writer;
+    private BrokersCertificateOutputWriter writer;
 
     @BeforeEach
     public void setup() {
@@ -34,9 +34,9 @@ class NewBrokersCertificateOutputWriterTest extends OpensslCaTestHarness {
         var op = new MockKube().build().secrets().inNamespace(ns);
         secretResource = op
                 .withName(secretName);
-        writer = new NewBrokersCertificateOutputWriter(new Reconciliation("test", "Kafka", ns, cluster),
+        writer = new BrokersCertificateOutputWriter(new Reconciliation("test", "Kafka", ns, cluster),
                 cluster,
-                new NamedResource<Secret>(op, secretName));
+                new NamedResource<>(op, secretName), true, true);
     }
 
 
