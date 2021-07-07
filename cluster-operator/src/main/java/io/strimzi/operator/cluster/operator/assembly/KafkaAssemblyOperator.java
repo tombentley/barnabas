@@ -1186,8 +1186,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
                     // We make sure that the highest log.message.format.version or inter.broker.protocol.version version
                     // used by any of the brokers is not higher than the broker version we upgrade from.
-                    if (highestLogMessageFormatVersion != null && compareDottedVersions(versionChange.from().messageVersion(), highestLogMessageFormatVersion) < 0
-                            || highestInterBrokerProtocolVersion != null && compareDottedVersions(versionChange.from().protocolVersion(), highestInterBrokerProtocolVersion) < 0) {
+                    if ((highestLogMessageFormatVersion != null && compareDottedVersions(versionChange.from().messageVersion(), highestLogMessageFormatVersion) < 0)
+                            || (highestInterBrokerProtocolVersion != null && compareDottedVersions(versionChange.from().protocolVersion(), highestInterBrokerProtocolVersion) < 0)) {
                         LOGGER.warnCr(reconciliation, "log.message.format.version ({}) and inter.broker.protocol.version ({}) used by the brokers have to be lower or equal to the Kafka broker version we upgrade from ({})", highestLogMessageFormatVersion, highestInterBrokerProtocolVersion, versionChange.from().version());
                         throw new KafkaUpgradeException("log.message.format.version (" + highestLogMessageFormatVersion + ") and inter.broker.protocol.version (" + highestInterBrokerProtocolVersion + ") used by the brokers have to be lower or equal to the Kafka broker version we upgrade from (" + versionChange.from().version() + ")");
                     }
@@ -2944,13 +2944,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                     Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION)))));
             } else {
                 return withVoid(maybeRollKafka(kafkaDiffs.resource(),
-                        pod -> getReasonsToRestartPod(kafkaDiffs.resource(),
-                                pod,
-                                existingKafkaCertsChanged,
-                                new Foo(clusterCa.certRenewed(), clusterCa.certsRemoved(), isPodCaCertUpToDate(pod, clusterCa.caCertSecret(),
-                                        Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)),
-                                new Foo(clientsCa.certRenewed(), clientsCa.certsRemoved(), isPodCaCertUpToDate(pod, clientsCa.caCertSecret(),
-                                        Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION)))));
+                    pod -> getReasonsToRestartPod(kafkaDiffs.resource(),
+                            pod,
+                            existingKafkaCertsChanged,
+                            new Foo(clusterCa.certRenewed(), clusterCa.certsRemoved(), isPodCaCertUpToDate(pod, clusterCa.caCertSecret(),
+                                    Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)),
+                            new Foo(clientsCa.certRenewed(), clientsCa.certsRemoved(), isPodCaCertUpToDate(pod, clientsCa.caCertSecret(),
+                                    Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION)))));
             }
         }
 
@@ -3178,7 +3178,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                             Future<Void> waitForDeletion = pvcOperations.waitFor(reconciliation, namespace, pvcName, "deleted", pollingIntervalMs, timeoutMs, (ignore1, ignore2) -> {
                                 PersistentVolumeClaim deletion = pvcOperations.get(namespace, pvcName);
                                 LOGGER.traceCr(reconciliation, "Checking if {} {} in namespace {} has been deleted", pvc.getKind(), pvcName, namespace);
-                                return deletion == null || deletion.getMetadata() != null && !uid.equals(deletion.getMetadata().getUid());
+                                return deletion == null || (deletion.getMetadata() != null && !uid.equals(deletion.getMetadata().getUid()));
                             });
 
                             waitForDeletionResults.add(waitForDeletion);
