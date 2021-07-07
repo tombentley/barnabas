@@ -83,6 +83,10 @@
         <module name="ParenPad"/>
         <module name="TypecastParenPad"/>
 
+<!--        <module name="LineLength">-->
+<!--            <property name="max" value="200"/>-->
+<!--        </module>-->
+
         <!-- locale-sensitive methods should specify locale -->
         <module name="Regexp">
             <property name="format" value="\.to(Lower|Upper)Case\(\)"/>
