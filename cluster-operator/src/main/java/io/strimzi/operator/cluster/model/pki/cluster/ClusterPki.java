@@ -142,7 +142,7 @@ public class ClusterPki {
         this.cluster = Objects.requireNonNull(cluster);
         this.ownerReference = ownerReference;
 
-        this.chain = new Chain(clock,
+        this.chain = new Chain(reconciliation, clock,
                 client.secrets().inNamespace(namespace),
                 certManager);
 
@@ -187,7 +187,7 @@ public class ClusterPki {
             clusterCa.setRenewalDays(30);
         }
         long t0 = System.nanoTime();
-        issuer = chain.reconcile(reconciliation, Chain.clusterCaFromCrd(cluster, clusterCa),
+        issuer = chain.reconcile(Chain.clusterCaFromCrd(cluster, clusterCa),
                 clusterCa.isGenerateSecretOwnerReference() ? ownerReference : null);
         LOGGER.debugCr(reconciliation, "Chain reconciliation took {}ms",
                 (System.nanoTime() - t0) / 1_000_000.0);

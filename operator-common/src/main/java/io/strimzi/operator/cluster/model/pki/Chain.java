@@ -34,6 +34,7 @@ import io.strimzi.api.kafka.model.CertificateExpirationPolicy;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.certs.CertManager;
 import io.strimzi.certs.Subject;
+import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
 
@@ -107,7 +108,9 @@ public class Chain {
          */
         private final IssuanceParams issuanceParams;
 
-        public CaCertificateReference(String certificateSecret, String certificateItem, String keySecret, String keySecretItem, IssuanceParams issuanceParams) {
+        public CaCertificateReference(String certificateSecret, String certificateItem,
+                                      String keySecret, String keySecretItem,
+                                      IssuanceParams issuanceParams) {
             this.certificateSecret = Objects.requireNonNull(certificateSecret);
             this.certificateItem = Objects.requireNonNull(certificateItem);
             this.keySecret = keySecret;
@@ -232,19 +235,22 @@ public class Chain {
                                         new IssuanceParams(subject, ca.getValidityDays(), ca.getCertificateExpirationPolicy()) : null)));
     }
 
+    private final Reconciliation reconciliation;
     private final Clock clock;
     private final NonNamespaceOperation<Secret, SecretList, Resource<Secret>> secrets;
     private final CertManager certManager;
 
-    public Chain(Clock clock,
+    public Chain(Reconciliation reconciliation,
+                 Clock clock,
                  NonNamespaceOperation<Secret, SecretList, Resource<Secret>> secrets,
                  CertManager certManager) {
+        this.reconciliation = reconciliation;
         this.clock = clock;
         this.secrets = secrets;
         this.certManager = certManager;
     }
 
-    public CertificateIssuer reconcile(Reconciliation reconciliation, InternalIssuerSpec chain, OwnerReference ownerRef) throws CertificateException {
+    public CertificateIssuer reconcile(InternalIssuerSpec chain, OwnerReference ownerRef) throws CertificateException {
         Validator validator = new Validator(clock, chain.getRenewalDays());
         List<X509Certificate> partialCertChain = new ArrayList<>();
         CertAndKey certificate = null;
@@ -261,25 +267,24 @@ public class Chain {
                     certReference.getKeySecret(),
                     certReference.getKeySecretItem());
             boolean issued = false;
-            if (certificate.cert == null || anyIssued) {
+            if (certificate.cert == null || certificate.key == null || anyIssued) {
                 if (certReference.isIssuable()) {
-                    // If it doesn't exist and is issuable then issue it using the given parameters
                     LOGGER.infoCr(reconciliation, "{} does not exist; creating", certReference);
                     certificate = issue(certReference.getIssuanceParams(), prevCert, prevKey, certificate.key, pathLen);
                     anyIssued = issued = true;
                 } else {
-                    // If it does not exist and is not issuable, then throw/report error
-                    throw new PkiException(String.format("CA Certificate %s in secret %s does not exist and is not configured to allow automatic issuance",
-                            certReference.certificateItem, certReference.certificateSecret));
+                    throw new PkiException(
+                            certificate.cert == null ?
+                                    String.format("CA Certificate %s in secret %s does not exist and is not configured to allow automatic issuance",
+                                        certReference.certificateItem, certReference.certificateSecret) :
+                            certificate.key == null ?
+                                    String.format("CA Key %s in secret %s does not exist and is not configured to allow automatic issuance",
+                                            certReference.keySecretItem, certReference.keySecret) :
+                                    "A previous certificate in the path needed to be reissued, but this one could not be.");
                 }
-            } else if (certificate.key == null) {
-                throw new PkiException(String.format("CA Key %s in secret %s does not exist and is not configured to allow automatic issuance",
-                        certReference.keySecretItem, certReference.keySecret));
             }
             // Validate it using the partial chain built so far
-            var x = new ArrayList<>(partialCertChain);
-            x.add(certificate.cert);
-            Validator.Result validate = validate(validator, x, certificate.cert);
+            Validator.Result validate = validate(validator, validationChain(partialCertChain, certificate), certificate.cert);
             switch (validate.type()) {
                 case OK:
                     LOGGER.debugCr(reconciliation, "CA certificate {} is valid", certReference);
@@ -291,9 +296,7 @@ public class Chain {
                     certificate = issue(certReference.getIssuanceParams(), prevCert, prevKey, certificate.key, pathLen);
                     anyIssued = issued = true;
                     // validate the issued cert
-                    var y = new ArrayList<>(partialCertChain);
-                    y.add(certificate.cert);
-                    Validator.Result.Type type = validate(validator, y, certificate.cert).type();
+                    Validator.Result.Type type = validate(validator, validationChain(partialCertChain, certificate), certificate.cert).type();
                     if (type != Validator.Result.Type.OK) {
                         throw new IllegalStateException("Reissued certificate " + certReference + " is not valid: " + type);
                     }
@@ -301,8 +304,8 @@ public class Chain {
                 default:
                     throw new IllegalStateException("Unexpected validation result " + validate);
             }
-            // store this cert (and the key!)
-            if (issued) { //we can't do this conditionally, if we need to reconcile the owner ref
+            // store this cert and key
+            if (issued) { //TODO we can't do this conditionally, if we need to reconcile the owner ref
                 storeCertAndKey(
                         certReference.getCertificateSecret(),
                         certReference.getCertificateItem(),
@@ -316,6 +319,12 @@ public class Chain {
         }
 
         return new InternalCertificateIssuer(reconciliation, clock, certManager, partialCertChain, certificate.key, certificate.cert);
+    }
+
+    private ArrayList<X509Certificate> validationChain(List<X509Certificate> partialCertChain, CertAndKey certificate) {
+        var validationChain = new ArrayList<>(partialCertChain);
+        validationChain.add(certificate.cert);
+        return validationChain;
     }
 
     private void storeCertAndKey(String certificateSecret, String certificateId,
@@ -362,27 +371,39 @@ public class Chain {
         return validator.validate(x, Set.of(new TrustAnchor(partialChain.get(0), null)));
     }
 
-    private CertAndKey loadCertAndKey(String certificateSecret, String certificateId, String keySecret, String keyId) throws CertificateException {
-        Secret secret = secrets.withName(certificateSecret).get();
-        X509Certificate cert;
-        if (secret == null || secret.getData() == null) {
+    private CertAndKey loadCertAndKey(String certSecretName, String certificateId, String keySecretName, String keyId) throws CertificateException {
+        Secret certSecret = secrets.withName(certSecretName).get();
+        final X509Certificate cert;
+        if (certSecret == null || certSecret.getData() == null) {
+            cert = null;
+        } else if (Annotations.booleanAnnotation(certSecret, Annotations.ANNO_STRIMZI_IO_FORCE_RENEW, false)) {
+            LOGGER.infoCr(reconciliation, "Secret {} annotated with {}: No loading existing cert",
+                    certSecretName, Annotations.ANNO_STRIMZI_IO_FORCE_RENEW);
             cert = null;
         } else {
-            String src = secret.getData().get(certificateId);
+            String src = certSecret.getData().get(certificateId);
             if (src == null) {
                 cert = null;
             } else {
                 cert = PkiUtils.x509Certificate(Base64.getDecoder().decode(src));
             }
         }
-        if (!certificateSecret.equals(keySecret)) {
-            secret = secrets.withName(keySecret).get();
+
+        Secret keySecret;
+        if (certSecretName.equals(keySecretName)) {
+            keySecret = certSecret;
+        } else {
+            keySecret = secrets.withName(keySecretName).get();
         }
-        byte[] key;
-        if (secret == null || secret.getData() == null) {
+        final byte[] key;
+        if (keySecret == null || keySecret.getData() == null) {
+            key = null;
+        } else if (Annotations.booleanAnnotation(keySecret, Annotations.ANNO_STRIMZI_IO_FORCE_REPLACE, false)) {
+            LOGGER.infoCr(reconciliation, "Secret {} annotated with {}: No loading existing key",
+                    keySecretName, Annotations.ANNO_STRIMZI_IO_FORCE_REPLACE);
             key = null;
         } else {
-            String src = secret.getData().get(keyId);
+            String src = keySecret.getData().get(keyId);
             if (src == null) {
                 key = null;
             } else {

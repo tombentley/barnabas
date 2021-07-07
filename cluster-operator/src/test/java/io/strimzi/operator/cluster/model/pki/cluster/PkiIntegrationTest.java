@@ -137,7 +137,7 @@ class PkiIntegrationTest {
 //        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(clock,
 //                new OpenSslCertManager(clock), new Subject.Builder().withCommonName("My CA").build(), caValidity);
 
-        Chain chain = new Chain(clock, client.secrets(), certManager);
+        Chain chain = new Chain(reconciliation, clock, client.secrets(), certManager);
         chainCertSecretName = "ggg";
         chainKeySecretName = "hhh";
         chainCertItem = "ca.crt";
@@ -149,7 +149,7 @@ class PkiIntegrationTest {
                                         caValidity, CertificateExpirationPolicy.REPLACE_KEY))
                 )
         );
-        CertificateIssuer issuer = chain.reconcile(reconciliation, internalIssuerSpec, null);
+        CertificateIssuer issuer = chain.reconcile(internalIssuerSpec, null);
         g++;
         cc = new CertificateController(reconciliation,
                 trustPrivateState, statusStore,

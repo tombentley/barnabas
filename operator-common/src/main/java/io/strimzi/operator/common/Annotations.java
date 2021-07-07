@@ -59,6 +59,9 @@ public class Annotations {
 
     public static final String ANNO_DEP_KUBE_IO_REVISION = "deployment.kubernetes.io/revision";
 
+    public static final String ANNO_STRIMZI_IO_FORCE_REPLACE = STRIMZI_DOMAIN + "force-replace";
+    public static final String ANNO_STRIMZI_IO_FORCE_RENEW = STRIMZI_DOMAIN + "force-renew";
+
     /**
      * List of predicates that allows existing load balancer service annotations to be retained while reconciling the resources.
      */
