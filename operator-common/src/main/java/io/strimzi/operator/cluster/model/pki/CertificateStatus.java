@@ -105,7 +105,7 @@ public class CertificateStatus {
         if (state == CertificateState.PENDING || state == CertificateState.IN_USE) {
             return issuedCertificate;
         } else {
-            throw new IllegalStateException(toString());
+            return null;
         }
     }
 
