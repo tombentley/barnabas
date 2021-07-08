@@ -1342,50 +1342,50 @@ public class KafkaAssemblyOperatorTest {
                         return Future.succeededFuture();
                     }
 
-                    @Override
-                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterPkiTrust() {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> rollingUpdateForPki() {
-                        return Future.succeededFuture(this);
-                    }
+//                    @Override
+//                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+//                        return Future.succeededFuture(this);
+//                    }
+//
+//                    @Override
+//                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+//                        return Future.succeededFuture(this);
+//                    }
+//
+//                    @Override
+//                    Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
+//                        return Future.succeededFuture(this);
+//                    }
+//
+//                    @Override
+//                    Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
+//                        return Future.succeededFuture(this);
+//                    }
+//
+//                    @Override
+//                    Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
+//                        return Future.succeededFuture(this);
+//                    }
+//
+//                    @Override
+//                    Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
+//                        return Future.succeededFuture(this);
+//                    }
+//
+//                    @Override
+//                    Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
+//                        return Future.succeededFuture(this);
+//                    }
+//
+//                    @Override
+//                    Future<ReconciliationState> clusterPkiTrust() {
+//                        return Future.succeededFuture(this);
+//                    }
+//
+//                    @Override
+//                    Future<ReconciliationState> rollingUpdateForPki() {
+//                        return Future.succeededFuture(this);
+//                    }
                 };
             }
         };

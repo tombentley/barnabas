@@ -268,7 +268,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         reconcileState.initialStatus()
                 .compose(state -> state.reconcileCas(this::dateSupplier))
-                .compose(state -> newMode ? Future.succeededFuture(state) : state.clusterOperatorSecret(this::dateSupplier))
                 .compose(state -> newMode ? state.clusterCaBootstrap(this::dateSupplier) : Future.succeededFuture(state))
                 .compose(state -> newMode ? state.clusterCaIssueClusterOperatorCertificate(this::dateSupplier) : Future.succeededFuture(state))
                 .compose(state -> state.info("getKafkaClusterDescription()"))
@@ -291,7 +290,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.zkPvcs())
                 .compose(state -> state.zkService())
                 .compose(state -> state.zkHeadlessService())
-                .compose(state -> newMode ? Future.succeededFuture(state) : state.zkGenerateCertificates(this::dateSupplier))
 
                 .compose(state -> state.zkAncillaryCm())
                 .compose(state -> newMode ? Future.succeededFuture(state) : state.zkNodesSecret())
@@ -317,7 +315,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaIngressesReady())
                 .compose(state -> state.kafkaIngressesV1Beta1Ready())
                 .compose(state -> state.info("kafkaGenerateCertificates()"))
-                .compose(state -> newMode ? Future.succeededFuture(state) : state.kafkaGenerateCertificates(this::dateSupplier))
                 .compose(state -> state.info("clusterCaIssueZkCertificates()"))
                 .compose(state -> newMode ? state.clusterCaIssueZkCertificates(this::dateSupplier) : Future.succeededFuture(state))
                 .compose(state -> state.info("clusterCaIssueBrokerCertificates()"))
@@ -337,9 +334,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.getEntityOperatorDescription())
                 .compose(state -> state.getCruiseControlDescription())
                 .compose(state -> state.getKafkaExporterDescription())
-                .compose(state -> newMode ? Future.succeededFuture(state) : state.entityOperatorSecret(this::dateSupplier))
-                .compose(state -> newMode ? Future.succeededFuture(state) : state.cruiseControlSecret(this::dateSupplier))
-                .compose(state -> newMode ? Future.succeededFuture(state) : state.kafkaExporterSecret(this::dateSupplier))
                 .compose(state -> state.info("rollingUpdateForPki()"))
                 .compose(state -> newMode ? state.rollingUpdateForPki() : Future.succeededFuture(state))
                 .compose(state -> state.info("clusterPkiTrust()"))
@@ -444,7 +438,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private String highestLogMessageFormatVersion;
         private String highestInterBrokerProtocolVersion;
 
-        /* test */ ClusterCa clusterCa;
         boolean clusterCaKeyReplaced;
         /* test */ ClientsCa clientsCa;
 
@@ -1421,24 +1414,14 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> zkRollingUpdate() {
             // Scale-down and Scale-up might have change the STS. we should get a fresh one.
-            if (newMode) {
-                return zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
-                        .compose(sts -> zkSetOperations.maybeRollingUpdate(reconciliation, sts,
-                            pod -> getReasonsToRestartPod(zkDiffs.resource(), pod, existingZookeeperCertsChanged,
-                                    new Foo(clusterPki.newTrust(), false,
-                                            isPodCaCertUpToDate(pod,
-                                                    clusterCaCertSecret,
-                                                    Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)))))
-                        .map(this);
-            } else {
-                return zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
-                        .compose(sts -> zkSetOperations.maybeRollingUpdate(reconciliation, sts,
-                            pod -> getReasonsToRestartPod(zkDiffs.resource(), pod, existingZookeeperCertsChanged,
-                                    new Foo(clusterCa.certRenewed(), clusterCa.certsRemoved(), isPodCaCertUpToDate(pod,
-                                            clusterCaCertSecret,
-                                            Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)))))
-                        .map(this);
-            }
+            return zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
+                    .compose(sts -> zkSetOperations.maybeRollingUpdate(reconciliation, sts,
+                        pod -> getReasonsToRestartPod(zkDiffs.resource(), pod, existingZookeeperCertsChanged,
+                                new Foo(clusterPki.newTrust(), false,
+                                        isPodCaCertUpToDate(pod,
+                                                clusterCaCertSecret,
+                                                Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)))))
+                    .map(this);
         }
 
         /**
@@ -1617,25 +1600,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> zkHeadlessServiceEndpointReadiness() {
             return withVoid(serviceOperations.endpointReadiness(reconciliation, namespace, zkCluster.getHeadlessServiceName(), 1_000, operationTimeoutMs));
-        }
-
-        Future<ReconciliationState> zkGenerateCertificates(Supplier<Date> dateSupplier) {
-            if (newMode) {
-                return Future.succeededFuture(this);
-            }
-            Promise<ReconciliationState> resultPromise = Promise.promise();
-            vertx.createSharedWorkerExecutor("kubernetes-ops-pool").<ReconciliationState>executeBlocking(
-                future -> {
-                    try {
-                        zkCluster.generateCertificates(kafkaAssembly, clusterCa, isMaintenanceTimeWindowsSatisfied(dateSupplier));
-                        future.complete(this);
-                    } catch (Throwable e) {
-                        future.fail(e);
-                    }
-                },
-                true,
-                resultPromise);
-            return resultPromise.future();
         }
 
         Future<ReconciliationState> info(String fmt) {
@@ -2516,27 +2480,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return withVoid(CompositeFuture.join(listenerFutures));
         }
 
-        Future<ReconciliationState> kafkaGenerateCertificates(Supplier<Date> dateSupplier) {
-            if (newMode) {
-                return Future.succeededFuture(this);
-            }
-            Promise<ReconciliationState> resultPromise = Promise.promise();
-            vertx.createSharedWorkerExecutor("kubernetes-ops-pool").<ReconciliationState>executeBlocking(
-                future -> {
-                    try {
-                        kafkaCluster.generateCertificates(kafkaAssembly,
-                                clusterCa, kafkaBootstrapDnsName, kafkaBrokerDnsNames,
-                                isMaintenanceTimeWindowsSatisfied(dateSupplier));
-                        future.complete(this);
-                    } catch (Throwable e) {
-                        future.fail(e);
-                    }
-                },
-                true,
-                resultPromise);
-            return resultPromise.future();
-        }
-
         Future<ReconciliationState> customListenerCertificates() {
             List<String> secretNames = kafkaCluster.getListeners().stream()
                     .filter(listener -> listener.isTls()
@@ -2931,27 +2874,16 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         Future<ReconciliationState> kafkaRollingUpdate() {
-            if (newMode) {
-                return withVoid(maybeRollKafka(kafkaDiffs.resource(),
-                    pod -> getReasonsToRestartPod(kafkaDiffs.resource(),
-                            pod,
-                            existingKafkaCertsChanged,
-                            new Foo(clusterPki.newTrust(), false,
-                                    isPodCaCertUpToDate(pod,
-                                            clusterCaCertSecret,
-                                            Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)),
-                            new Foo(clientsCa.certRenewed(), clientsCa.certsRemoved(), isPodCaCertUpToDate(pod, clientsCa.caCertSecret(),
-                                    Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION)))));
-            } else {
-                return withVoid(maybeRollKafka(kafkaDiffs.resource(),
-                    pod -> getReasonsToRestartPod(kafkaDiffs.resource(),
-                            pod,
-                            existingKafkaCertsChanged,
-                            new Foo(clusterCa.certRenewed(), clusterCa.certsRemoved(), isPodCaCertUpToDate(pod, clusterCa.caCertSecret(),
-                                    Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)),
-                            new Foo(clientsCa.certRenewed(), clientsCa.certsRemoved(), isPodCaCertUpToDate(pod, clientsCa.caCertSecret(),
-                                    Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION)))));
-            }
+            return withVoid(maybeRollKafka(kafkaDiffs.resource(),
+                pod -> getReasonsToRestartPod(kafkaDiffs.resource(),
+                        pod,
+                        existingKafkaCertsChanged,
+                        new Foo(clusterPki.newTrust(), false,
+                                isPodCaCertUpToDate(pod,
+                                        clusterCaCertSecret,
+                                        Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)),
+                        new Foo(clientsCa.certRenewed(), clientsCa.certsRemoved(), isPodCaCertUpToDate(pod, clientsCa.caCertSecret(),
+                                Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION)))));
         }
 
         Future<ReconciliationState> kafkaScaleUp() {
@@ -3550,17 +3482,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return withVoid(Future.succeededFuture());
         }
 
-        Future<ReconciliationState> entityOperatorSecret(Supplier<Date> dateSupplier) {
-            if (newMode) {
-                return Future.succeededFuture(this);
-            }
-            return updateCertificateSecretWithDiff(EntityOperator.secretName(name), entityOperator == null ? null : entityOperator.generateSecret(clusterCa, isMaintenanceTimeWindowsSatisfied(dateSupplier)))
-                    .map(changed -> {
-                        existingEntityOperatorCertsChanged = changed;
-                        return this;
-                    });
-        }
-
         private boolean isPodUpToDate(StatefulSet sts, Pod pod) {
             final int stsGeneration = StatefulSetOperator.getStsGeneration(sts);
             final int podGeneration = StatefulSetOperator.getPodGeneration(pod);
@@ -3602,17 +3523,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     ccDeployment != null && cruiseControl != null ?
                             cruiseControl.getAncillaryConfigMapName() : CruiseControl.metricAndLogConfigsName(name),
                     cruiseControlMetricsAndLogsConfigMap));
-        }
-
-        Future<ReconciliationState> cruiseControlSecret(Supplier<Date> dateSupplier) {
-            if (newMode) {
-                return Future.succeededFuture(this);
-            }
-            return updateCertificateSecretWithDiff(CruiseControl.secretName(name), cruiseControl == null ? null : cruiseControl.generateSecret(clusterCa, isMaintenanceTimeWindowsSatisfied(dateSupplier)))
-                    .map(changed -> {
-                        existingCruiseControlCertsChanged = changed;
-                        return this;
-                    });
         }
 
         Future<ReconciliationState> cruiseControlDeployment() {
@@ -3786,37 +3696,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                     Ca.INIT_GENERATION);
         }
 
-        /**
-         * Records any existing CO secret.
-         * Updates the Secret with a new cert & key if needed.
-         * Reconciles the Secret.
-         * @param dateSupplier The current time.
-         * @return this
-         */
-        Future<ReconciliationState> clusterOperatorSecret(Supplier<Date> dateSupplier) {
-            if (newMode) {
-                return Future.succeededFuture(this);
-            }
-            oldCoSecret = clusterCa.clusterOperatorSecret();
-
-            Labels labels = Labels.fromResource(kafkaAssembly)
-                    .withStrimziKind(reconciliation.kind())
-                    .withStrimziCluster(reconciliation.name())
-                    .withKubernetesName(Labels.APPLICATION_NAME)
-                    .withKubernetesInstance(reconciliation.name())
-                    .withKubernetesPartOf(reconciliation.name())
-                    .withKubernetesManagedBy(AbstractModel.STRIMZI_CLUSTER_OPERATOR_NAME);
-
-            OwnerReference ownerRef = ownerReference();
-
-            Secret secret = ModelUtils.buildSecret(reconciliation, clusterCa, clusterCa.clusterOperatorSecret(), namespace,
-                    ClusterOperator.secretName(name), "cluster-operator", "cluster-operator",
-                    labels, ownerRef, isMaintenanceTimeWindowsSatisfied(dateSupplier));
-
-            return withVoid(secretOperations.reconcile(reconciliation, namespace, ClusterOperator.secretName(name),
-                    secret));
-        }
-
         private Storage getOldStorage(StatefulSet sts)  {
             Storage storage = null;
 
@@ -3894,17 +3773,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return withVoid(serviceAccountOperations.reconcile(reconciliation, namespace,
                     KafkaExporter.containerServiceAccountName(name),
                     exporterDeployment != null ? kafkaExporter.generateServiceAccount() : null));
-        }
-
-        Future<ReconciliationState> kafkaExporterSecret(Supplier<Date> dateSupplier) {
-            if (newMode) {
-                return Future.succeededFuture(this);
-            }
-            return updateCertificateSecretWithDiff(KafkaExporter.secretName(name), kafkaExporter == null ? null : kafkaExporter.generateSecret(clusterCa, isMaintenanceTimeWindowsSatisfied(dateSupplier)))
-                    .map(changed -> {
-                        existingKafkaExporterCertsChanged = changed;
-                        return this;
-                    });
         }
 
         Future<ReconciliationState> kafkaExporterDeployment() {
