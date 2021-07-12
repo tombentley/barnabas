@@ -57,7 +57,7 @@ import io.vertx.core.Vertx;
 // Deprecation is suppressed because of KafkaConnectS2I
 @SuppressWarnings({"checkstyle:ClassDataAbstractionCoupling", "deprecation"})
 public class ResourceOperatorSupplier {
-    public final SecretOperator secretOperations;
+    public SecretOperator secretOperations;
     public final ServiceOperator serviceOperations;
     public final RouteOperator routeOperations;
     public final ZookeeperSetOperator zkSetOperations;

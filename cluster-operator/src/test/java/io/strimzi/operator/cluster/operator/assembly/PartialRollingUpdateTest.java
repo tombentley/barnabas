@@ -154,6 +154,10 @@ public class PartialRollingUpdateTest {
             public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
                 return new ReconciliationState(r, ka) {
                     @Override
+                    boolean newTrust() {
+                        return false;
+                    }
+                    @Override
                     Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
                         return Future.succeededFuture(this);
                     }
@@ -203,7 +207,10 @@ public class PartialRollingUpdateTest {
         LOGGER.info("bootstrap reconciliation");
         CountDownLatch createAsync = new CountDownLatch(1);
         kco.reconcile(new Reconciliation("test-trigger", Kafka.RESOURCE_KIND, NAMESPACE, CLUSTER_NAME)).onComplete(ar -> {
-            context.verify(() -> assertThat(ar.succeeded(), is(true)));
+            context.verify(() -> {
+                ar.cause().printStackTrace();
+                assertThat(ar.succeeded(), is(true));
+            });
             createAsync.countDown();
         });
         if (!createAsync.await(60, TimeUnit.SECONDS)) {

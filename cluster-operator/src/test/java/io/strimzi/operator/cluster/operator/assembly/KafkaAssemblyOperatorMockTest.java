@@ -4,6 +4,10 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import java.io.File;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -44,6 +48,7 @@ import io.strimzi.api.kafka.model.storage.PersistentClaimStorage;
 import io.strimzi.api.kafka.model.storage.PersistentClaimStorageBuilder;
 import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.storage.Storage;
+import io.strimzi.certs.CertManager;
 import io.strimzi.operator.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ClusterOperator;
@@ -57,13 +62,14 @@ import io.strimzi.operator.cluster.model.KafkaCluster;
 import io.strimzi.operator.cluster.model.KafkaConfiguration;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
+import io.strimzi.operator.cluster.model.pki.TestClock;
+import io.strimzi.operator.cluster.model.pki.cluster.TestOpenSslCertManager;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperLeaderFinder;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.test.mockkube.MockKube;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -287,13 +293,20 @@ public class KafkaAssemblyOperatorMockTest {
 //        CertManager foo = TestOpenSslCertManager.record(KafkaAssemblyOperatorMockTest.class.getSimpleName() + ",z=" + params.zkReplicas + ",z=" + params.kafkaReplicas, Clock.systemUTC(),
 //                new File("."));
 //        CertManager foo = TestOpenSslCertManager.replay(KafkaAssemblyOperatorMockTest.class.getSimpleName() + ",z=" + params.zkReplicas + ",z=" + params.kafkaReplicas, new File("."));
+        TestClock clock = new TestClock(Clock.fixed(Instant.ofEpochMilli(0), ZoneId.of("UTC")));
+        CertManager certManager = TestOpenSslCertManager.replayAndRecord("foo", clock, new File("."));
 
-        operator = new KafkaAssemblyOperator(vertx, pfa, new MockCertManager(),
-                new PasswordGenerator(10, "a", "a"), supplier, config) {
+
+        operator = new KafkaAssemblyOperator(vertx, pfa, certManager,
+                new PasswordGenerator(10, "a", "a"), supplier, config, clock) {
 
             @Override
             public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
                 return new ReconciliationState(r, ka) {
+                    @Override
+                    boolean newTrust() {
+                        return false;
+                    }
                     @Override
                     Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
                         return Future.succeededFuture(this);

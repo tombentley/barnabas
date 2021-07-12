@@ -45,6 +45,7 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
                             OwnerReference ownerReference)
             throws CertificateException, InvalidKeySpecException, KeyStoreException, IOException {
         Objects.requireNonNull(subjectIdentity);
+        LOGGER.infoCr(reconciliation, "XXX Maybe write {} issued to {}", secretResource, subjectIdentity);
         if (cls.isInstance(subjectIdentity)) {
             Id id = (Id) subjectIdentity;
             Secret existingSecret = secretResource.get();

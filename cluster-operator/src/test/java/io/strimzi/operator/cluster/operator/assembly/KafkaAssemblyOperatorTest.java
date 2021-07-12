@@ -4,6 +4,10 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import java.io.File;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -81,6 +85,8 @@ import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.ListenersUtils;
 import io.strimzi.operator.cluster.model.VolumeUtils;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
+import io.strimzi.operator.cluster.model.pki.TestClock;
+import io.strimzi.operator.cluster.model.pki.cluster.TestOpenSslCertManager;
 import io.strimzi.operator.cluster.operator.resource.KafkaSetOperator;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.cluster.operator.resource.StatefulSetDiff;
@@ -89,7 +95,6 @@ import io.strimzi.operator.common.MetricsAndLogging;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
@@ -104,6 +109,7 @@ import io.strimzi.operator.common.operator.resource.RouteOperator;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.ServiceOperator;
 import io.strimzi.test.TestUtils;
+import io.strimzi.test.mockkube.MockKube;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.junit5.Checkpoint;
@@ -172,6 +178,7 @@ public class KafkaAssemblyOperatorTest {
     private static SingleVolumeStorage zkStorage;
     private static EntityOperatorSpec eoConfig;
     private static CertManager certManager;
+    private static Clock clock;
     private static PasswordGenerator passwordGenerator = new PasswordGenerator(10, "a", "a");
 
     public static class Params {
@@ -333,9 +340,10 @@ public class KafkaAssemblyOperatorTest {
 
     @BeforeEach
     public void foo() {
-//        certManager = TestOpenSslCertManager.record("foo", Clock.systemUTC(), new File("."));
+        clock = new TestClock(Clock.fixed(Instant.ofEpochMilli(0), ZoneId.of("UTC")));
+        certManager = TestOpenSslCertManager.record("foo", clock, new File("."));
 //        certManager = TestOpenSslCertManager.replay("foo", new File("."));
-        certManager = new MockCertManager();
+//        certManager = new MockCertManager();
     }
 
     @AfterAll
@@ -688,58 +696,13 @@ public class KafkaAssemblyOperatorTest {
                 certManager,
                 passwordGenerator,
                 supplier,
-                config) {
+                config, clock) {
             @Override
             public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
                 return new ReconciliationState(r, ka) {
                     @Override
                     public Future<Void> waitForQuiescence(StatefulSet sts) {
                         return Future.succeededFuture();
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterPkiTrust() {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> rollingUpdateForPki() {
-                        return Future.succeededFuture(this);
                     }
                 };
             }
@@ -987,7 +950,9 @@ public class KafkaAssemblyOperatorTest {
         PvcOperator mockPvcOps = supplier.pvcOperations;
         PodOperator mockPodOps = supplier.podOperations;
         DeploymentOperator mockDepOps = supplier.deploymentOperations;
-        SecretOperator mockSecretOps = supplier.secretOperations;
+
+        SecretOperator mockSecretOps = new SecretOperator(vertx, new MockKube().build());
+        supplier.secretOperations = mockSecretOps;
         NetworkPolicyOperator mockPolicyOps = supplier.networkPolicyOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         NodeOperator mockNodeOps = supplier.nodeOperator;
@@ -1173,35 +1138,6 @@ public class KafkaAssemblyOperatorTest {
             );
         }
 
-        // Mock Secret gets
-        when(mockSecretOps.list(anyString(), any())).thenReturn(
-                emptyList()
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, KafkaCluster.jmxSecretName(clusterName))).thenReturn(
-                Future.succeededFuture(originalKafkaCluster.generateJmxSecret())
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, ZookeeperCluster.nodesSecretName(clusterName))).thenReturn(
-                Future.succeededFuture()
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, KafkaCluster.brokersSecretName(clusterName))).thenReturn(
-                Future.succeededFuture()
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, EntityOperator.secretName(clusterName))).thenReturn(
-                Future.succeededFuture()
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, KafkaExporter.secretName(clusterName))).thenReturn(
-                Future.succeededFuture()
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, KafkaResources.clusterCaCertificateSecretName(clusterName))).thenReturn(
-                Future.succeededFuture(new Secret())
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, ClusterOperator.secretName(clusterName))).thenReturn(
-                Future.succeededFuture(new Secret())
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, CruiseControl.secretName(clusterName))).thenReturn(
-                Future.succeededFuture()
-        );
-
         // Mock NetworkPolicy get
         when(mockPolicyOps.get(clusterNamespace, KafkaCluster.networkPolicyName(clusterName))).thenReturn(originalKafkaCluster.generateNetworkPolicy(null, null));
         when(mockPolicyOps.get(clusterNamespace, ZookeeperCluster.policyName(clusterName))).thenReturn(originalZookeeperCluster.generateNetworkPolicy(null, null));
@@ -1218,50 +1154,73 @@ public class KafkaAssemblyOperatorTest {
                 originalZookeeperCluster.generateStatefulSet(openShift, null, null)
         );
         // Mock Deployment get
-        if (originalEntityOperator != null) {
-            when(mockDepOps.get(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenReturn(
-                    originalEntityOperator.generateDeployment(true, Collections.EMPTY_MAP, null, null)
-            );
-            when(mockDepOps.getAsync(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenReturn(
-                    Future.succeededFuture(originalEntityOperator.generateDeployment(true, Collections.EMPTY_MAP, null, null))
-            );
-            when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-            when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-        }
+        when(mockDepOps.rollingUpdate(any(), any(), any(), anyLong())).thenAnswer(i -> {
+            return Future.succeededFuture();
+        });
 
-        if (originalCruiseControl != null) {
-            when(mockDepOps.get(clusterNamespace, CruiseControl.cruiseControlName(clusterName))).thenReturn(
-                    originalCruiseControl.generateDeployment(true, Collections.EMPTY_MAP, null, null)
-            );
-            when(mockDepOps.getAsync(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenReturn(
-                    Future.succeededFuture(originalCruiseControl.generateDeployment(true, Collections.EMPTY_MAP, null, null))
-            );
-            when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-            when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-        }
+        when(mockDepOps.get(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenAnswer(i -> {
+            if (originalEntityOperator != null) {
+                return originalEntityOperator.generateDeployment(true, Collections.EMPTY_MAP, null, null);
+            } else {
+                return null;
+            }
+        });
+        when(mockDepOps.getAsync(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenAnswer(i -> {
+            if (originalEntityOperator != null) {
+                return Future.succeededFuture(originalEntityOperator.generateDeployment(true, Collections.EMPTY_MAP, null, null));
+            } else {
+                return Future.succeededFuture();
+            }
+        });
+        when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
+        when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
 
-        if (metrics) {
-            when(mockDepOps.get(clusterNamespace, KafkaExporter.kafkaExporterName(clusterName))).thenReturn(
-                    originalKafkaExporter.generateDeployment(true, null, null)
-            );
-            when(mockDepOps.getAsync(clusterNamespace, KafkaExporter.kafkaExporterName(clusterName))).thenReturn(
-                    Future.succeededFuture(originalKafkaExporter.generateDeployment(true, null, null))
-            );
-            when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-            when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-        }
+
+        when(mockDepOps.get(clusterNamespace, CruiseControl.cruiseControlName(clusterName))).thenAnswer(i -> {
+            if (originalCruiseControl != null) {
+                return originalCruiseControl.generateDeployment(true, Collections.EMPTY_MAP, null, null);
+            } else {
+                return null;
+            }
+        });
+        when(mockDepOps.getAsync(clusterNamespace, CruiseControl.cruiseControlName(clusterName))).thenAnswer(i -> {
+            if (originalCruiseControl != null) {
+                return Future.succeededFuture(originalCruiseControl.generateDeployment(true, Collections.EMPTY_MAP, null, null));
+            } else {
+                return Future.succeededFuture();
+            }
+        });
+        when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
+        when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
+        when(mockDepOps.get(clusterNamespace, KafkaExporter.kafkaExporterName(clusterName))).thenAnswer(i -> {
+            if (metrics) {
+                return originalKafkaExporter.generateDeployment(true, null, null);
+            } else {
+                return null;
+            }
+        });
+        when(mockDepOps.getAsync(clusterNamespace, KafkaExporter.kafkaExporterName(clusterName))).thenAnswer(i -> {
+            if (metrics) {
+                return Future.succeededFuture(originalKafkaExporter.generateDeployment(true, null, null));
+            } else {
+                return Future.succeededFuture();
+            }
+        });
+        when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
+        when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
+
 
         // Mock CM patch
         Set<String> metricsCms = set();
@@ -1279,8 +1238,6 @@ public class KafkaAssemblyOperatorTest {
         // Mock Service patch (both service and headless service
         ArgumentCaptor<String> patchedServicesCaptor = ArgumentCaptor.forClass(String.class);
         when(mockServiceOps.reconcile(any(), eq(clusterNamespace), patchedServicesCaptor.capture(), any())).thenReturn(Future.succeededFuture());
-        // Mock Secrets patch
-        when(mockSecretOps.reconcile(any(), eq(clusterNamespace), any(), any())).thenReturn(Future.succeededFuture());
 
         // Mock NetworkPolicy patch
         when(mockPolicyOps.reconcile(any(), eq(clusterNamespace), any(), any())).thenReturn(Future.succeededFuture());
@@ -1333,7 +1290,7 @@ public class KafkaAssemblyOperatorTest {
                 certManager,
                 passwordGenerator,
                 supplier,
-                config) {
+                config, clock) {
             @Override
             public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
                 return new ReconciliationState(r, ka) {
@@ -1341,51 +1298,6 @@ public class KafkaAssemblyOperatorTest {
                     public Future<Void> waitForQuiescence(StatefulSet sts) {
                         return Future.succeededFuture();
                     }
-
-//                    @Override
-//                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
-//                        return Future.succeededFuture(this);
-//                    }
-//
-//                    @Override
-//                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
-//                        return Future.succeededFuture(this);
-//                    }
-//
-//                    @Override
-//                    Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
-//                        return Future.succeededFuture(this);
-//                    }
-//
-//                    @Override
-//                    Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
-//                        return Future.succeededFuture(this);
-//                    }
-//
-//                    @Override
-//                    Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
-//                        return Future.succeededFuture(this);
-//                    }
-//
-//                    @Override
-//                    Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
-//                        return Future.succeededFuture(this);
-//                    }
-//
-//                    @Override
-//                    Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
-//                        return Future.succeededFuture(this);
-//                    }
-//
-//                    @Override
-//                    Future<ReconciliationState> clusterPkiTrust() {
-//                        return Future.succeededFuture(this);
-//                    }
-//
-//                    @Override
-//                    Future<ReconciliationState> rollingUpdateForPki() {
-//                        return Future.succeededFuture(this);
-//                    }
                 };
             }
         };
@@ -1512,46 +1424,6 @@ public class KafkaAssemblyOperatorTest {
                     Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
                         return Future.succeededFuture(this);
                     }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterPkiTrust() {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> rollingUpdateForPki() {
-                        return Future.succeededFuture(this);
-                    }
                 };
             }
         };
@@ -1642,50 +1514,7 @@ public class KafkaAssemblyOperatorTest {
             @Override
             public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
                 return new ReconciliationState(r, ka) {
-                    @Override
-                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
 
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterPkiTrust() {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> rollingUpdateForPki() {
-                        return Future.succeededFuture(this);
-                    }
                 };
             }
         };

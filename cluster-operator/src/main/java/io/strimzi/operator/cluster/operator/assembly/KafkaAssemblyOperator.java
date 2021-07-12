@@ -10,6 +10,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
 import java.text.ParseException;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
@@ -182,7 +183,9 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
     private final AdminClientProvider adminClientProvider;
     private final KubernetesClient client;
     private final CertManager certManager;
+    private final Clock clock;
     private final PasswordGenerator passwordGenerator;
+    private final ClusterPki clusterPki;
     private boolean newMode = true;
 
     /**
@@ -197,8 +200,15 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                  CertManager certManager, PasswordGenerator passwordGenerator,
                                  ResourceOperatorSupplier supplier,
                                  ClusterOperatorConfig config) {
+        this(vertx, pfa, certManager, passwordGenerator, supplier, config, Clock.systemUTC());
+    }
+    public KafkaAssemblyOperator(Vertx vertx, PlatformFeaturesAvailability pfa,
+                                 CertManager certManager, PasswordGenerator passwordGenerator,
+                                 ResourceOperatorSupplier supplier,
+                                 ClusterOperatorConfig config, Clock clock) {
         super(vertx, pfa, Kafka.RESOURCE_KIND, supplier.kafkaOperator, supplier, config);
         this.certManager = certManager;
+        this.clock = clock;
         this.passwordGenerator = passwordGenerator;
         this.operationTimeoutMs = config.getOperationTimeoutMs();
         this.operatorNamespace = config.getOperatorNamespace();
@@ -220,6 +230,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         this.zkScalerProvider = supplier.zkScalerProvider;
         this.adminClientProvider = supplier.adminClientProvider;
         this.client = supplier.client;
+        this.clusterPki = new ClusterPki(clock, client, certManager);
     }
 
     @Override
@@ -262,6 +273,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
     }
 
 
+
     @SuppressWarnings("checkstyle:MethodLength")
     Future<Void> reconcile(ReconciliationState reconcileState)  {
         Promise<Void> chainPromise = Promise.promise();
@@ -277,7 +289,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 // Roll everything if a new CA is added to the trust store.
                 .compose(state -> state.info("rollingUpdateForNewCaKey()"))
                 .compose(state -> state.rollingUpdateForNewCaKey(
-                        newMode ? state.clusterPki.newTrust() : state.clusterCaKeyReplaced,
+                        newMode ? state.newTrust() : state.clusterCaKeyReplaced,
                         state.clientsCa.keyReplaced()))
 
                 .compose(state -> state.getZookeeperDescription())
@@ -356,7 +368,9 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.info("zkStatefulSet()"))
                 .compose(state -> state.zkStatefulSet())
                 .compose(state -> state.zkScalingDown())
+                .compose(state -> state.info("zkRollingUpdate()"))
                 .compose(state -> state.zkRollingUpdate())
+                .compose(state -> state.info("zkPodsReady()"))
                 .compose(state -> state.zkPodsReady())
                 .compose(state -> state.zkScalingUp())
                 .compose(state -> state.zkScalingCheck())
@@ -491,9 +505,9 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private JmxTrans jmxTrans = null;
         private ConfigMap jmxTransConfigMap = null;
         private Deployment jmxTransDeployment = null;
-        private ClusterPki clusterPki;
         private Secret clusterCaCertSecret;
         private Secret clusterCaKeySecret;
+        private ClusterPki.Result1 foo;
 
         ReconciliationState(Reconciliation reconciliation, Kafka kafkaAssembly) {
             this.reconciliation = reconciliation;
@@ -645,63 +659,62 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
-            this.clusterPki = new ClusterPki(reconciliation, client, certManager, namespace,
-                    name, ownerReference());
             return async(dateSupplier, () -> {
-                this.clusterPki.bootstrapCa(kafkaAssembly.getSpec().getClusterCa());
+                this.foo = clusterPki.bootstrapCa(reconciliation, namespace, name, kafkaAssembly.getSpec().getClusterCa(), ownerReference());
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterPki.issueZkCertificates(kafkaAssembly);
+                foo.issueZkCertificates(kafkaAssembly);
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterPki.issueKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames);
+                foo.issueKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames);
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterPki.issueEoCertificate(kafkaAssembly);
+                foo.issueEoCertificate(kafkaAssembly);
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterPki.issueCoCertificate(kafkaAssembly);
+                foo.issueCoCertificate(kafkaAssembly);
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterPki.issueKafkaExporterCertificates(kafkaAssembly);
+                foo.issueKafkaExporterCertificates(kafkaAssembly);
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterPki.issueCcCertificate(kafkaAssembly);
+                foo.issueCcCertificate(kafkaAssembly);
                 return null;
             });
         }
 
         Future<ReconciliationState> rollingUpdateForPki() {
-            return rollingUpdateForNewCaKey(clusterPki.newTrust(), false);
+            return rollingUpdateForNewCaKey(newTrust(), false);
         }
 
         Future<ReconciliationState> clusterPkiTrust() {
             try {
-                clusterPki.trust();
+                clusterPki.trust(foo);
+                clusterCaCertSecret = secretOperations.get(namespace, KafkaResources.clusterCaCertificateSecretName(name));
             } catch (CertificateEncodingException e) {
                 return Future.failedFuture(e);
             }
@@ -925,7 +938,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          * @return  Succeeded future if it succeeded, failed otherwise.
          */
         Future<Void> rollDeploymentIfExists(String deploymentName, String reasons)  {
-            return deploymentOperations.getAsync(namespace, deploymentName)
+            Future<Deployment> async = deploymentOperations.getAsync(namespace, deploymentName);
+            return async
                     .compose(dep -> {
                         if (dep != null) {
                             LOGGER.debugCr(reconciliation, "Rolling Deployment {} to {}", deploymentName, reasons);
@@ -1417,7 +1431,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
                     .compose(sts -> zkSetOperations.maybeRollingUpdate(reconciliation, sts,
                         pod -> getReasonsToRestartPod(zkDiffs.resource(), pod, existingZookeeperCertsChanged,
-                                new Foo(clusterPki.newTrust(), false,
+                                new Foo(newTrust(), false,
                                         isPodCaCertUpToDate(pod,
                                                 clusterCaCertSecret,
                                                 Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)))))
@@ -2878,7 +2892,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 pod -> getReasonsToRestartPod(kafkaDiffs.resource(),
                         pod,
                         existingKafkaCertsChanged,
-                        new Foo(clusterPki.newTrust(), false,
+                        new Foo(newTrust(), false,
                                 isPodCaCertUpToDate(pod,
                                         clusterCaCertSecret,
                                         Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)),
@@ -3586,8 +3600,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private boolean isPodCaCertUpToDate(Pod pod, Secret caCertSecret, String podAnnotation) {
             final int caCertGeneration = getCaCertGeneration(caCertSecret);
             final int podCaCertGeneration =
-                    Annotations.intAnnotation(pod, podAnnotation, Ca.INIT_GENERATION);
+                    pod == null ? Ca.INIT_GENERATION : Annotations.intAnnotation(pod, podAnnotation, Ca.INIT_GENERATION);
             return caCertGeneration == podCaCertGeneration;
+        }
+
+        boolean newTrust() {
+            return foo.newTrust();
         }
 
         class Foo {

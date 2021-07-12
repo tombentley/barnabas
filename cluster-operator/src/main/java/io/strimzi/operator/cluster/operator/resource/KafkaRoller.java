@@ -297,7 +297,7 @@ public class KafkaRoller {
                 } else {
                     long delay1 = ctx.backOff.delayMs();
                     LOGGER.infoCr(reconciliation, "Could not roll pod {} due to {}, retrying after at least {}ms",
-                            podId, e, delay1);
+                            podId, e, delay1, e);
                     schedule(podId, delay1, TimeUnit.MILLISECONDS);
                 }
             }
