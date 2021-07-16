@@ -4,6 +4,26 @@
  */
 package io.strimzi.operator.user.model;
 
+import javax.naming.InvalidNameException;
+import javax.naming.ldap.LdapName;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStoreException;
+import java.security.cert.CertificateEncodingException;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
+import java.security.spec.InvalidKeySpecException;
+import java.time.Clock;
+import java.util.Base64;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
@@ -19,33 +39,26 @@ import io.strimzi.api.kafka.model.KafkaUserTlsClientAuthentication;
 import io.strimzi.certs.CertAndKey;
 import io.strimzi.certs.CertManager;
 import io.strimzi.certs.OpenSslCertManager;
-import io.strimzi.operator.cluster.model.ClientsCa;
+import io.strimzi.certs.Subject;
 import io.strimzi.operator.cluster.model.InvalidResourceException;
+import io.strimzi.operator.cluster.model.pki.InternalCertificateIssuer;
+import io.strimzi.operator.cluster.model.pki.IssuedCertificate;
+import io.strimzi.operator.cluster.model.pki.PkiUtils;
+import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.user.UserOperatorConfig;
 import io.strimzi.operator.user.model.acl.SimpleAclRule;
-import io.strimzi.operator.common.PasswordGenerator;
-
-import javax.naming.InvalidNameException;
-import javax.naming.ldap.LdapName;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 public class KafkaUserModel {
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(KafkaUserModel.class.getName());
 
     public static final String KEY_PASSWORD = "password";
     public static final String KEY_SASL_JAAS_CONFIG = "sasl.jaas.config";
+
+    private final Clock clock = Clock.systemUTC();
 
     protected final String namespace;
     protected final String name;
@@ -161,6 +174,13 @@ public class KafkaUserModel {
         return createSecret(data);
     }
 
+    private boolean isExpiring(String userCrt, int renewalDays) throws CertificateException {
+        X509Certificate x509 = PkiUtils.x509Certificate(Base64.getDecoder().decode(userCrt));
+        Date notAfter = x509.getNotAfter();
+        long msTillExpired = notAfter.getTime() - clock.millis();
+        return msTillExpired < renewalDays * 24L * 60L * 60L * 1000L;
+    }
+
     /**
      * Manage certificates generation based on those already present in the Secrets
      *
@@ -185,16 +205,11 @@ public class KafkaUserModel {
             throw new NoCertificateSecretException("The Clients CA Key Secret is missing");
         } else {
             try {
-                ClientsCa clientsCa = new ClientsCa(reconciliation, certManager,
-                        passwordGenerator,
-                        clientsCaCertSecret.getMetadata().getName(),
-                        clientsCaCertSecret,
-                        clientsCaCertSecret.getMetadata().getName(),
-                        clientsCaKeySecret,
-                        validityDays,
-                        renewalDays,
-                        false, null);
-                final String caCert = clientsCa.currentCaCertBase64();
+                byte[] issuingKey = Base64.getDecoder().decode(clientsCaKeySecret.getData().get("ca.key"));
+                final String caCert = clientsCaCertSecret.getData().get("ca.crt");
+
+                Subject subject = new Subject.Builder().withCommonName(name).build();
+
                 CertAndKey userCertAndKey = null;
                 if (userSecret != null) {
                     // Secret already exists -> lets verify if it has keys from the same CA
@@ -210,7 +225,7 @@ public class KafkaUserModel {
                             && !userCrt.isEmpty()
                             && userKey != null
                             && !userKey.isEmpty()
-                            && !clientsCa.isExpiring(userSecret, "user.crt")) {
+                            && !isExpiring(userCrt, renewalDays)) {
 
                         if (userKeyStore != null
                                 && !userKeyStore.isEmpty()
@@ -226,25 +241,50 @@ public class KafkaUserModel {
                         } else {
                             // coming from an older operator version, the user secret exists but without keystore and password
                             try {
-                                userCertAndKey = clientsCa.addKeyAndCertToKeyStore(name,
+                                String keystorePassword = passwordGenerator.generate();
+                                CertAndKey result = new CertAndKey(
                                         decodeFromSecret(userSecret, "user.key"),
-                                        decodeFromSecret(userSecret, "user.crt"));
-                            } catch (IOException e) {
+                                        decodeFromSecret(userSecret, "user.crt"),
+                                        null,
+                                        new IssuedCertificate(decodeFromSecret(userSecret, "user.key"),
+                                                PkiUtils.x509Certificate(decodeFromSecret(userSecret, "user.crt")),
+                                                List.of(),
+                                                PkiUtils.x509Certificate(decodeFromSecret(clientsCaCertSecret, "ca.crt"))).toPkcs12(keystorePassword.toCharArray()),
+                                        keystorePassword);
+//                                userCertAndKey = clientsCa.addKeyAndCertToKeyStore(name,
+//                                        decodeFromSecret(userSecret, "user.key"),
+//                                        decodeFromSecret(userSecret, "user.crt"));
+                            } catch (IOException | KeyStoreException | InvalidKeySpecException e) {
                                 LOGGER.errorCr(reconciliation, "Error generating the keystore for user {}", name, e);
                             }
                         }
                     } else {
-                        userCertAndKey = clientsCa.generateSignedCert(name);
+                        X509Certificate issuingCert = PkiUtils.x509Certificate(Base64.getDecoder().decode(caCert));
+                        InternalCertificateIssuer issuer = new InternalCertificateIssuer(reconciliation, clock, certManager, null, issuingKey, issuingCert);
+                        userCertAndKey = generateSignedCert(validityDays, issuer, subject);
                     }
                 } else {
-                    userCertAndKey = clientsCa.generateSignedCert(name);
+                    X509Certificate issuingCert = PkiUtils.x509Certificate(Base64.getDecoder().decode(caCert));
+                    InternalCertificateIssuer issuer = new InternalCertificateIssuer(reconciliation, clock, certManager, null, issuingKey, issuingCert);
+                    userCertAndKey = generateSignedCert(validityDays, issuer, subject);
                 }
                 return tlsSecret(caCert, userCertAndKey);
-            } catch (IOException e) {
-                LOGGER.errorCr(reconciliation, "Error generating signed certificate for user {}", name, e);
-                return null;
+            } catch (CertificateException e) {
+                throw new RuntimeException(e);
             }
         }
+    }
+
+    private CertAndKey generateSignedCert(int validityDays, InternalCertificateIssuer issuer, Subject subject) throws CertificateEncodingException {
+        byte[] tokenBytes = issuer.requestCertificate(subject, validityDays);
+        Optional<IssuedCertificate> issuedOpt = issuer.pollForRequestedCertificate(tokenBytes);
+        // The interface is designed to accommodate asynchrony between request and issuance
+        // but we know the InternalCertificateIssuer will always be able to complete the request
+        // on first poll.
+        IssuedCertificate issued = issuedOpt.orElseThrow();
+        return new CertAndKey(
+                issued.privateKey(),
+                issued.issuedCertBytes());
     }
 
     /**
