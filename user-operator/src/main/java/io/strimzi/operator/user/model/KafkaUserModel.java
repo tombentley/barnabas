@@ -52,9 +52,6 @@ public class KafkaUserModel {
     protected final Labels labels;
 
     protected KafkaUserAuthentication authentication;
-    protected String caCert;
-    protected CertAndKey userCertAndKey;
-    protected String scramSha512Password;
 
     protected Set<SimpleAclRule> simpleAclRules = null;
     public static final String ENV_VAR_CLIENTS_CA_VALIDITY = "STRIMZI_CA_VALIDITY";
@@ -72,6 +69,7 @@ public class KafkaUserModel {
     private Map<String, String> templateSecretAnnotations;
 
     private final String secretPrefix;
+    private Secret userSecret;
 
     /**
      * Constructor
@@ -117,15 +115,24 @@ public class KafkaUserModel {
         result.setOwnerReference(kafkaUser);
         result.setAuthentication(kafkaUser.getSpec().getAuthentication());
 
+        if (kafkaUser.getSpec().getTemplate() != null
+                && kafkaUser.getSpec().getTemplate().getSecret() != null
+                && kafkaUser.getSpec().getTemplate().getSecret().getMetadata() != null)  {
+            result.templateSecretLabels = kafkaUser.getSpec().getTemplate().getSecret().getMetadata().getLabels();
+            result.templateSecretAnnotations = kafkaUser.getSpec().getTemplate().getSecret().getMetadata().getAnnotations();
+        }
+
         if (kafkaUser.getSpec().getAuthentication() instanceof KafkaUserTlsClientAuthentication) {
             if (kafkaUser.getMetadata().getName().length() > OpenSslCertManager.MAXIMUM_CN_LENGTH)    {
                 throw new InvalidResourceException("Users with TLS client authentication can have a username (name of the KafkaUser custom resource) only up to 64 characters long.");
             }
 
-            result.maybeGenerateCertificates(reconciliation, certManager, passwordGenerator, clientsCaCert, clientsCaKey, userSecret,
+            result.userSecret = result.maybeGenerateCertificates(reconciliation, certManager, passwordGenerator, clientsCaCert, clientsCaKey, userSecret,
                     UserOperatorConfig.getClientsCaValidityDays(), UserOperatorConfig.getClientsCaRenewalDays());
         } else if (kafkaUser.getSpec().getAuthentication() instanceof KafkaUserScramSha512ClientAuthentication) {
-            result.maybeGeneratePassword(reconciliation, passwordGenerator, userSecret);
+            result.userSecret = result.maybeGeneratePassword(reconciliation, passwordGenerator, userSecret);
+        } else {
+            result.userSecret = null;
         }
 
         if (kafkaUser.getSpec().getAuthorization() != null && kafkaUser.getSpec().getAuthorization().getType().equals(KafkaUserAuthorizationSimple.TYPE_SIMPLE)) {
@@ -134,39 +141,24 @@ public class KafkaUserModel {
         }
         result.setQuotas(kafkaUser.getSpec().getQuotas());
 
-        if (kafkaUser.getSpec().getTemplate() != null
-                && kafkaUser.getSpec().getTemplate().getSecret() != null
-                && kafkaUser.getSpec().getTemplate().getSecret().getMetadata() != null)  {
-            result.templateSecretLabels = kafkaUser.getSpec().getTemplate().getSecret().getMetadata().getLabels();
-            result.templateSecretAnnotations = kafkaUser.getSpec().getTemplate().getSecret().getMetadata().getAnnotations();
-        }
-
         return result;
     }
 
-    /**
-     * Generates secret containing the certificate for TLS client auth when TLS client auth is enabled for this user.
-     * Returns null otherwise.
-     *
-     * @return The secret.
-     */
-    public Secret generateSecret()  {
-        if (authentication instanceof KafkaUserTlsClientAuthentication) {
-            Map<String, String> data = new HashMap<>(5);
-            data.put("ca.crt", caCert);
-            data.put("user.key", userCertAndKey.keyAsBase64String());
-            data.put("user.crt", userCertAndKey.certAsBase64String());
-            data.put("user.p12", userCertAndKey.keyStoreAsBase64String());
-            data.put("user.password", userCertAndKey.storePasswordAsBase64String());
-            return createSecret(data);
-        } else if (authentication instanceof KafkaUserScramSha512ClientAuthentication) {
-            Map<String, String> data = new HashMap<>(2);
-            data.put(KafkaUserModel.KEY_PASSWORD, Base64.getEncoder().encodeToString(this.scramSha512Password.getBytes(StandardCharsets.US_ASCII)));
-            data.put(KafkaUserModel.KEY_SASL_JAAS_CONFIG, Base64.getEncoder().encodeToString(getSaslJsonConfig().getBytes(StandardCharsets.US_ASCII)));
-            return createSecret(data);
-        } else {
-            return null;
-        }
+    private Secret scramShaSecret(String scramSha512Password) {
+        Map<String, String> data = new HashMap<>(2);
+        data.put(KafkaUserModel.KEY_PASSWORD, Base64.getEncoder().encodeToString(scramSha512Password.getBytes(StandardCharsets.US_ASCII)));
+        data.put(KafkaUserModel.KEY_SASL_JAAS_CONFIG, Base64.getEncoder().encodeToString(getSaslJaasConfig(scramSha512Password).getBytes(StandardCharsets.US_ASCII)));
+        return createSecret(data);
+    }
+
+    private Secret tlsSecret(String caCert, CertAndKey userCertAndKey) {
+        Map<String, String> data = new HashMap<>(5);
+        data.put("ca.crt", caCert);
+        data.put("user.key", userCertAndKey.keyAsBase64String());
+        data.put("user.crt", userCertAndKey.certAsBase64String());
+        data.put("user.p12", userCertAndKey.keyStoreAsBase64String());
+        data.put("user.password", userCertAndKey.storePasswordAsBase64String());
+        return createSecret(data);
     }
 
     /**
@@ -180,73 +172,78 @@ public class KafkaUserModel {
      * @param userSecret Secret with the user certificate
      * @param validityDays The number of days the certificate should be valid for.
      * @param renewalDays The renewal days.
+     * @return The user Secret containing the user's TLS certificate and key (in PEM and PKCS#12 with password)
+     * together with the client's CA certificate used to sign the user certificate.
      */
     @SuppressWarnings("checkstyle:BooleanExpressionComplexity")
-    public void maybeGenerateCertificates(Reconciliation reconciliation, CertManager certManager, PasswordGenerator passwordGenerator,
-                                          Secret clientsCaCertSecret, Secret clientsCaKeySecret,
-                                          Secret userSecret, int validityDays, int renewalDays) {
+    public Secret maybeGenerateCertificates(Reconciliation reconciliation, CertManager certManager, PasswordGenerator passwordGenerator,
+                                            Secret clientsCaCertSecret, Secret clientsCaKeySecret,
+                                            Secret userSecret, int validityDays, int renewalDays) {
         if (clientsCaCertSecret == null) {
             throw new NoCertificateSecretException("The Clients CA Cert Secret is missing");
         } else if (clientsCaKeySecret == null) {
             throw new NoCertificateSecretException("The Clients CA Key Secret is missing");
         } else {
-            ClientsCa clientsCa = new ClientsCa(reconciliation, certManager,
-                    passwordGenerator,
-                    clientsCaCertSecret.getMetadata().getName(),
-                    clientsCaCertSecret,
-                    clientsCaCertSecret.getMetadata().getName(),
-                    clientsCaKeySecret,
-                    validityDays,
-                    renewalDays,
-                    false, null);
-            this.caCert = clientsCa.currentCaCertBase64();
-            if (userSecret != null) {
-                // Secret already exists -> lets verify if it has keys from the same CA
-                String originalCaCrt = clientsCaCertSecret.getData().get("ca.crt");
-                String caCrt = userSecret.getData().get("ca.crt");
-                String userCrt = userSecret.getData().get("user.crt");
-                String userKey = userSecret.getData().get("user.key");
-                String userKeyStore = userSecret.getData().get("user.p12");
-                String userKeyStorePassword = userSecret.getData().get("user.password");
-                if (originalCaCrt != null
-                        && originalCaCrt.equals(caCrt)
-                        && userCrt != null
-                        && !userCrt.isEmpty()
-                        && userKey != null
-                        && !userKey.isEmpty()
-                        && !clientsCa.isExpiring(userSecret, "user.crt")) {
-
-                    if (userKeyStore != null
-                            && !userKeyStore.isEmpty()
-                            && userKeyStorePassword != null
-                            && !userKeyStorePassword.isEmpty()) {
-
-                        this.userCertAndKey = new CertAndKey(
-                                decodeFromSecret(userSecret, "user.key"),
-                                decodeFromSecret(userSecret, "user.crt"),
-                                null,
-                                decodeFromSecret(userSecret, "user.p12"),
-                                new String(decodeFromSecret(userSecret, "user.password"), StandardCharsets.US_ASCII));
-                    } else {
-                        // coming from an older operator version, the user secret exists but without keystore and password
-                        try {
-                            this.userCertAndKey = clientsCa.addKeyAndCertToKeyStore(name,
-                                    decodeFromSecret(userSecret, "user.key"),
-                                    decodeFromSecret(userSecret, "user.crt"));
-                        } catch (IOException e) {
-                            LOGGER.errorCr(reconciliation, "Error generating the keystore for user {}", name, e);
-                        }
-                    }
-                    return;
-                }
-            }
-
             try {
-                this.userCertAndKey = clientsCa.generateSignedCert(name);
+                ClientsCa clientsCa = new ClientsCa(reconciliation, certManager,
+                        passwordGenerator,
+                        clientsCaCertSecret.getMetadata().getName(),
+                        clientsCaCertSecret,
+                        clientsCaCertSecret.getMetadata().getName(),
+                        clientsCaKeySecret,
+                        validityDays,
+                        renewalDays,
+                        false, null);
+                final String caCert = clientsCa.currentCaCertBase64();
+                CertAndKey userCertAndKey = null;
+                if (userSecret != null) {
+                    // Secret already exists -> lets verify if it has keys from the same CA
+                    String originalCaCrt = clientsCaCertSecret.getData().get("ca.crt");
+                    String caCrt = userSecret.getData().get("ca.crt");
+                    String userCrt = userSecret.getData().get("user.crt");
+                    String userKey = userSecret.getData().get("user.key");
+                    String userKeyStore = userSecret.getData().get("user.p12");
+                    String userKeyStorePassword = userSecret.getData().get("user.password");
+                    if (originalCaCrt != null
+                            && originalCaCrt.equals(caCrt)
+                            && userCrt != null
+                            && !userCrt.isEmpty()
+                            && userKey != null
+                            && !userKey.isEmpty()
+                            && !clientsCa.isExpiring(userSecret, "user.crt")) {
+
+                        if (userKeyStore != null
+                                && !userKeyStore.isEmpty()
+                                && userKeyStorePassword != null
+                                && !userKeyStorePassword.isEmpty()) {
+
+                            userCertAndKey = new CertAndKey(
+                                    decodeFromSecret(userSecret, "user.key"),
+                                    decodeFromSecret(userSecret, "user.crt"),
+                                    null,
+                                    decodeFromSecret(userSecret, "user.p12"),
+                                    new String(decodeFromSecret(userSecret, "user.password"), StandardCharsets.US_ASCII));
+                        } else {
+                            // coming from an older operator version, the user secret exists but without keystore and password
+                            try {
+                                userCertAndKey = clientsCa.addKeyAndCertToKeyStore(name,
+                                        decodeFromSecret(userSecret, "user.key"),
+                                        decodeFromSecret(userSecret, "user.crt"));
+                            } catch (IOException e) {
+                                LOGGER.errorCr(reconciliation, "Error generating the keystore for user {}", name, e);
+                            }
+                        }
+                    } else {
+                        userCertAndKey = clientsCa.generateSignedCert(name);
+                    }
+                } else {
+                    userCertAndKey = clientsCa.generateSignedCert(name);
+                }
+                return tlsSecret(caCert, userCertAndKey);
             } catch (IOException e) {
                 LOGGER.errorCr(reconciliation, "Error generating signed certificate for user {}", name, e);
+                return null;
             }
-
         }
     }
 
@@ -254,18 +251,24 @@ public class KafkaUserModel {
      * @param reconciliation The reconciliation.
      * @param generator The password generator.
      * @param userSecret The Secret containing any existing password.
+     * @return The user Secret containing the password
      */
-    public void maybeGeneratePassword(Reconciliation reconciliation, PasswordGenerator generator, Secret userSecret) {
+    public Secret maybeGeneratePassword(Reconciliation reconciliation, PasswordGenerator generator, Secret userSecret) {
+        final String scramSha512Password;
         if (userSecret != null) {
             // Secret already exists -> lets verify if it has a password
             String password = userSecret.getData().get(KEY_PASSWORD);
             if (password != null && !password.isEmpty()) {
-                this.scramSha512Password = new String(Base64.getDecoder().decode(password), StandardCharsets.US_ASCII);
-                return;
+                scramSha512Password = new String(Base64.getDecoder().decode(password), StandardCharsets.US_ASCII);
+            } else {
+                LOGGER.debugCr(reconciliation, "Generating user password");
+                scramSha512Password = generator.generate();
             }
+        } else {
+            LOGGER.debugCr(reconciliation, "Generating user password");
+            scramSha512Password = generator.generate();
         }
-        LOGGER.debugCr(reconciliation, "Generating user password");
-        this.scramSha512Password = generator.generate();
+        return scramShaSecret(scramSha512Password);
 
     }
 
@@ -409,7 +412,7 @@ public class KafkaUserModel {
      * @param password The SCRAM password.
      * @return The JAAS configuration string.
      */
-    public static String getSaslJsonConfig(String username, String password) {
+    public static String getSaslJaasConfig(String username, String password) {
         return "org.apache.kafka.common.security.scram.ScramLoginModule required username=\"" + username + "\" password=\"" + password + "\";";
     }
 
@@ -505,10 +508,14 @@ public class KafkaUserModel {
     /**
      * Creates the JAAS configuration string for SASL SCRAM-SHA-512 authentication.
      *
+     * @param scramSha512Password The password
      * @return The JAAS configuration string.
      */
-    public String getSaslJsonConfig() {
-        return getSaslJsonConfig(getScramUserName(name), scramSha512Password);
+    public String getSaslJaasConfig(String scramSha512Password) {
+        return getSaslJaasConfig(getScramUserName(name), scramSha512Password);
     }
 
+    public Secret getUserSecret() {
+        return userSecret;
+    }
 }

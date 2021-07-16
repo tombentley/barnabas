@@ -152,11 +152,11 @@ public class KafkaUserOperator extends AbstractOperator<KafkaUser, KafkaUserSpec
         }
 
         LOGGER.debugCr(reconciliation, "Updating User {} in namespace {}", userName, namespace);
-        Secret desired = user.generateSecret();
+        Secret desiredUserSecret = user.getUserSecret();
         String password = null;
 
-        if (desired != null && desired.getData().get("password") != null)   {
-            password = new String(Base64.getDecoder().decode(desired.getData().get("password")), StandardCharsets.US_ASCII);
+        if (desiredUserSecret != null && desiredUserSecret.getData().get("password") != null)   {
+            password = new String(Base64.getDecoder().decode(desiredUserSecret.getData().get("password")), StandardCharsets.US_ASCII);
         }
 
         Set<SimpleAclRule> tlsAcls = null;
@@ -184,7 +184,7 @@ public class KafkaUserOperator extends AbstractOperator<KafkaUser, KafkaUserSpec
                 scramShaCredentialOperator.reconcile(reconciliation, user.getName(), password)
                         .compose(ignore -> CompositeFuture.join(kafkaUserQuotasOperator.reconcile(reconciliation, KafkaUserModel.getTlsUserName(userName), finalTlsQuotas),
                                 kafkaUserQuotasOperator.reconcile(reconciliation, KafkaUserModel.getScramUserName(userName), finalScramOrNoneQuotas))),
-                reconcileSecretAndSetStatus(reconciliation, namespace, user, desired, userStatus),
+                reconcileSecretAndSetStatus(reconciliation, namespace, user, desiredUserSecret, userStatus),
                 aclOperations.reconcile(reconciliation, KafkaUserModel.getTlsUserName(userName), tlsAcls),
                 aclOperations.reconcile(reconciliation, KafkaUserModel.getScramUserName(userName), scramOrNoneAcls))
                 .onComplete(reconciliationResult -> {
