@@ -36,20 +36,19 @@ class BrokersCertificateOutputWriterTest extends OpensslCaTestHarness {
                 .withName(secretName);
         writer = new BrokersCertificateOutputWriter(new Reconciliation("test", "Kafka", ns, cluster),
                 cluster,
-                new NamedResource<>(op, secretName), true, true);
+                new NamedResource<>(op, secretName),
+                new NamedResource<>(op, secretName),  null, true, true);
     }
-
-
 
     @Test
     public void testWriteIssued() throws IOException, CertificateException, InvalidKeySpecException, KeyStoreException {
-        writer.writeIssued(new BrokerIdentity(0), issuedCertificate(), null);
+        writer.writeIssued(new BrokerIdentity(0), issuedCertificate());
         assertEquals(
                 Set.of(
                         "cluster-kafka-0.p12", "cluster-kafka-0.password", "cluster-kafka-0.crt", "cluster-kafka-0.key"),
                 secretResource.get().getData().keySet());
 
-        writer.writeIssued(new BrokerIdentity(1), issuedCertificate(), null);
+        writer.writeIssued(new BrokerIdentity(1), issuedCertificate());
         assertEquals(
                 Set.of(
                     "cluster-kafka-0.p12", "cluster-kafka-0.password", "cluster-kafka-0.crt", "cluster-kafka-0.key",

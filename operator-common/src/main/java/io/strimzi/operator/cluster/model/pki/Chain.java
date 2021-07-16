@@ -251,6 +251,13 @@ public class Chain {
     }
 
     public CertificateIssuer reconcile(InternalIssuerSpec chain, OwnerReference ownerRef) throws CertificateException {
+        /*
+         * kind: Secret
+         * metadata:
+         *   name: my-cluster-FOO
+         * data:
+         *   type: Internal
+         */
         Validator validator = new Validator(clock, chain.getRenewalDays());
         List<X509Certificate> partialCertChain = new ArrayList<>();
         CertAndKey certificate = null;
@@ -276,11 +283,11 @@ public class Chain {
                     throw new PkiException(
                             certificate.cert == null ?
                                     String.format("CA Certificate %s in secret %s does not exist and is not configured to allow automatic issuance",
-                                        certReference.certificateItem, certReference.certificateSecret) :
-                            certificate.key == null ?
-                                    String.format("CA Key %s in secret %s does not exist and is not configured to allow automatic issuance",
-                                            certReference.keySecretItem, certReference.keySecret) :
-                                    "A previous certificate in the path needed to be reissued, but this one could not be.");
+                                            certReference.certificateItem, certReference.certificateSecret) :
+                                    certificate.key == null ?
+                                            String.format("CA Key %s in secret %s does not exist and is not configured to allow automatic issuance",
+                                                    certReference.keySecretItem, certReference.keySecret) :
+                                            "A previous certificate in the path needed to be reissued, but this one could not be.");
                 }
             }
             // Validate it using the partial chain built so far
@@ -317,6 +324,10 @@ public class Chain {
             prevCert = certificate.cert;
             prevKey = certificate.key;
         }
+
+//    }
+//
+//    public CertificateIssuer instantiate() throws CertificateException {
 
         return new InternalCertificateIssuer(reconciliation, clock, certManager, partialCertChain, certificate.key, certificate.cert);
     }

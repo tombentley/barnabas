@@ -4,6 +4,9 @@
  */
 package io.strimzi.operator.cluster.model.pki.cluster;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.jsontype.NamedType;
+import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
 import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
@@ -12,10 +15,24 @@ import io.strimzi.operator.common.Reconciliation;
 
 public class ZookeeperCertificateOutputWriter extends AbstractCertificateOutputWriter<ZooKeeperNodeIdentity> {
 
-    private final String cluster;
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    static {
+        MAPPER.registerSubtypes(
+                new NamedType(ZooKeeperNodeIdentity.class, "zookeeper"));
+    }
 
-    public ZookeeperCertificateOutputWriter(Reconciliation reconciliation, String cluster, NamedResource<Secret> secretResource) {
-        super(reconciliation, ZooKeeperNodeIdentity.class, secretResource, null);
+    private final String cluster;
+    private final NamedResource<Secret> statusResource;
+    private final NamedResource<Secret> issuedResource;
+
+    public ZookeeperCertificateOutputWriter(Reconciliation reconciliation,
+                                            String cluster,
+                                            NamedResource<Secret> statusResource,
+                                            NamedResource<Secret> issuedResource,
+                                            OwnerReference ownerReference) {
+        super(reconciliation,  null, ownerReference, MAPPER);
+        this.statusResource = statusResource;
+        this.issuedResource = issuedResource;
         this.cluster = cluster;
     }
 
@@ -37,5 +54,20 @@ public class ZookeeperCertificateOutputWriter extends AbstractCertificateOutputW
     @Override
     protected String keyKey(ZooKeeperNodeIdentity id) {
         return ZookeeperCluster.zookeeperPodName(cluster, id.nodeId()) + ".key";
+    }
+
+    @Override
+    protected String stateKey(ZooKeeperNodeIdentity id) {
+        return ZookeeperCluster.zookeeperPodName(cluster, ((ZooKeeperNodeIdentity) id).nodeId()) + ".state";
+    }
+
+    @Override
+    protected NamedResource<Secret> statusResource(ZooKeeperNodeIdentity zooKeeperNodeIdentity) {
+        return statusResource;
+    }
+
+    @Override
+    protected NamedResource<Secret> issuedResource(ZooKeeperNodeIdentity zooKeeperNodeIdentity) {
+        return issuedResource;
     }
 }

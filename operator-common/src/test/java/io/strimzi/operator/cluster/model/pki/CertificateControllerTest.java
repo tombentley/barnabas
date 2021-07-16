@@ -69,7 +69,6 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     private final IssuedCertificate issued = issuedCertificate();
     private TrustPrivateState trustPrivateState;
     private LinkedHashMap<Object, Object> storedStatuses;
-    private CertificateStatusStore certificateStatusStore;
     private ArrayList<IssuedCertificate> observedIssuedCertificates;
     private CertificateOutputWriter certificateOutputWriter;
     private CertificateIssuer issuer;
@@ -91,21 +90,21 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         when(trustPrivateState.load()).thenAnswer(i -> new HashMap<>(trustPrivateStateMap));
 
         storedStatuses = new LinkedHashMap<>();
-        certificateStatusStore = mock(CertificateStatusStore.class);
-        when(certificateStatusStore.loadStatus(subjectIdentity)).thenAnswer(i -> storedStatuses.get(i.getArgument(0)));
+        certificateOutputWriter = mock(CertificateOutputWriter.class);
+        when(certificateOutputWriter.loadStatus(subjectIdentity)).thenAnswer(i -> storedStatuses.get(i.getArgument(0)));
         Mockito.doAnswer(i -> {
             CertificateStatus status = i.getArgument(0);
             storedStatuses.put(status.subjectIdentity(), status);
             return null;
-        }).when(certificateStatusStore).storeStatus(any());
+        }).when(certificateOutputWriter).storeStatus(any());
 
         observedIssuedCertificates = new ArrayList<>();
-        certificateOutputWriter = mock(CertificateOutputWriter.class);
+
         doAnswer(i -> {
             assertEquals(subjectIdentity, i.getArgument(0));
             observedIssuedCertificates.add(i.getArgument(1));
             return null;
-        }).when(certificateOutputWriter).writeIssued(any(), any(), any());
+        }).when(certificateOutputWriter).writeIssued(any(), any());
 
         issuer = mock(CertificateIssuer.class);
 
@@ -114,8 +113,6 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         controller = new CertificateController(
                 new Reconciliation("test", "Kafka", "ns", "n"),
                 trustPrivateState,
-                certificateStatusStore,
-                List.of(certificateOutputWriter),
                 issuer,
                 validator,
                 requestedValidity, null);
@@ -134,7 +131,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         when(validator.validate(any(IssuedCertificate.class), any(Set.class))).thenReturn(Validator.Result.noTrustAnchor());
 
         // Do the reconcile
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject));
+        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
 
         final CertificateStatus requested = requestedStatus();
         assertEquals(List.of(requested), List.copyOf(storedStatuses.values()));
@@ -144,7 +141,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         // Nothing should change if we reconcile again, but in particular we should not request another new certificate
         when(issuer.requestCertificate(eq(subject), eq(requestedValidity)))
                 .thenThrow(new AssertionError("Should not try to issue another cert"));
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject));
+        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
 
         assertEquals(List.of(requested), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(), observedIssuedCertificates);
@@ -209,7 +206,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
                 Validator.Result.noTrustAnchor());
 
         // Do the reconcile
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject));
+        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
 
         assertEquals(List.of(pendingStatus(issued)), List.copyOf(storedStatuses.values()));
         assertEquals(expectedIssuedCertificates, observedIssuedCertificates);
@@ -217,7 +214,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         assertEquals(Map.of(v1.fingerprint(), v1), trustPrivateStateMap);
 
         // And do it again, should be idempotent
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject));
+        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
 
         assertEquals(List.of(pendingStatus(issued)), List.copyOf(storedStatuses.values()));
         assertEquals(expectedIssuedCertificates, observedIssuedCertificates);
@@ -255,7 +252,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
                 Validator.Result.ok(new TrustAnchor(issued.rootCaCertificate(), null)));
 
         // Do the reconcile
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject));
+        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
 
         assertEquals(List.of(inUseStatus(issued)), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(issued), observedIssuedCertificates);
@@ -263,7 +260,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         assertEquals(Map.of(v1.fingerprint(), v1), trustPrivateStateMap);
 
         // And do it again, should be idempotent
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject));
+        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
 
         assertEquals(List.of(inUseStatus(issued)), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(issued), observedIssuedCertificates);
@@ -290,7 +287,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
                 Validator.Result.willExpire(issued.rootCaCertificate(), new TrustAnchor(issued.rootCaCertificate(), null)));
 
         // Do the reconcile
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject));
+        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
 
         assertEquals(List.of(requestedStatus()), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(issued), observedIssuedCertificates);
@@ -298,7 +295,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         assertEquals(Map.of(value.fingerprint(), value.toPhaseOut()), trustPrivateStateMap);
 
         // And do it again, should be idempotent
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject));
+        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
 
         assertEquals(List.of(requestedStatus()), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(issued), observedIssuedCertificates);

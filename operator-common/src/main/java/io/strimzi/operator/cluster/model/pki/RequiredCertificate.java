@@ -12,12 +12,12 @@ import io.strimzi.certs.Subject;
  * Represents a certificate which is required for something to function.
  * For example this could be a certificate for a given broker.
  */
-public class RequiredCertificate {
+public class RequiredCertificate<I extends SubjectIdentity> {
 
-    private final SubjectIdentity subjectIdentity;
+    private final I subjectIdentity;
     private final Subject subject;
 
-    public RequiredCertificate(SubjectIdentity subjectIdentity, Subject subject) {
+    public RequiredCertificate(I subjectIdentity, Subject subject) {
         this.subjectIdentity = Objects.requireNonNull(subjectIdentity);
         this.subject = Objects.requireNonNull(subject);
     }
@@ -32,7 +32,7 @@ public class RequiredCertificate {
     /**
      * @return The subject's DN.
      */
-    public SubjectIdentity subjectIdentity() {
+    public I subjectIdentity() {
         return subjectIdentity;
     }
 

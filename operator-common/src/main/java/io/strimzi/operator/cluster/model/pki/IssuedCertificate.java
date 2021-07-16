@@ -76,12 +76,12 @@ public class IssuedCertificate {
     }
 
     @JsonProperty("cert")
-    public byte[] certBytes() throws CertificateEncodingException {
+    public byte[] issuedCertBytes() throws CertificateEncodingException {
         return issuedCertificate.getEncoded();
     }
 
     @JsonProperty("root")
-    public byte[] rootBytes() throws CertificateEncodingException {
+    public byte[] rootCertBytes() throws CertificateEncodingException {
         return rootCaCertificate.getEncoded();
     }
 

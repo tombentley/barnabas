@@ -19,9 +19,9 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * and not for use by components (e.g. brokers) needing to use a certificate, for which there is a separate
  * interface, {@link CertificateOutputWriter}.
  */
-public class CertificateStatus {
+public class CertificateStatus<Id extends SubjectIdentity> {
     private final CertificateState state;
-    private final SubjectIdentity subjectIdentity;
+    private final Id subjectIdentity;
     private final IssuedCertificate issuedCertificate;
     private final byte[] token;
     private Fingerprint fingerprint = null;
@@ -29,13 +29,13 @@ public class CertificateStatus {
     @JsonCreator
     public CertificateStatus(
             @JsonProperty("state") CertificateState state,
-            @JsonProperty("subjectIdentity") SubjectIdentity subjectIdentity,
+            @JsonProperty("subjectIdentity") Id subjectIdentity,
             @JsonProperty("requestToken") byte[] token,
             @JsonProperty("pending") IssuedCertificate pending) {
         this(state, subjectIdentity, token, pending, null);
     }
 
-    CertificateStatus(CertificateState state, SubjectIdentity subjectIdentity, byte[] token, IssuedCertificate issuedCertificate, Fingerprint fingerprint) {
+    CertificateStatus(CertificateState state, Id subjectIdentity, byte[] token, IssuedCertificate issuedCertificate, Fingerprint fingerprint) {
         this.state = Objects.requireNonNull(state);
         this.subjectIdentity = Objects.requireNonNull(subjectIdentity);
         this.issuedCertificate = issuedCertificate;
@@ -87,7 +87,7 @@ public class CertificateStatus {
     }
 
     @JsonProperty
-    public SubjectIdentity subjectIdentity() {
+    public Id subjectIdentity() {
         return subjectIdentity;
     }
 

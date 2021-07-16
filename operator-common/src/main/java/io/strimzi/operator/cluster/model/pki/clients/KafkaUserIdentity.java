@@ -16,6 +16,10 @@ public class KafkaUserIdentity extends SubjectIdentity {
         this.name = Objects.requireNonNull(name);
     }
 
+    public String username() {
+        return name;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;

@@ -39,7 +39,7 @@ public class NamedResource<T extends HasMetadata>
         this(name, op.withName(name));
     }
 
-    public NamedResource(String name, Resource<T> resource) {
+    private NamedResource(String name, Resource<T> resource) {
         this.name = name;
         this.resource = resource;
     }

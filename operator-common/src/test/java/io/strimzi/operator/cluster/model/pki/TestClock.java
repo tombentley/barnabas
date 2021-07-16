@@ -14,6 +14,8 @@ import java.time.ZoneId;
  */
 public class TestClock extends Clock {
 
+    public static final TestClock EPOCH = new TestClock(Clock.fixed(Instant.ofEpochMilli(0), ZoneId.of("UTC")));
+
     private final Clock origin;
     private Clock current;
 

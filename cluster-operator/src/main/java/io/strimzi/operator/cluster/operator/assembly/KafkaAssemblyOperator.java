@@ -454,6 +454,16 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         boolean clusterCaKeyReplaced;
         /* test */ ClientsCa clientsCa;
+        // Certificate change indicators
+        private boolean existingZookeeperCertsChanged = false;
+        private boolean existingKafkaCertsChanged = false;
+        private boolean existingKafkaExporterCertsChanged = false;
+        private boolean existingEntityOperatorCertsChanged = false;
+        private boolean existingCruiseControlCertsChanged = false;
+        private Secret clusterCaCertSecret;
+        private Secret clusterCaKeySecret;
+        private Secret oldCoSecret;
+        private ClusterPki.Result1 foo;
 
         /* test */ ZookeeperCluster zkCluster;
         private ConfigMap zkMetricsAndLogsConfigMap;
@@ -480,7 +490,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         /* test */ Deployment eoDeployment = null;
         private ConfigMap topicOperatorMetricsAndLogsConfigMap = null;
         private ConfigMap userOperatorMetricsAndLogsConfigMap;
-        private Secret oldCoSecret;
 
         CruiseControl cruiseControl;
         Deployment ccDeployment = null;
@@ -491,13 +500,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         /* test */ Set<String> fsResizingRestartRequest = new HashSet<>();
 
-        // Certificate change indicators
-        private boolean existingZookeeperCertsChanged = false;
-        private boolean existingKafkaCertsChanged = false;
-        private boolean existingKafkaExporterCertsChanged = false;
-        private boolean existingEntityOperatorCertsChanged = false;
-        private boolean existingCruiseControlCertsChanged = false;
-
         // Custom Listener certificates
         private final Map<String, String> customListenerCertificates = new HashMap<>();
         private final Map<String, String> customListenerCertificateThumbprints = new HashMap<>();
@@ -505,9 +507,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private JmxTrans jmxTrans = null;
         private ConfigMap jmxTransConfigMap = null;
         private Deployment jmxTransDeployment = null;
-        private Secret clusterCaCertSecret;
-        private Secret clusterCaKeySecret;
-        private ClusterPki.Result1 foo;
 
         ReconciliationState(Reconciliation reconciliation, Kafka kafkaAssembly) {
             this.reconciliation = reconciliation;
@@ -1431,7 +1430,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
                     .compose(sts -> zkSetOperations.maybeRollingUpdate(reconciliation, sts,
                         pod -> getReasonsToRestartPod(zkDiffs.resource(), pod, existingZookeeperCertsChanged,
-                                new Foo(newTrust(), false,
+                                new CertInfo(newTrust(), false,
                                         isPodCaCertUpToDate(pod,
                                                 clusterCaCertSecret,
                                                 Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)))))
@@ -2892,11 +2891,11 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 pod -> getReasonsToRestartPod(kafkaDiffs.resource(),
                         pod,
                         existingKafkaCertsChanged,
-                        new Foo(newTrust(), false,
+                        new CertInfo(newTrust(), false,
                                 isPodCaCertUpToDate(pod,
                                         clusterCaCertSecret,
                                         Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)),
-                        new Foo(clientsCa.certRenewed(), clientsCa.certsRemoved(), isPodCaCertUpToDate(pod, clientsCa.caCertSecret(),
+                        new CertInfo(clientsCa.certRenewed(), clientsCa.certsRemoved(), isPodCaCertUpToDate(pod, clientsCa.caCertSecret(),
                                 Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION)))));
         }
 
@@ -3608,12 +3607,12 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return foo.newTrust();
         }
 
-        class Foo {
+        class CertInfo {
             private final boolean certRenewed;
             private final boolean certsRemoved;
             private final boolean isPodCaCertUpToDate;
 
-            public Foo(boolean certRenewed, boolean certsRemoved, boolean isPodCaCertUpToDate) {
+            public CertInfo(boolean certRenewed, boolean certsRemoved, boolean isPodCaCertUpToDate) {
                 this.certRenewed = certRenewed;
                 this.certsRemoved = certsRemoved;
                 this.isPodCaCertUpToDate = isPodCaCertUpToDate;
@@ -3628,7 +3627,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          */
         private List<String> getReasonsToRestartPod(StatefulSet sts, Pod pod,
                                                            boolean nodeCertsChange,
-                                                           Foo... cas) {
+                                                           CertInfo... cas) {
             if (pod == null)    {
                 // When the Pod doesn't exist, it doesn't need to be restarted.
                 // It will be created with new configuration.
@@ -3640,7 +3639,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
             List<String> reasons = new ArrayList<>(3);
 
-            for (Foo ca: cas) {
+            for (CertInfo ca: cas) {
                 if (ca.certRenewed) {
                     reasons.add(ca + " certificate renewal");
                 }

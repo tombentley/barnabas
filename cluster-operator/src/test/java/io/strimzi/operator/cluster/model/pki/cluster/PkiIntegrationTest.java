@@ -91,6 +91,7 @@ class PkiIntegrationTest {
     private String trustSecretName;
     private String brokerCertsSecretName;
     private Reconciliation reconciliation = new Reconciliation("test", "Kafka", "ns", "test");
+    private BrokersCertificateOutputWriter outputStore;
 
     @BeforeEach
     void setUp() {
@@ -122,17 +123,14 @@ class PkiIntegrationTest {
     }
 
     private void initCc(int caValidity, int certValidity, int certRenewal) throws CertificateException {
-        CertificateStatusStoreImpl statusStore = new CertificateStatusStoreImpl(reconciliation, mapper, null,
-                 CLUSTER, null,
-                brokerCertsSecretResource,
-                 null,
-                 null,
-                 null,
-                 null);
-        BrokersCertificateOutputWriter outputStore = new BrokersCertificateOutputWriter(
+
+        outputStore = new BrokersCertificateOutputWriter(
                 reconciliation,
                 CLUSTER,
-                new NamedResource<>(client.secrets().inNamespace(NAMESPACE), brokerCertsSecretName), true, true);
+                new NamedResource<>(client.secrets().inNamespace(NAMESPACE), brokerCertsSecretName),
+                new NamedResource<>(client.secrets().inNamespace(NAMESPACE), brokerCertsSecretName),
+                null,
+                true, true);
 
 //        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(clock,
 //                new OpenSslCertManager(clock), new Subject.Builder().withCommonName("My CA").build(), caValidity);
@@ -152,8 +150,7 @@ class PkiIntegrationTest {
         CertificateIssuer issuer = chain.reconcile(internalIssuerSpec, null);
         g++;
         cc = new CertificateController(reconciliation,
-                trustPrivateState, statusStore,
-                List.of(outputStore),
+                trustPrivateState,
                 issuer, new Validator(clock, certRenewal), certValidity, null);
     }
 
@@ -183,7 +180,7 @@ class PkiIntegrationTest {
         assertEquals(rootFingerprint0, secretItemFingerprint(chainCertSecretName, chainCertItem));
 
         // Initial certificate reconciliation, resulting in a new CA certificate which won't be trusted yet
-        CertificateReconcileResult crr1 = cc.reconcile(brokerReqCert);
+        CertificateReconcileResult crr1 = cc.reconcile(brokerReqCert, outputStore);
         Assertions.assertEquals(WaitingForTrust.class, crr1.getClass());
         TrustRoot trustRoot = ((WaitingForTrust) crr1).trustRoot();
         assertEquals(rootFingerprint0, ((Object) trustRoot.fingerprint()).toString());
@@ -212,7 +209,7 @@ class PkiIntegrationTest {
         Map<String, String> trustCerts = trustSecretResource.get().getData();
 
         // Now reconcile the certificate again, because the CA cert is now trusted it should transition to in use
-        CertificateReconcileResult crr2 = cc.reconcile(brokerReqCert);
+        CertificateReconcileResult crr2 = cc.reconcile(brokerReqCert, outputStore);
         Assertions.assertEquals(OkIssued.class, crr2.getClass());
         assertEquals(rootFingerprint0, ((Object) ((OkIssued) crr2).trustRoot().fingerprint()).toString(), "Expected the root CA as trust root");
         assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED), trustPrivateState());
@@ -245,7 +242,7 @@ class PkiIntegrationTest {
                 "Expected the secret keysets to be the same");
 
         // reconcile the certificate again, should be a no op
-        CertificateReconcileResult crr3 = cc.reconcile(brokerReqCert);
+        CertificateReconcileResult crr3 = cc.reconcile(brokerReqCert, outputStore);
         // And we have a trust relationship
         Assertions.assertEquals(OkNoop.class, crr3.getClass());
         assertEquals(rootFingerprint0, ((Object) ((OkNoop) crr3).trustRoot().fingerprint()).toString(), "Expected the root CA as trust root");
@@ -280,7 +277,7 @@ class PkiIntegrationTest {
                 "Expected the secret keysets to be the same");
         assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED), trustPrivateState());
 
-        CertificateReconcileResult crr4 = cc.reconcile(brokerReqCert);
+        CertificateReconcileResult crr4 = cc.reconcile(brokerReqCert, outputStore);
         // And we have a trust relationship
         Assertions.assertEquals(CertificateReconcileResult.OkIssued.class, crr4.getClass());
         assertEquals(rootFingerprint0, ((Object) ((OkIssued) crr4).trustRoot().fingerprint()).toString(), "Expected the root CA as trust root");
@@ -330,7 +327,7 @@ class PkiIntegrationTest {
                 "Expected the secret keysets to be the same");
         assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED), trustPrivateState());
 
-        CertificateReconcileResult crr5 = cc.reconcile(brokerReqCert);
+        CertificateReconcileResult crr5 = cc.reconcile(brokerReqCert, outputStore);
         // We should be waiting for a trust relationship
         Assertions.assertEquals(WaitingForTrust.class, crr5.getClass());
         assertNotNull(((WaitingForTrust) crr5).trustRoot(), "Expected a trust root");

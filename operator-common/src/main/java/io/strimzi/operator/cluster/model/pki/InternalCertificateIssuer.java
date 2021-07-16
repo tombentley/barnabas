@@ -113,7 +113,7 @@ public class InternalCertificateIssuer implements CertificateIssuer {
      * @param issuingCert The cert of the CA which will be used to issue certificates.
      */
     @SuppressWarnings("unchecked")
-    InternalCertificateIssuer(Reconciliation reconciliation, Clock clock, CertManager certManager, List<X509Certificate> pathFromTrusted, byte[] issuingKey, X509Certificate issuingCert) {
+    public InternalCertificateIssuer(Reconciliation reconciliation, Clock clock, CertManager certManager, List<X509Certificate> pathFromTrusted, byte[] issuingKey, X509Certificate issuingCert) {
         this.reconciliation = reconciliation;
         this.clock = Objects.requireNonNull(clock);
         this.certManager = Objects.requireNonNull(certManager);

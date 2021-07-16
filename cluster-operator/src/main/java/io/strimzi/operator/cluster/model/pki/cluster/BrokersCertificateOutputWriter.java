@@ -4,6 +4,9 @@
  */
 package io.strimzi.operator.cluster.model.pki.cluster;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.jsontype.NamedType;
+import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.strimzi.operator.cluster.model.KafkaCluster;
 import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
@@ -28,16 +31,28 @@ import io.strimzi.operator.common.Reconciliation;
  */
 public class BrokersCertificateOutputWriter extends AbstractCertificateOutputWriter<BrokerIdentity> {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    static {
+        MAPPER.registerSubtypes(
+                new NamedType(BrokerIdentity.class, "kafka"));
+    }
+
     private final String cluster;
     private final boolean includePem;
     private final boolean includeP12;
+    private final NamedResource<Secret> statusResource;
+    private final NamedResource<Secret> issuedResource;
 
     BrokersCertificateOutputWriter(Reconciliation reconciliation,
                                    String cluster,
+                                   NamedResource<Secret> statusResource,
                                    NamedResource<Secret> secretResource,
+                                   OwnerReference ownerReference,
                                    boolean includePem,
                                    boolean includeP12) {
-        super(reconciliation, BrokerIdentity.class, secretResource, null);
+        super(reconciliation,  null, ownerReference, MAPPER);
+        this.statusResource = statusResource;
+        this.issuedResource = secretResource;
         this.cluster = cluster;
         this.includePem = includePem;
         this.includeP12 = includeP12;
@@ -61,6 +76,21 @@ public class BrokersCertificateOutputWriter extends AbstractCertificateOutputWri
     @Override
     protected String keyKey(BrokerIdentity id) {
         return includePem ? KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".key" : null;
+    }
+
+    @Override
+    protected String stateKey(BrokerIdentity id) {
+        return KafkaCluster.kafkaPodName(cluster, ((BrokerIdentity) id).brokerId()) + ".state";
+    }
+
+    @Override
+    protected NamedResource<Secret> statusResource(BrokerIdentity brokerIdentity) {
+        return statusResource;
+    }
+
+    @Override
+    protected NamedResource<Secret> issuedResource(BrokerIdentity brokerIdentity) {
+        return issuedResource;
     }
 
 }

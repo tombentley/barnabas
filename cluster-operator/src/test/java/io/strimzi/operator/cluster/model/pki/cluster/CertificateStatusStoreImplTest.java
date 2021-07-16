@@ -13,10 +13,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.jsontype.NamedType;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.dsl.Resource;
+import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
+import io.strimzi.operator.cluster.model.pki.CertificateOutputWriter;
 import io.strimzi.operator.cluster.model.pki.CertificateState;
 import io.strimzi.operator.cluster.model.pki.CertificateStatus;
 import io.strimzi.operator.cluster.model.pki.IssuedCertificate;
 import io.strimzi.operator.cluster.model.pki.NamedResource;
+import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
 import io.strimzi.operator.cluster.model.pki.TrustPrivateStateTest;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.mockkube.MockKube;
@@ -29,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class CertificateStatusStoreImplTest {
 
     private Resource<Secret> secretResource;
-    private CertificateStatusStoreImpl writer;
+    private CertificateOutputWriter writer;
 
     @BeforeEach
     public void setup() {
@@ -37,14 +40,25 @@ class CertificateStatusStoreImplTest {
         secretResource = op.withName("n");
         ObjectMapper mapper = new ObjectMapper();
         mapper.registerSubtypes(new NamedType(BrokerIdentity.class, "broker"));
-        writer = new CertificateStatusStoreImpl(new Reconciliation("test", "Kafka", "ns", "n"), mapper, null,
-                 "n",
-                 null,
-                 new NamedResource<>(op, "n"),
-                 null,
-                 null,
-                 null,
-                 null);
+        writer = new AbstractCertificateOutputWriter(
+                new Reconciliation("test", "Kafka", "ns", "n"),
+                "base",
+                null, mapper) {
+            @Override
+            protected String stateKey(SubjectIdentity id) {
+                return "foooooo";
+            }
+
+            @Override
+            protected NamedResource<Secret> statusResource(SubjectIdentity subjectIdentity) {
+                return new NamedResource<>(op, "n");
+            }
+
+            @Override
+            protected NamedResource<Secret> issuedResource(SubjectIdentity subjectIdentity) {
+                return new NamedResource<>(op, "n2");
+            }
+        };
     }
 
     @Test

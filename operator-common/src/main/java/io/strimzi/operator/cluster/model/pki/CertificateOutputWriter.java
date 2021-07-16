@@ -12,14 +12,35 @@ import java.security.spec.InvalidKeySpecException;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 
 /**
- * Abstraction for things which know how to take a bunch of {@code IssuedCertificate IssuedCertificates}
- * and put them somewhere for use by components/clients.
+ * Abstraction for things which can store {@link CertificateStatus CertificateStatuses}
+ * and deploy {@code IssuedCertificate IssuedCertificates} for use by components/clients.
  * This includes, but is not limited to, putting them in a Secret.
- * This is a distinct responsibility from storing a {@link CertificateStatus}.
  */
-public interface CertificateOutputWriter {
-    void writeIssued(SubjectIdentity subjectIdentity,
-                     IssuedCertificate certificate,
-                     OwnerReference ownerReference)
+public interface CertificateOutputWriter<I extends SubjectIdentity> {
+    /**
+     * Load the certificate status for the given {@code subjectIdentity}
+     * @param subjectIdentity The subject
+     * @return Its status. If the given {@code subjectIdentity} doesn't have a status then a new one in
+     * state {@link CertificateState#NEW} should be returned.
+     */
+    CertificateStatus<I> loadStatus(I subjectIdentity);
+
+    /**
+     * Store the given {@code certificateStatus} for later retrieval by {@link #loadStatus(SubjectIdentity)}.
+     * @param certificateStatus
+     */
+    void storeStatus(CertificateStatus<I> certificateStatus);
+
+    /**
+     * Write the given {@code certificate} that was issued for the given {@code subjectIdentity}
+     * @param subjectIdentity
+     * @param certificate
+     * @throws CertificateException
+     * @throws InvalidKeySpecException
+     * @throws KeyStoreException
+     * @throws IOException
+     */
+    void writeIssued(I subjectIdentity,
+                     IssuedCertificate certificate)
             throws CertificateException, InvalidKeySpecException, KeyStoreException, IOException;
 }
