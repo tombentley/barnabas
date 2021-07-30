@@ -104,6 +104,7 @@ public class InternalCertificateIssuer implements CertificateIssuer {
 
     /**
      * Create an issuer.
+     * @param reconciliation The reconciliation
      * @param clock A clock for the start of issued certificates.
      * @param certManager The thing used to actually generate the certificates and key.
      * @param pathFromTrusted The path of trusted certificates, from the CA cert that should be trust anchor (which may not be self-signed).

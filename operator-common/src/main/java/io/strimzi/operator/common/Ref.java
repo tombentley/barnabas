@@ -140,7 +140,7 @@ public abstract class Ref<T> {
             return sb.toString();
         }
 
-        static Map<Class<? extends HasMetadata>, Function<KubernetesClient, ? extends MixedOperation<?, ?, ? extends Resource<?>>>> MAP = Map.of(
+        static Map<Class<? extends HasMetadata>, Function<KubernetesClient, ? extends MixedOperation<?, ?, ? extends Resource<?>>>> kindMap = Map.of(
                 Secret.class, KubernetesClient::secrets,
                 ConfigMap.class, KubernetesClient::configMaps);
 
@@ -151,7 +151,7 @@ public abstract class Ref<T> {
             if (this.namespace != null && !this.namespace.equals(namespace)) {
                 throw new IllegalArgumentException("Mismatching namespaces: " + this.namespace + ", " + namespace);
             }
-            MixedOperation<?, ?, ?> apply = MAP.get(kind).apply(client);
+            MixedOperation<?, ?, ?> apply = kindMap.get(kind).apply(client);
             NonNamespaceOperation<?, ?, ? extends Resource<?>> nonNamespaceOperation = apply.inNamespace(namespace);
             Object o = nonNamespaceOperation.withName(name).get();
             if (o == null) {
@@ -172,6 +172,7 @@ public abstract class Ref<T> {
             return HasMetadata.class.isAssignableFrom(c) && isKindCompatibleWith(c.asSubclass(HasMetadata.class));
         }
 
+        @SuppressWarnings("unchecked")
         @Override
         public <T> Ref<T> as(Class<T> c) {
             if (HasMetadata.class.isAssignableFrom(c)
@@ -184,7 +185,7 @@ public abstract class Ref<T> {
 
         @Override
         public T get(Resolver resolver) {
-            MixedOperation<?, ?, ?> apply = MAP.get(kindClass).apply(resolver.client());
+            MixedOperation<?, ?, ?> apply = kindMap.get(kindClass).apply(resolver.client());
             NonNamespaceOperation<?, ?, ? extends Resource<?>> nonNamespaceOperation = apply.inNamespace(namespace);
             Object o = nonNamespaceOperation.withName(name).get();
             if (o == null) {

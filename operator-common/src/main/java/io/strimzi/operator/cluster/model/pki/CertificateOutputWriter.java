@@ -9,8 +9,6 @@ import java.security.KeyStoreException;
 import java.security.cert.CertificateException;
 import java.security.spec.InvalidKeySpecException;
 
-import io.fabric8.kubernetes.api.model.OwnerReference;
-
 /**
  * Abstraction for things which can store {@link CertificateStatus CertificateStatuses}
  * and deploy {@code IssuedCertificate IssuedCertificates} for use by components/clients.
@@ -27,18 +25,18 @@ public interface CertificateOutputWriter<I extends SubjectIdentity> {
 
     /**
      * Store the given {@code certificateStatus} for later retrieval by {@link #loadStatus(SubjectIdentity)}.
-     * @param certificateStatus
+     * @param certificateStatus The status
      */
     void storeStatus(CertificateStatus<I> certificateStatus);
 
     /**
      * Write the given {@code certificate} that was issued for the given {@code subjectIdentity}
-     * @param subjectIdentity
-     * @param certificate
-     * @throws CertificateException
-     * @throws InvalidKeySpecException
-     * @throws KeyStoreException
-     * @throws IOException
+     * @param subjectIdentity The identity
+     * @param certificate The certificate
+     * @throws CertificateException Problem with cert
+     * @throws InvalidKeySpecException Problem with key
+     * @throws KeyStoreException PRoblem storing key
+     * @throws IOException Problem with IO
      */
     void writeIssued(I subjectIdentity,
                      IssuedCertificate certificate)

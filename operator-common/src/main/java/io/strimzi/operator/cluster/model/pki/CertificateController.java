@@ -49,9 +49,7 @@ public class CertificateController {
     private final TrustPrivateState trustPrivateState;
     private final CertificateIssuer issuer;
     private final int requestedValidity;
-    private final OwnerReference ownerReference;
     private final Reconciliation reconciliation;
-
 
     public CertificateController(Reconciliation reconciliation,
                                  TrustPrivateState trustPrivateState,
@@ -65,7 +63,6 @@ public class CertificateController {
         this.issuer = Objects.requireNonNull(issuer);
         this.validator = Objects.requireNonNull(validator);
         this.requestedValidity = requestedValidity;
-        this.ownerReference = ownerReference;
         this.reconciliation = reconciliation;
     }
 
@@ -100,7 +97,9 @@ public class CertificateController {
      * <p>The actual transitions can be more complicated than that. For instance, it might happen that issuance takes
      * a while, so {@link WaitingForIssuance} might be returned for some number of calls.</p>
      *
+     * @param <I> The type of certificate identity.
      * @param requiredCertificate The required certificate.
+     * @param writer The writer
      * @return The reconciliation result.
      * @throws CertificateException Cert ex
      */
@@ -112,7 +111,7 @@ public class CertificateController {
         // Which would basically just to remove the state and the output certificates.
 
         Map<Fingerprint, TrustRoot> trustState = this.trustPrivateState.load();
-        CertificateStatus certStatus = writer.loadStatus(requiredCertificate.subjectIdentity());
+        CertificateStatus<I> certStatus = writer.loadStatus(requiredCertificate.subjectIdentity());
         final CertificateState startState = certStatus.state();
         LOGGER.debugCr(reconciliation, "Required cert {} has state {}", requiredCertificate.subjectIdentity(), startState);
         switch (startState) {
@@ -137,16 +136,16 @@ public class CertificateController {
         throw new AssertionError();
     }
 
-    private <I extends SubjectIdentity> CertificateStatus handleNew(CertificateStatus status,
+    private <I extends SubjectIdentity> CertificateStatus<I> handleNew(CertificateStatus<I> status,
                                         CertificateOutputWriter<I> writer, RequiredCertificate<I> requiredCertificate) {
         byte[] token = issuer.requestCertificate(requiredCertificate.subjectAndSan(), requestedValidity);
         LOGGER.debugCr(reconciliation, "Cert transition: identity: {}, to-state: {}", requiredCertificate.subjectIdentity(), CertificateState.REQUESTED);
-        CertificateStatus requested = status.toRequested(token);
+        CertificateStatus<I> requested = status.toRequested(token);
         writer.storeStatus(requested);
         return requested;
     }
 
-    private <I extends SubjectIdentity> CertificateReconcileResult handleRequested(CertificateStatus status,
+    private <I extends SubjectIdentity> CertificateReconcileResult handleRequested(CertificateStatus<I> status,
                                                        RequiredCertificate<I> requiredCertificate,
                                                        Map<Fingerprint, TrustRoot> trustState,
                                                        CertificateOutputWriter<I> writer)
@@ -204,7 +203,7 @@ public class CertificateController {
         }
     }
 
-    private <I extends SubjectIdentity> CertificateReconcileResult validateRequestedThatShouldBeTrusted(CertificateStatus status,
+    private <I extends SubjectIdentity> CertificateReconcileResult validateRequestedThatShouldBeTrusted(CertificateStatus<I> status,
                                                                             RequiredCertificate<I> requiredCertificate,
                                                                             IssuedCertificate issued,
                                                                             TrustRoot trustRoot,
@@ -243,7 +242,7 @@ public class CertificateController {
         }
     }
 
-    private <I extends SubjectIdentity> CertificateReconcileResult validateRequestedThatsNotYetTrustable(CertificateStatus status,
+    private <I extends SubjectIdentity> CertificateReconcileResult validateRequestedThatsNotYetTrustable(CertificateStatus<I> status,
                                                                              CertificateOutputWriter<I> writer,
                                                                              RequiredCertificate<I> requiredCertificate,
                                                                              IssuedCertificate issued,
@@ -284,7 +283,7 @@ public class CertificateController {
         return Set.of(new TrustAnchor(trustRoot.x509(), null));
     }
 
-    private <I extends SubjectIdentity> CertificateReconcileResult handlePending(CertificateStatus status,
+    private <I extends SubjectIdentity> CertificateReconcileResult handlePending(CertificateStatus<I> status,
                                                      RequiredCertificate<I> requiredCertificate,
                                                      Map<Fingerprint, TrustRoot> trustState,
                                                      CertificateOutputWriter<I> writer) {
@@ -311,7 +310,7 @@ public class CertificateController {
         }
     }
 
-    private <I extends SubjectIdentity> CertificateReconcileResult deploy(CertificateStatus status,
+    private <I extends SubjectIdentity> CertificateReconcileResult deploy(CertificateStatus<I> status,
                                               RequiredCertificate<I> requiredCertificate,
                                               IssuedCertificate issued,
                                               TrustRoot trustRoot,
@@ -335,7 +334,7 @@ public class CertificateController {
     }
 
     private <I extends SubjectIdentity> CertificateReconcileResult handleInUse(
-            CertificateStatus status,
+            CertificateStatus<I> status,
             RequiredCertificate<I> requiredCertificate,
             Map<Fingerprint, TrustRoot> trustState,
             CertificateOutputWriter<I> writer) throws CertificateParsingException {
@@ -380,7 +379,7 @@ public class CertificateController {
         return result;
     }
 
-    private <I extends SubjectIdentity> CertificateReconcileResult waitingForTrust(CertificateStatus status,
+    private <I extends SubjectIdentity> CertificateReconcileResult waitingForTrust(CertificateStatus<I> status,
                                                        CertificateOutputWriter<I> writer,
                                                        IssuedCertificate issued,
                                                        TrustRoot untrustedTrustRoot) {

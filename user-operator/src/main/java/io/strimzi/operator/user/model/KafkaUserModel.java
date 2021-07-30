@@ -259,14 +259,20 @@ public class KafkaUserModel {
                             }
                         }
                     } else {
-                        X509Certificate issuingCert = PkiUtils.x509Certificate(Base64.getDecoder().decode(caCert));
-                        InternalCertificateIssuer issuer = new InternalCertificateIssuer(reconciliation, clock, certManager, null, issuingKey, issuingCert);
-                        userCertAndKey = generateSignedCert(validityDays, issuer, subject);
+                        try {
+                            X509Certificate x509Certificate = PkiUtils.x509Certificate(Base64.getDecoder().decode(caCert));
+                            userCertAndKey = generateSignedCert(reconciliation, certManager, validityDays, issuingKey, x509Certificate, subject);
+                        } catch (CertificateException | KeyStoreException | IOException | InvalidKeySpecException e) {
+                            throw new RuntimeException("Could not parse or issue certificate using ca.crt in " + clientsCaCertSecret.getMetadata().getName());
+                        }
                     }
                 } else {
-                    X509Certificate issuingCert = PkiUtils.x509Certificate(Base64.getDecoder().decode(caCert));
-                    InternalCertificateIssuer issuer = new InternalCertificateIssuer(reconciliation, clock, certManager, null, issuingKey, issuingCert);
-                    userCertAndKey = generateSignedCert(validityDays, issuer, subject);
+                    try {
+                        X509Certificate x509Certificate = PkiUtils.x509Certificate(Base64.getDecoder().decode(caCert));
+                        userCertAndKey = generateSignedCert(reconciliation, certManager, validityDays, issuingKey, x509Certificate, subject);
+                    } catch (CertificateException | KeyStoreException | IOException | InvalidKeySpecException e) {
+                        throw new RuntimeException("Could not parse or issue certificate using ca.crt in " + clientsCaCertSecret.getMetadata().getName());
+                    }
                 }
                 return tlsSecret(caCert, userCertAndKey);
             } catch (CertificateException e) {
@@ -275,16 +281,27 @@ public class KafkaUserModel {
         }
     }
 
-    private CertAndKey generateSignedCert(int validityDays, InternalCertificateIssuer issuer, Subject subject) throws CertificateEncodingException {
+    protected CertAndKey generateSignedCert(Reconciliation reconciliation, CertManager certManager, int validityDays,
+                                            byte[] issuingKey, X509Certificate issuingCert, Subject subject) throws CertificateException, KeyStoreException, IOException, InvalidKeySpecException {
+        CertAndKey userCertAndKey;
+        InternalCertificateIssuer issuer = new InternalCertificateIssuer(reconciliation, clock, certManager, List.of(issuingCert), issuingKey, issuingCert);
         byte[] tokenBytes = issuer.requestCertificate(subject, validityDays);
         Optional<IssuedCertificate> issuedOpt = issuer.pollForRequestedCertificate(tokenBytes);
         // The interface is designed to accommodate asynchrony between request and issuance
         // but we know the InternalCertificateIssuer will always be able to complete the request
         // on first poll.
         IssuedCertificate issued = issuedOpt.orElseThrow();
-        return new CertAndKey(
+        String keystorePassword = "1234";
+        userCertAndKey = new CertAndKey(
                 issued.privateKey(),
-                issued.issuedCertBytes());
+                issued.issuedCertBytes(),
+                null,
+                new IssuedCertificate(issued.privateKey(),
+                        issued.issuedCertificate(),
+                        List.of(issuingCert),
+                        issuingCert).toPkcs12(keystorePassword.toCharArray()),
+                keystorePassword);
+        return userCertAndKey;
     }
 
     /**

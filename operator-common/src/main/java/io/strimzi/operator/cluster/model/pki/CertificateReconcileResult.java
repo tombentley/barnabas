@@ -8,7 +8,7 @@ import java.util.Objects;
 
 /**
  * The result of a certificate reconciliation attempt, i.e. the result type of
- * {@link CertificateController#reconcile(RequiredCertificate)}.
+ * {@link CertificateController#reconcile(RequiredCertificate, CertificateOutputWriter)}.
  */
 public abstract class CertificateReconcileResult {
 

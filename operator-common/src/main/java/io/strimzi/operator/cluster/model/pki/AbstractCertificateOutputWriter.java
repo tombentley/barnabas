@@ -124,9 +124,9 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
         return baseEntryName + ".key";
     }
 
-
+    @SuppressWarnings("unchecked")
     @Override
-    public CertificateStatus loadStatus(Id subjectIdentity) {
+    public CertificateStatus<Id> loadStatus(Id subjectIdentity) {
         NamedResource<Secret> secretResource = statusResource(subjectIdentity);
         Secret secret = secretResource.get();
         if (secret == null || secret.getData() == null || secret.getData().isEmpty()) {

@@ -14,7 +14,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
  * A certificate and its current state.
- * Instances can be represented as JSON and persisted via a {@link CertificateStatusStore}.
+ * Instances can be represented as JSON and persisted via a {@link CertificateOutputWriter}.
  * The storage of CertificateStatus instances is for internal use by the {@link CertificateController},
  * and not for use by components (e.g. brokers) needing to use a certificate, for which there is a separate
  * interface, {@link CertificateOutputWriter}.
@@ -43,34 +43,34 @@ public class CertificateStatus<Id extends SubjectIdentity> {
         this.fingerprint = fingerprint;
     }
 
-    public static CertificateStatus createNew(SubjectIdentity subjectIdentity) {
+    public static <Id extends SubjectIdentity> CertificateStatus<Id> createNew(Id subjectIdentity) {
         Objects.requireNonNull(subjectIdentity);
-        return new CertificateStatus(CertificateState.NEW, subjectIdentity, null, null, null);
+        return new CertificateStatus<>(CertificateState.NEW, subjectIdentity, null, null, null);
     }
 
-    public CertificateStatus toRequested(byte[] token) {
+    public CertificateStatus<Id> toRequested(byte[] token) {
         if (this.state != CertificateState.NEW && this.state != CertificateState.IN_USE)
             throw new AssertionError("Unexpected state transition: " + this.state + "->" + CertificateState.REQUESTED);
-        return new CertificateStatus(CertificateState.REQUESTED, this.subjectIdentity, token, null, null);
+        return new CertificateStatus<>(CertificateState.REQUESTED, this.subjectIdentity, token, null, null);
     }
 
-    public CertificateStatus toPending(IssuedCertificate issuedCertificate) {
+    public CertificateStatus<Id> toPending(IssuedCertificate issuedCertificate) {
         Objects.requireNonNull(issuedCertificate);
         if (this.state != CertificateState.REQUESTED)
             throw new AssertionError("Unexpected state transition: " + this.state + "->" + CertificateState.PENDING);
-        return new CertificateStatus(CertificateState.PENDING, this.subjectIdentity, null, issuedCertificate, null);
+        return new CertificateStatus<>(CertificateState.PENDING, this.subjectIdentity, null, issuedCertificate, null);
     }
 
-    public CertificateStatus toInUse() {
+    public CertificateStatus<Id> toInUse() {
         if (this.state != CertificateState.PENDING)
             throw new AssertionError("Unexpected state transition: " + this.state + "->" + CertificateState.IN_USE);
-        return new CertificateStatus(CertificateState.IN_USE, this.subjectIdentity, null, this.issuedCertificate, this.fingerprint);
+        return new CertificateStatus<>(CertificateState.IN_USE, this.subjectIdentity, null, this.issuedCertificate, this.fingerprint);
     }
 
-    public CertificateStatus toNotNeeded() {
+    public CertificateStatus<Id> toNotNeeded() {
         if (this.state != CertificateState.IN_USE)
             throw new AssertionError("Unexpected state transition: " + this.state + "->" + CertificateState.NOT_NEEDED);
-        return new CertificateStatus(CertificateState.NOT_NEEDED, this.subjectIdentity, null, null, this.fingerprint);
+        return new CertificateStatus<>(CertificateState.NOT_NEEDED, this.subjectIdentity, null, null, this.fingerprint);
     }
 
     @JsonProperty("requestToken")
@@ -136,7 +136,7 @@ public class CertificateStatus<Id extends SubjectIdentity> {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        CertificateStatus that = (CertificateStatus) o;
+        CertificateStatus<?> that = (CertificateStatus<?>) o;
         return state == that.state &&
                 Objects.equals(subjectIdentity, that.subjectIdentity) &&
                 Objects.equals(issuedCertificate, that.issuedCertificate) &&

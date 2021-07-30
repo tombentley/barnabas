@@ -57,9 +57,9 @@ public class KafkaUserCertificateOutputWriter extends AbstractCertificateOutputW
         return "user.key";
     }
 
-
+    @SuppressWarnings("unchecked")
     @Override
-    public CertificateStatus loadStatus(KafkaUserIdentity subjectIdentity) {
+    public CertificateStatus<KafkaUserIdentity> loadStatus(KafkaUserIdentity subjectIdentity) {
         NamedResource<Secret> secretResource = statusResource(subjectIdentity);
         Secret secret = secretResource.get();
         if (secret == null || secret.getData() == null || secret.getData().isEmpty()) {
