@@ -463,7 +463,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private Secret clusterCaCertSecret;
         private Secret clusterCaKeySecret;
         private Secret oldCoSecret;
-        private ClusterPki.Result1 foo;
+        private ClusterPki.ClusterCerts clusterCerts;
 
         /* test */ ZookeeperCluster zkCluster;
         private ConfigMap zkMetricsAndLogsConfigMap;
@@ -659,49 +659,49 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                this.foo = clusterPki.bootstrapCa(reconciliation, namespace, name, kafkaAssembly.getSpec().getClusterCa(), ownerReference());
+                this.clusterCerts = clusterPki.bootstrapCa(reconciliation, namespace, name, kafkaAssembly.getSpec().getClusterCa(), ownerReference());
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                foo.issueZkCertificates(kafkaAssembly);
+                clusterCerts.issueZkCertificates(kafkaAssembly);
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                foo.issueKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames);
+                clusterCerts.issueKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames);
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                foo.issueEoCertificate(kafkaAssembly);
+                clusterCerts.issueEoCertificate(kafkaAssembly);
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                foo.issueCoCertificate(kafkaAssembly);
+                clusterCerts.issueCoCertificate(kafkaAssembly);
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                foo.issueKafkaExporterCertificates(kafkaAssembly);
+                clusterCerts.issueKafkaExporterCertificates(kafkaAssembly);
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                foo.issueCcCertificate(kafkaAssembly);
+                clusterCerts.issueCcCertificate(kafkaAssembly);
                 return null;
             });
         }
@@ -712,7 +712,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterPkiTrust() {
             try {
-                clusterPki.trust(foo);
+                clusterPki.trust(clusterCerts);
                 clusterCaCertSecret = secretOperations.get(namespace, KafkaResources.clusterCaCertificateSecretName(name));
             } catch (CertificateEncodingException e) {
                 return Future.failedFuture(e);
@@ -3604,7 +3604,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         boolean newTrust() {
-            return foo.newTrust();
+            return clusterCerts.newTrust();
         }
 
         class CertInfo {

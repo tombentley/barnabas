@@ -45,6 +45,7 @@ import io.strimzi.operator.cluster.model.pki.RequiredCertificate;
 import io.strimzi.operator.cluster.model.pki.TrustController;
 import io.strimzi.operator.cluster.model.pki.TrustPrivateState;
 import io.strimzi.operator.cluster.model.pki.TrustRoot;
+import io.strimzi.operator.cluster.model.pki.TrustState;
 import io.strimzi.operator.cluster.model.pki.Validator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
@@ -103,29 +104,30 @@ public class ClusterPki {
 
     }
 
-    public static class Result1 {
+    public static class ClusterCerts {
         private final TrustPrivateState trustPrivateState;
         private final Reconciliation reconciliation;
         private final CertificateController controller;
         private final String namespace;
         private final String cluster;
-        private final Set<TrustRoot> newTrustRoots;
-        private final Set<TrustRoot> usedTrustRoots;
-        private final HashSet<TrustRoot> existingTrust;
+        private boolean newTrust = false;
+        private final Set<TrustRoot> usedTrustRoots = new HashSet<>();
         private final KubernetesClient client;
         private final OwnerReference ownerReference;
 
-        public Result1(KubernetesClient client,
-                       TrustPrivateState trustPrivateState, Reconciliation reconciliation, CertificateController controller, String namespace, String cluster, Set<TrustRoot> newTrustRoots, Set<TrustRoot> usedTrustRoots, OwnerReference ownerReference) {
+        public ClusterCerts(KubernetesClient client,
+                            TrustPrivateState trustPrivateState,
+                            Reconciliation reconciliation,
+                            CertificateController controller,
+                            String namespace,
+                            String cluster,
+                            OwnerReference ownerReference) {
             this.client = client;
             this.trustPrivateState = trustPrivateState;
             this.reconciliation = reconciliation;
             this.controller = controller;
             this.namespace = namespace;
             this.cluster = cluster;
-            this.newTrustRoots = newTrustRoots;
-            this.usedTrustRoots = usedTrustRoots;
-            this.existingTrust = new HashSet<>(trustPrivateState.load().values());
             this.ownerReference = ownerReference;
         }
 
@@ -298,7 +300,7 @@ public class ClusterPki {
             } else if (result instanceof CertificateReconcileResult.IssuedBad) {
             } else if (result instanceof CertificateReconcileResult.PendingBad) {
             } else if (result instanceof CertificateReconcileResult.WaitingForTrust) {
-                newTrustRoots.add(((CertificateReconcileResult.WaitingForTrust) result).trustRoot());
+                newTrust = true;
                 usedTrustRoots.add(((CertificateReconcileResult.WaitingForTrust) result).trustRoot());
             } else if (result instanceof CertificateReconcileResult.OkIssued) {
                 usedTrustRoots.add(((CertificateReconcileResult.OkIssued) result).trustRoot());
@@ -311,7 +313,7 @@ public class ClusterPki {
 
         // Kafka roller will then run
         public boolean newTrust() {
-            return !newTrustRoots.isEmpty();
+            return newTrust;
         }
     }
 
@@ -325,10 +327,10 @@ public class ClusterPki {
      * @throws CertificateException if problems.
      * @return A result
      */
-    public Result1 bootstrapCa(Reconciliation reconciliation,
-                               String namespace, String cluster,
-                               CertificateAuthority clusterCa,
-                               OwnerReference ownerReference) throws CertificateException {
+    public ClusterCerts bootstrapCa(Reconciliation reconciliation,
+                                    String namespace, String cluster,
+                                    CertificateAuthority clusterCa,
+                                    OwnerReference ownerReference) throws CertificateException {
         Objects.requireNonNull(namespace);
         Objects.requireNonNull(cluster);
         if (clusterCa == null) {
@@ -354,9 +356,13 @@ public class ClusterPki {
                 issuer,
                 validator, clusterCa.getValidityDays(),
                 clusterCa.isGenerateSecretOwnerReference() ? ownerReference : null);
-        final Set<TrustRoot> newTrustRoots = new HashSet<>();
-        final Set<TrustRoot> usedTrustRoots = new HashSet<>();
-        return new Result1(client, trustPrivateState, reconciliation, controller, namespace, cluster, newTrustRoots, usedTrustRoots, ownerReference);
+        return new ClusterCerts(client,
+                trustPrivateState,
+                reconciliation,
+                controller,
+                namespace,
+                cluster,
+                ownerReference);
     }
 
     static RequiredCertificate<BrokerIdentity> brokerSubject(String namespace,
@@ -428,7 +434,7 @@ public class ClusterPki {
     }
 
     // TODO this needs a test
-    public void trust(Result1 result) throws CertificateEncodingException {
+    public void trust(ClusterCerts result) throws CertificateEncodingException {
         TrustController trustController = new TrustController(result.reconciliation,
                 result.trustPrivateState,
                 List.of(new LegacyTrustOutputWriter(client.secrets().inNamespace(result.namespace)
@@ -436,7 +442,7 @@ public class ClusterPki {
         
         Comparator<TrustRoot> comparator = Comparator.comparing(x -> x.fingerprint());
         Set<TrustRoot> newState = result.trustPrivateState.load().values().stream().map(trustRoot -> {
-            if (result.newTrustRoots.contains(trustRoot)) {
+            if (trustRoot.state() == TrustState.UNTRUSTED) {
                 // TODO this is fishy:
                 // a) what is enforcing the valid transitions
                 // b) why the need for the resourceVersion argument, then the TrustRoot already knows its rv?
@@ -447,6 +453,12 @@ public class ClusterPki {
             }
         }).collect(Collectors.toCollection(() -> new TreeSet<>(comparator)));
         Set<TrustRoot> toPhaseOut = new TreeSet<>(comparator);
+        // TODO Here we want to know all the EE certs in CertificateReconcileResult.WaitingForTrust, OkIssued or OkNoop
+        // TODO but do those CertificateReconcileResult correspond to CertStatuses
+        // I.e. does unique CertStatus imply thos CRRs?
+        // In kube we could do this using a label, allowing us to select by status
+        // But vault doesn't really support a usable LIST (https://www.vaultproject.io/api-docs/secret/kv/kv-v1)
+        // with selection semantic. The best we could do would be to LIST.map(GET).filter(STATE)
         toPhaseOut.removeAll(result.usedTrustRoots);
         newState.addAll(toPhaseOut.stream().map(TrustRoot::toPhaseOut).collect(Collectors.toSet()));
         // If a new CA cert was used this will
