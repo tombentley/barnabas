@@ -401,11 +401,11 @@ public class ClusterPki {
                 }
             }
         }
-        return new RequiredCertificate(new BrokerIdentity(brokerId), subject.build());
+        return new RequiredCertificate<>(new BrokerIdentity(brokerId), subject.build());
 
     }
 
-    static RequiredCertificate zkSubject(String namespace,
+    static RequiredCertificate<ZooKeeperNodeIdentity> zkSubject(String namespace,
                      String cluster,
                      int podId) {
         DnsNameGenerator zkDnsGenerator = DnsNameGenerator.of(namespace, ZookeeperCluster.serviceName(cluster));
@@ -424,7 +424,7 @@ public class ClusterPki {
         subject.addDnsName(zkDnsGenerator.wildcardServiceDnsName());
         subject.addDnsName(zkHeadlessDnsGenerator.wildcardServiceDnsNameWithoutClusterDomain());
         subject.addDnsName(zkHeadlessDnsGenerator.wildcardServiceDnsName());
-        return new RequiredCertificate(new ZooKeeperNodeIdentity(podId), subject.build());
+        return new RequiredCertificate<>(new ZooKeeperNodeIdentity(podId), subject.build());
     }
 
     // TODO this needs a test

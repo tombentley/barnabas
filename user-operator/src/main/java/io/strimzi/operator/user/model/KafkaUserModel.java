@@ -9,7 +9,6 @@ import javax.naming.ldap.LdapName;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStoreException;
-import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.security.spec.InvalidKeySpecException;
