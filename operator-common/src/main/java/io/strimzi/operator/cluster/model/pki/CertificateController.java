@@ -45,17 +45,16 @@ public class CertificateController {
 
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(CertificateController.class);
 
+    private final CertificateIssuer issuer;
     private final Validator validator;
     private final TrustPrivateState trustPrivateState;
-    private final CertificateIssuer issuer;
     private final int requestedValidity;
     private final Reconciliation reconciliation;
 
     public CertificateController(Reconciliation reconciliation,
                                  TrustPrivateState trustPrivateState,
                                  CertificateIssuer issuer,
-                                 Validator validator, int requestedValidity,
-                                 OwnerReference ownerReference) {
+                                 Validator validator, int requestedValidity) {
         // TODO we're just passing in the issuer, but really that has its own little state machine
         // or at least some state mgmt for knowing when we need to regenerate???
         // Or is it a recursive use of the trust controller and certificate controller?

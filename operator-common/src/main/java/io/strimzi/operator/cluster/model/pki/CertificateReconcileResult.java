@@ -5,6 +5,7 @@
 package io.strimzi.operator.cluster.model.pki;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * The result of a certificate reconciliation attempt, i.e. the result type of
@@ -38,6 +39,11 @@ public abstract class CertificateReconcileResult {
         public boolean equals(Object obj) {
             return obj instanceof WaitingForIssuance;
         }
+
+        @Override
+        public Optional<TrustRoot> trustRoot() {
+            return Optional.empty();
+        }
     }
 
     /**
@@ -63,6 +69,11 @@ public abstract class CertificateReconcileResult {
         public boolean equals(Object obj) {
             return obj instanceof IssuedBad;
         }
+
+        @Override
+        public Optional<TrustRoot> trustRoot() {
+            return Optional.empty();
+        }
     }
 
     /**
@@ -71,6 +82,11 @@ public abstract class CertificateReconcileResult {
     public static final class PendingBad extends CertificateReconcileResult {
         public PendingBad() {
 
+        }
+
+        @Override
+        public Optional<TrustRoot> trustRoot() {
+            return Optional.empty();
         }
 
         @Override
@@ -101,8 +117,8 @@ public abstract class CertificateReconcileResult {
             this.trustRoot = trustRoot;
         }
 
-        public TrustRoot trustRoot() {
-            return trustRoot;
+        public Optional<TrustRoot> trustRoot() {
+            return Optional.of(trustRoot);
         }
 
         @Override
@@ -139,8 +155,8 @@ public abstract class CertificateReconcileResult {
             this.trustRoot = trustRoot;
         }
 
-        public TrustRoot trustRoot() {
-            return trustRoot;
+        public Optional<TrustRoot> trustRoot() {
+            return Optional.of(trustRoot);
         }
 
         @Override
@@ -177,8 +193,8 @@ public abstract class CertificateReconcileResult {
             this.trustRoot = trustRoot;
         }
 
-        public TrustRoot trustRoot() {
-            return trustRoot;
+        public Optional<TrustRoot> trustRoot() {
+            return Optional.of(trustRoot);
         }
 
         @Override
@@ -202,4 +218,7 @@ public abstract class CertificateReconcileResult {
             return Objects.hash(trustRoot);
         }
     }
+
+
+    public abstract Optional<TrustRoot> trustRoot();
 }

@@ -158,10 +158,12 @@ public class ClientPkiUo {
         LOGGER.debugCr(reconciliation, "Chain reconciliation took {}ms",
                 (System.nanoTime() - t0) / 1_000_000.0);
         Validator validator = new Validator(clock, clientsCa.getRenewalDays());
-        CertificateController controller = new CertificateController(reconciliation, trustPrivateState,
+        CertificateController controller = new CertificateController(
+                reconciliation,
+                trustPrivateState,
                 issuer,
-                validator, clientsCa.getValidityDays(),
-                clientsCa.isGenerateSecretOwnerReference() ? ownerReference : null);
+                validator,
+                clientsCa.getValidityDays());
         final Set<TrustRoot> newTrustRoots = new HashSet<>();
         final Set<TrustRoot> usedTrustRoots = new HashSet<>();
         return new BootstrapResult(reconciliation, issuer, controller, client, namespace, cluster);

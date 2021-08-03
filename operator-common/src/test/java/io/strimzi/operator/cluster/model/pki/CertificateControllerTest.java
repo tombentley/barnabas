@@ -115,7 +115,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
                 trustPrivateState,
                 issuer,
                 validator,
-                requestedValidity, null);
+                requestedValidity);
     }
 
     /** Test the transition NEW -> REQUESTED, where the issuer doesn't reply synchronously */

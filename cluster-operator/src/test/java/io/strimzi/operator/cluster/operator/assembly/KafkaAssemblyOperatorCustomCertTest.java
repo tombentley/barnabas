@@ -88,10 +88,6 @@ public class KafkaAssemblyOperatorCustomCertTest {
         ReconciliationState createReconciliationState(Reconciliation reconciliation, Kafka kafkaAssembly) {
             return new ReconciliationState(reconciliation, kafkaAssembly) {
                 @Override
-                boolean newTrust() {
-                    return false;
-                }
-                @Override
                 Future<Void> maybeRollKafka(StatefulSet sts, Function<Pod, List<String>> podNeedsRestart) {
                     functionArgumentCaptor.add(podNeedsRestart);
                     return Future.succeededFuture();

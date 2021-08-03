@@ -19,6 +19,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.TreeSet;
@@ -97,6 +98,7 @@ import io.strimzi.operator.cluster.model.StatusDiff;
 import io.strimzi.operator.cluster.model.StorageDiff;
 import io.strimzi.operator.cluster.model.StorageUtils;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
+import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult;
 import io.strimzi.operator.cluster.model.pki.cluster.ClusterPki;
 import io.strimzi.operator.cluster.operator.resource.ConcurrentDeletionException;
 import io.strimzi.operator.cluster.operator.resource.KafkaRoller;
@@ -289,7 +291,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 // Roll everything if a new CA is added to the trust store.
                 .compose(state -> state.info("rollingUpdateForNewCaKey()"))
                 .compose(state -> state.rollingUpdateForNewCaKey(
-                        newMode ? state.newTrust() : state.clusterCaKeyReplaced,
+                        // TODO Can state.newClusterPkiTrust ever be true here?
+                        newMode ? state.newClusterPkiTrust : state.clusterCaKeyReplaced,
                         state.clientsCa.keyReplaced()))
 
                 .compose(state -> state.getZookeeperDescription())
@@ -464,6 +467,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private Secret clusterCaKeySecret;
         private Secret oldCoSecret;
         private ClusterPki.ClusterCerts clusterCerts;
+        private boolean newClusterPkiTrust = false;
 
         /* test */ ZookeeperCluster zkCluster;
         private ConfigMap zkMetricsAndLogsConfigMap;
@@ -666,48 +670,60 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterCerts.issueZkCertificates(kafkaAssembly);
+                clusterCerts.issueZkCertificates(kafkaAssembly).forEach(cr -> {
+                    newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
+                });
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterCerts.issueKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames);
+                clusterCerts.issueKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames).forEach(cr -> {
+                    newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
+                });
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterCerts.issueEoCertificate(kafkaAssembly);
+                Optional.ofNullable(clusterCerts.issueEoCertificate(kafkaAssembly)).ifPresent(cr -> {
+                    newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
+                });
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterCerts.issueCoCertificate(kafkaAssembly);
+                Optional.ofNullable(clusterCerts.issueCoCertificate(kafkaAssembly)).ifPresent(cr -> {
+                    newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
+                });
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterCerts.issueKafkaExporterCertificates(kafkaAssembly);
+                Optional.ofNullable(clusterCerts.issueKafkaExporterCertificates(kafkaAssembly)).ifPresent(cr -> {
+                    newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
+                });
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterCerts.issueCcCertificate(kafkaAssembly);
+                Optional.ofNullable(clusterCerts.issueCcCertificate(kafkaAssembly)).ifPresent(cr -> {
+                    newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
+                });
                 return null;
             });
         }
 
         Future<ReconciliationState> rollingUpdateForPki() {
-            return rollingUpdateForNewCaKey(newTrust(), false);
+            return rollingUpdateForNewCaKey(newClusterPkiTrust, false);
         }
 
         Future<ReconciliationState> clusterPkiTrust() {
@@ -1430,7 +1446,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return zkSetOperations.getAsync(namespace, ZookeeperCluster.zookeeperClusterName(name))
                     .compose(sts -> zkSetOperations.maybeRollingUpdate(reconciliation, sts,
                         pod -> getReasonsToRestartPod(zkDiffs.resource(), pod, existingZookeeperCertsChanged,
-                                new CertInfo(newTrust(), false,
+                                new CertInfo(newClusterPkiTrust, false,
                                         isPodCaCertUpToDate(pod,
                                                 clusterCaCertSecret,
                                                 Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)))))
@@ -2891,7 +2907,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 pod -> getReasonsToRestartPod(kafkaDiffs.resource(),
                         pod,
                         existingKafkaCertsChanged,
-                        new CertInfo(newTrust(), false,
+                        new CertInfo(newClusterPkiTrust, false,
                                 isPodCaCertUpToDate(pod,
                                         clusterCaCertSecret,
                                         Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION)),
@@ -3601,10 +3617,6 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             final int podCaCertGeneration =
                     pod == null ? Ca.INIT_GENERATION : Annotations.intAnnotation(pod, podAnnotation, Ca.INIT_GENERATION);
             return caCertGeneration == podCaCertGeneration;
-        }
-
-        boolean newTrust() {
-            return clusterCerts.newTrust();
         }
 
         class CertInfo {
