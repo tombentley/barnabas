@@ -134,12 +134,12 @@ public class TrustController {
                 }
                 break;
             case UNTRUSTED:
-                if (desiredState != TrustState.TRUSTED
+                if (desiredState != TrustState.TRUSTED_NEW
                     && desiredState != TrustState.ZOMBIE) {
                     throw new RuntimeException("Illegal state transition: " + currentState + " -> " + desiredRoot);
                 }
                 break;
-            case TRUSTED:
+            case TRUSTED_NEW:
                 if (desiredState != TrustState.PHASE_OUT) {
                     throw new RuntimeException("Illegal state transition: " + currentState + " -> " + desiredRoot);
                 }

@@ -22,7 +22,7 @@ public class BrokerIdentity extends SubjectIdentity {
         this.brokerId = brokerId;
     }
 
-    @JsonProperty
+    @JsonProperty("brokerId")
     public int brokerId() {
         return brokerId;
     }

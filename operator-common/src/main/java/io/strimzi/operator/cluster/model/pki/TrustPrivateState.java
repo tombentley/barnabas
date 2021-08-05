@@ -39,6 +39,7 @@ import org.apache.logging.log4j.Logger;
  * data:
  *   $FINGERPRINT.crt: ... # contains key and cert
  *   $FINGERPRINT.state: ... # is the current state
+ *   $FINGERPRINT.count: ... # the number of extant valid ee certs with this root cert as (possibly transitive) issuer
  * </code></pre>
  * <p>where there may be multiple fingerprints present.</p>
  *

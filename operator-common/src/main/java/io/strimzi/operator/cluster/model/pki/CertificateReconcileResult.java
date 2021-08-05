@@ -4,6 +4,7 @@
  */
 package io.strimzi.operator.cluster.model.pki;
 
+import java.security.cert.X509Certificate;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -41,7 +42,7 @@ public abstract class CertificateReconcileResult {
         }
 
         @Override
-        public Optional<TrustRoot> trustRoot() {
+        public Optional<X509Certificate> trustRoot() {
             return Optional.empty();
         }
     }
@@ -71,7 +72,7 @@ public abstract class CertificateReconcileResult {
         }
 
         @Override
-        public Optional<TrustRoot> trustRoot() {
+        public Optional<X509Certificate> trustRoot() {
             return Optional.empty();
         }
     }
@@ -85,7 +86,7 @@ public abstract class CertificateReconcileResult {
         }
 
         @Override
-        public Optional<TrustRoot> trustRoot() {
+        public Optional<X509Certificate> trustRoot() {
             return Optional.empty();
         }
 
@@ -110,22 +111,21 @@ public abstract class CertificateReconcileResult {
      * There <strong>is</strong> a {@link #trustRoot()} associated with results in this state.
      */
     public static final class WaitingForTrust extends CertificateReconcileResult {
-        private final TrustRoot trustRoot;
+        private final X509Certificate trustRoot;
 
-        public WaitingForTrust(TrustRoot trustRoot) {
+        public WaitingForTrust(X509Certificate trustRoot) {
             Objects.requireNonNull(trustRoot);
             this.trustRoot = trustRoot;
         }
 
-        public Optional<TrustRoot> trustRoot() {
+        public Optional<X509Certificate> trustRoot() {
             return Optional.of(trustRoot);
         }
 
         @Override
         public String toString() {
             return "WaitingForTrust(" +
-                    "trustRoot.fingerprint=" + trustRoot.fingerprint() +
-                    ", trustRoot.state=" + trustRoot.state() +
+                    "trustRoot.fingerprint=" + PkiUtils.fingerprint(trustRoot) +
                     ')';
         }
 
@@ -148,22 +148,21 @@ public abstract class CertificateReconcileResult {
      * There is no {@link #trustRoot()} associated with results in this state.
      */
     public static final class OkNoop extends CertificateReconcileResult {
-        private final TrustRoot trustRoot;
+        private final X509Certificate trustRoot;
 
-        public OkNoop(TrustRoot trustRoot) {
+        public OkNoop(X509Certificate trustRoot) {
             Objects.requireNonNull(trustRoot);
             this.trustRoot = trustRoot;
         }
 
-        public Optional<TrustRoot> trustRoot() {
+        public Optional<X509Certificate> trustRoot() {
             return Optional.of(trustRoot);
         }
 
         @Override
         public String toString() {
             return "OkNoop(" +
-                    "trustRoot.fingerprint=" + trustRoot.fingerprint() +
-                    ", trustRoot.state=" + trustRoot.state() +
+                    "trustRoot.fingerprint=" + PkiUtils.fingerprint(trustRoot) +
                     ')';
         }
 
@@ -186,22 +185,21 @@ public abstract class CertificateReconcileResult {
      * There is no {@link #trustRoot()} associated with results in this state.
      */
     public static final class OkIssued extends CertificateReconcileResult {
-        private final TrustRoot trustRoot;
+        private final X509Certificate trustRoot;
 
-        public OkIssued(TrustRoot trustRoot) {
+        public OkIssued(X509Certificate trustRoot) {
             Objects.requireNonNull(trustRoot);
             this.trustRoot = trustRoot;
         }
 
-        public Optional<TrustRoot> trustRoot() {
+        public Optional<X509Certificate> trustRoot() {
             return Optional.of(trustRoot);
         }
 
         @Override
         public String toString() {
             return "OkIssued(" +
-                    "trustRoot.fingerprint=" + trustRoot.fingerprint() +
-                    ", trustRoot.state=" + trustRoot.state() +
+                    "trustRoot.fingerprint=" + PkiUtils.fingerprint(trustRoot) +
                     ')';
         }
 
@@ -220,5 +218,5 @@ public abstract class CertificateReconcileResult {
     }
 
 
-    public abstract Optional<TrustRoot> trustRoot();
+    public abstract Optional<X509Certificate> trustRoot();
 }

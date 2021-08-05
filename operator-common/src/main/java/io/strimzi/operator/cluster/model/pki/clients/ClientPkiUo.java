@@ -27,7 +27,7 @@ import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult;
 import io.strimzi.operator.cluster.model.pki.Chain;
 import io.strimzi.operator.cluster.model.pki.NamedResource;
 import io.strimzi.operator.cluster.model.pki.RequiredCertificate;
-import io.strimzi.operator.cluster.model.pki.TrustPrivateState;
+import io.strimzi.operator.cluster.model.pki.TrustController2;
 import io.strimzi.operator.cluster.model.pki.TrustRoot;
 import io.strimzi.operator.cluster.model.pki.TrustState;
 import io.strimzi.operator.cluster.model.pki.Validator;
@@ -42,7 +42,7 @@ import io.strimzi.operator.common.ReconciliationLogger;
  * <p>
  * 1. When the UO issues a certificate it may create a new root cert in the trust secret
  * in the {@link TrustState#UNTRUSTED} state.
- * The CO rolls the brokers and transitions it to the {@link TrustState#TRUSTED} state
+ * The CO rolls the brokers and transitions it to the {@link TrustState#TRUSTED_NEW} state
  * <p>
  * 2. When a pending end entity certificate has a trusted root cert
  * the UO can then add the issued certificate to the user secret.
@@ -142,9 +142,10 @@ public class ClientPkiUo {
                 certManager);
 
         // TODO fix the name
-        TrustPrivateState trustPrivateState = new TrustPrivateState(
-                ownerReference,
-                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"));
+//        TrustPrivateState trustPrivateState = new TrustPrivateState(
+//                ownerReference,
+//                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"));
+        TrustController2 useManager = new TrustController2(reconciliation, new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"));
         // TODO we don't ourselves reconcile the chain here. We somehow need to instantiate an issuer based on
         // what's present in the Secrets and/or the Kafka CR
         // Does this that Chain ought to be composed of two parts
@@ -160,7 +161,7 @@ public class ClientPkiUo {
         Validator validator = new Validator(clock, clientsCa.getRenewalDays());
         CertificateController controller = new CertificateController(
                 reconciliation,
-                trustPrivateState,
+                useManager,
                 issuer,
                 validator,
                 clientsCa.getValidityDays());

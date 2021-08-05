@@ -99,6 +99,7 @@ import io.strimzi.operator.cluster.model.StorageDiff;
 import io.strimzi.operator.cluster.model.StorageUtils;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
 import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult;
+import io.strimzi.operator.cluster.model.pki.TrustRoot;
 import io.strimzi.operator.cluster.model.pki.cluster.ClusterPki;
 import io.strimzi.operator.cluster.operator.resource.ConcurrentDeletionException;
 import io.strimzi.operator.cluster.operator.resource.KafkaRoller;

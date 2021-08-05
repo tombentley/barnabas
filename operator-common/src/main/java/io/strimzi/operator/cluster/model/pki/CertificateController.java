@@ -12,12 +12,10 @@ import java.security.cert.CertificateParsingException;
 import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
 import java.security.spec.InvalidKeySpecException;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.strimzi.certs.Subject;
 import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult.OkIssued;
 import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult.OkNoop;
@@ -29,17 +27,16 @@ import io.strimzi.operator.common.ReconciliationLogger;
 /**
  * Manages the issuance, validation and re-issuance of end-entity certificates using a {@link CertificateIssuer},
  * implementing all the transitions of the {@link CertificateStatus} state machine, and some of the transitions
- * of the {@link TrustState} state machine.
+ * of the {@link TrustState} state machine via a {@link UseManager}.
  *
  * Because a certificate might be issued with a new, untrusted, root CA certificate certificates cannot always
  * be used immediately: Trust in the new root CA certificate may have to be established first.
- * The caller of {@link #reconcile(RequiredCertificate, CertificateOutputWriter)} needs to inspect the result and possibly establish trust
- * in the trust anchor before deploying the issued certificate for use.
+ * The caller of {@link #reconcile(RequiredCertificate, CertificateOutputWriter)} needs to inspect the result and
+ * possibly wait for a {@link TrustManager} to establish trust in the trust anchor before deploying the
+ * issued certificate for use.
  *
  * The state of issued certificates is made persistent (in Kube) via the {@link CertificateOutputWriter}, so that the
  * current state of each certificate's state machine is persisted across restarts of the operator process.
- *
- * The trustedness of CA certificates is determined by the {@link TrustPrivateState}.
  */
 public class CertificateController {
 
@@ -47,18 +44,16 @@ public class CertificateController {
 
     private final CertificateIssuer issuer;
     private final Validator validator;
-    private final TrustPrivateState trustPrivateState;
+    private final UseManager useManager;
     private final int requestedValidity;
     private final Reconciliation reconciliation;
 
     public CertificateController(Reconciliation reconciliation,
-                                 TrustPrivateState trustPrivateState,
+                                 //TrustPrivateState trustPrivateState,
+                                 UseManager useManager,
                                  CertificateIssuer issuer,
                                  Validator validator, int requestedValidity) {
-        // TODO we're just passing in the issuer, but really that has its own little state machine
-        // or at least some state mgmt for knowing when we need to regenerate???
-        // Or is it a recursive use of the trust controller and certificate controller?
-        this.trustPrivateState = Objects.requireNonNull(trustPrivateState);
+        this.useManager = useManager;
         this.issuer = Objects.requireNonNull(issuer);
         this.validator = Objects.requireNonNull(validator);
         this.requestedValidity = requestedValidity;
@@ -109,7 +104,6 @@ public class CertificateController {
         // Maybe that's a delete(SubjectIdentity) method.
         // Which would basically just to remove the state and the output certificates.
 
-        Map<Fingerprint, TrustRoot> trustState = this.trustPrivateState.load();
         CertificateStatus<I> certStatus = writer.loadStatus(requiredCertificate.subjectIdentity());
         final CertificateState startState = certStatus.state();
         LOGGER.debugCr(reconciliation, "Required cert {} has state {}", requiredCertificate.subjectIdentity(), startState);
@@ -119,13 +113,13 @@ public class CertificateController {
                 // fall through
             }
             case REQUESTED: {
-                return handleRequested(certStatus, requiredCertificate, trustState, writer);
+                return handleRequested(certStatus, requiredCertificate, writer);
             }
             case PENDING: {
-                return handlePending(certStatus, requiredCertificate, trustState, writer);
+                return handlePending(certStatus, requiredCertificate, writer);
             }
             case IN_USE: {
-                return handleInUse(certStatus, requiredCertificate, trustState, writer);
+                return handleInUse(certStatus, requiredCertificate, writer);
             }
             case NOT_NEEDED:
                 // This shouldn't occur here and only be handled at a higher level
@@ -146,7 +140,6 @@ public class CertificateController {
 
     private <I extends SubjectIdentity> CertificateReconcileResult handleRequested(CertificateStatus<I> status,
                                                        RequiredCertificate<I> requiredCertificate,
-                                                       Map<Fingerprint, TrustRoot> trustState,
                                                        CertificateOutputWriter<I> writer)
             throws CertificateParsingException {
 
@@ -174,16 +167,16 @@ public class CertificateController {
         }
 
         LOGGER.debugCr(reconciliation, "Cert issued: identity: {}, fingerprint: {} rootFingerprint: {}", requiredCertificate.subjectIdentity(), issued.issuedFingerprint(), issued.rootCaFingerprint());
-        TrustRoot trustRoot = trustState.get(issued.rootCaFingerprint());
-        if (trustRoot == null) {
+        TrustState trustState = useManager.state(issued.rootCaFingerprint());
+        if (trustState == null) {
             // it's new, so we should add it in UNTRUSTED
-            return waitingForTrust(status, writer, issued, TrustRoot.untrusted(issued.rootCaCertificate()));
+            return waitingForTrust(status, writer, issued, issued.rootCaCertificate());
         } else {
-            switch (trustRoot.state()) {
+            switch (trustState) {
                 case UNTRUSTED:
-                    return validateRequestedThatsNotYetTrustable(status, writer, requiredCertificate, issued, trustRoot);
-                case TRUSTED:
-                    return validateRequestedThatShouldBeTrusted(status, requiredCertificate, issued, trustRoot, writer);
+                    return validateRequestedThatsNotYetTrustable(status, writer, requiredCertificate, issued, issued.rootCaCertificate());
+                case TRUSTED_NEW:
+                    return validateRequestedThatShouldBeTrusted(status, requiredCertificate, issued, issued.rootCaCertificate(), writer);
                 case PHASE_OUT:
                     // fall through
                 case ZOMBIE: {
@@ -192,7 +185,7 @@ public class CertificateController {
                             "New certificate for {} was issued using a root CA certificate in state {}." +
                             "In theory this should never happen, so please report this as a bug.",
                             requiredCertificate.subjectIdentity(),
-                            trustRoot.state());
+                            trustState);
                     status = handleNew(status, writer, requiredCertificate);
                     return new CertificateReconcileResult.IssuedBad();
                 }
@@ -205,7 +198,7 @@ public class CertificateController {
     private <I extends SubjectIdentity> CertificateReconcileResult validateRequestedThatShouldBeTrusted(CertificateStatus<I> status,
                                                                             RequiredCertificate<I> requiredCertificate,
                                                                             IssuedCertificate issued,
-                                                                            TrustRoot trustRoot,
+                                                                            X509Certificate trustRoot,
                                                                             CertificateOutputWriter<I> writer) {
         // If it's trusted then proceed to validate
         Set<TrustAnchor> trustAnchors = asTrustAnchor(trustRoot);
@@ -245,7 +238,7 @@ public class CertificateController {
                                                                              CertificateOutputWriter<I> writer,
                                                                              RequiredCertificate<I> requiredCertificate,
                                                                              IssuedCertificate issued,
-                                                                             TrustRoot trustRoot) {
+                                                                             X509Certificate trustRoot) {
         // We're still waiting
         Set<TrustAnchor> trustAnchors = asTrustAnchor(trustRoot);
         Validator.Result result = validate(issued, trustAnchors);
@@ -278,27 +271,27 @@ public class CertificateController {
         }
     }
 
-    private Set<TrustAnchor> asTrustAnchor(TrustRoot trustRoot) {
-        return Set.of(new TrustAnchor(trustRoot.x509(), null));
+    private Set<TrustAnchor> asTrustAnchor(X509Certificate trustRoot) {
+        return Set.of(new TrustAnchor(trustRoot, null));
     }
 
     private <I extends SubjectIdentity> CertificateReconcileResult handlePending(CertificateStatus<I> status,
                                                      RequiredCertificate<I> requiredCertificate,
-                                                     Map<Fingerprint, TrustRoot> trustState,
                                                      CertificateOutputWriter<I> writer) {
         IssuedCertificate issued = status.issuedCertificate();
-        Set<TrustAnchor> trustAnchors = trustAnchors(trustState, TrustState.TRUSTED);
+        Set<TrustAnchor> trustAnchors = trustAnchors(TrustState.TRUSTED_NEW);
         Validator.Result result = validate(issued, trustAnchors);
         switch (result.type()) { // should we query the trustState or should be pkixValidate?
             case OK:
             case WILL_EXPIRE: // it may be about to expire, but it's better than nothing
                 // deploy it for use
                 Fingerprint fingerprint = PkiUtils.fingerprint(result.anchor().getTrustedCert());
-                TrustRoot trustRoot = trustState.get(fingerprint).toPhaseOut();
-                return deploy(status, requiredCertificate, issued, trustRoot, writer);
+//                TrustState trustState = useManager.state(fingerprint);
+//                TrustRoot trustRoot = trustState.get(fingerprint).toPhaseOut();
+                return deploy(status, requiredCertificate, issued, result.anchor().getTrustedCert(), writer);
             case NO_TRUST_ANCHOR:
                 // It's still not trusted yet: we have to wait
-                return new WaitingForTrust(TrustRoot.untrusted(issued.rootCaCertificate()));
+                return new WaitingForTrust(issued.rootCaCertificate());
             case HAS_EXPIRED:
             case OTHER:
                 status = handleNew(status, writer, requiredCertificate);
@@ -312,7 +305,7 @@ public class CertificateController {
     private <I extends SubjectIdentity> CertificateReconcileResult deploy(CertificateStatus<I> status,
                                               RequiredCertificate<I> requiredCertificate,
                                               IssuedCertificate issued,
-                                              TrustRoot trustRoot,
+                                              X509Certificate trustRoot,
                                               CertificateOutputWriter<I> writer) {
         LOGGER.debugCr(reconciliation, "Cert transition: identity: {}, to-state: {}", requiredCertificate.subjectIdentity(), CertificateState.IN_USE);
         status = status.toInUse();
@@ -335,18 +328,18 @@ public class CertificateController {
     private <I extends SubjectIdentity> CertificateReconcileResult handleInUse(
             CertificateStatus<I> status,
             RequiredCertificate<I> requiredCertificate,
-            Map<Fingerprint, TrustRoot> trustState,
             CertificateOutputWriter<I> writer) throws CertificateParsingException {
         // Is it still OK? validate it to find out
         IssuedCertificate issued = status.issuedCertificate(); // Alternative load the chain from the p12
-        Set<TrustAnchor> trustAnchors = trustAnchors(trustState, TrustState.TRUSTED, TrustState.PHASE_OUT);
+        Set<TrustAnchor> trustAnchors = trustAnchors(TrustState.TRUSTED_NEW, TrustState.PHASE_OUT);
         Validator.Result result = validate(issued, trustAnchors);
         switch (result.type()) {
             case OK: {
                 // still valid: do nothing (this is the common case once a cluster is bootstrapped)
                 Fingerprint fingerprint = PkiUtils.fingerprint(result.anchor().getTrustedCert());
-                TrustRoot trustRoot = trustState.get(fingerprint).toPhaseOut();
-                return new OkNoop(trustRoot);
+                useManager.state(fingerprint);
+//                TrustRoot trustRoot = trustState.get(fingerprint).toPhaseOut();
+                return new OkNoop(result.anchor().getTrustedCert());
             }
             case OTHER:
             case NO_TRUST_ANCHOR:
@@ -357,12 +350,13 @@ public class CertificateController {
                 status = handleNew(status, writer, requiredCertificate);
                 if (result.isRootExpiring()) {
                     Fingerprint fingerprint = PkiUtils.fingerprint(result.anchor().getTrustedCert());
-                    TrustRoot trustRoot = trustState.get(fingerprint).toPhaseOut();
-                    LOGGER.debugCr(reconciliation, "Trust transition: root: {}, to-state: {}", fingerprint, trustRoot.state());
-                    trustPrivateState.transition(Map.of(fingerprint, trustRoot));
+                    //TrustRoot trustRoot = trustState.get(fingerprint).toPhaseOut();
+                    LOGGER.debugCr(reconciliation, "Trust transition: root: {}, to-state: {}", fingerprint, useManager.state(fingerprint));
+                    useManager.depend(result.anchor().getTrustedCert());
+                    //trustPrivateState.transition(Map.of(fingerprint, trustRoot));
                 }
                 //return CertificateReconcileResult.waitingForIssuance();
-                return handleRequested(status, requiredCertificate, trustState, writer);
+                return handleRequested(status, requiredCertificate, writer);
             }
             default:
                 throw new IllegalStateException();
@@ -381,21 +375,20 @@ public class CertificateController {
     private <I extends SubjectIdentity> CertificateReconcileResult waitingForTrust(CertificateStatus<I> status,
                                                        CertificateOutputWriter<I> writer,
                                                        IssuedCertificate issued,
-                                                       TrustRoot untrustedTrustRoot) {
-        LOGGER.debugCr(reconciliation, "Cert transition: identity: {}, to-state: {}", issued.issuedFingerprint(), CertificateState.PENDING);
+                                                       X509Certificate trustRoot) {
+        LOGGER.debugCr(reconciliation, "Cert transition: identity: {}, to-state: {}",
+                issued.issuedFingerprint(), CertificateState.PENDING);
         status = status.toPending(issued);
         writer.storeStatus(status);
-        LOGGER.debugCr(reconciliation, "Trust transition: root: {}, to-state: {}", untrustedTrustRoot.fingerprint(), untrustedTrustRoot.state());
-        trustPrivateState.transition(Map.of(untrustedTrustRoot.fingerprint(), untrustedTrustRoot));
-        return new WaitingForTrust(untrustedTrustRoot);
+        useManager.requireTrust(trustRoot);
+        //trustPrivateState.transition(Map.of(untrustedTrustRoot.fingerprint(), untrustedTrustRoot));
+        return new WaitingForTrust(trustRoot);
     }
 
-    private Set<TrustAnchor> trustAnchors(Map<Fingerprint, TrustRoot> trustState, TrustState... s) {
-        Set<TrustState> x = Set.of(s);
-        return trustState.values().stream()
-            .filter(root -> x.contains(root.state()))
-            .map(root -> new TrustAnchor(root.x509(), null))
-            .collect(Collectors.toSet());
+    private Set<TrustAnchor> trustAnchors(TrustState... s) {
+        return useManager.certsInStates(Set.of(s)).stream()
+                .map(cert -> new TrustAnchor(cert, null))
+                .collect(Collectors.toSet());
     }
 
 }

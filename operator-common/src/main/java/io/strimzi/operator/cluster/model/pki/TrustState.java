@@ -23,7 +23,7 @@ public enum TrustState {
      *
      * <p>Transitions to:</p>
      * <ul>
-     * <li>{@link #TRUSTED} once all parties trust this CA certificate.</li>
+     * <li>{@link #TRUSTED_NEW} once all parties trust this CA certificate.</li>
      * <li>{@link #ZOMBIE} if this CA certificate expires or is marked for renewal before all the pods have been restarted.</li>
      * </ul>
      */
@@ -47,7 +47,9 @@ public enum TrustState {
      * <p>Transitions to: {@link #PHASE_OUT}.</p>
      */
 
-    TRUSTED("trusted"),
+    TRUSTED_NEW("trusted_new"),
+
+    TRUSTED_USED("trusted_used"),
 
     /**
      * <p>The certificate is trusted everywhere it needs to be and may still relied upon in cert paths.
@@ -69,6 +71,7 @@ public enum TrustState {
      *
      * <p>Transitions to {@link #ZOMBIE}.</p>
      */
+    @Deprecated
     PHASE_OUT("phase-out"),
 
     /**
@@ -114,8 +117,10 @@ public enum TrustState {
                 return UNKNOWN;
             case "untrusted":
                 return UNTRUSTED;
-            case "trusted":
-                return TRUSTED;
+            case "trusted_new":
+                return TRUSTED_NEW;
+            case "trusted_used":
+                return TRUSTED_USED;
             case "phase-out":
                 return PHASE_OUT;
             case "zombie":

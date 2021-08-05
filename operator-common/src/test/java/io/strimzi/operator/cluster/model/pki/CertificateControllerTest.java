@@ -20,6 +20,7 @@ import java.util.Set;
 
 import io.strimzi.certs.Subject;
 import io.strimzi.operator.common.Reconciliation;
+import io.strimzi.test.mockkube.MockKube;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -67,7 +68,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     private final int requestedValidity = 10;
     private final byte[] token = {1, 2, 3};
     private final IssuedCertificate issued = issuedCertificate();
-    private TrustPrivateState trustPrivateState;
+    private UseManager trustPrivateState;
     private LinkedHashMap<Object, Object> storedStatuses;
     private ArrayList<IssuedCertificate> observedIssuedCertificates;
     private CertificateOutputWriter certificateOutputWriter;
@@ -82,12 +83,8 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     @BeforeEach
     public void before() throws CertificateException, InvalidKeySpecException, KeyStoreException, IOException {
         trustPrivateStateMap = new HashMap<>();
-        trustPrivateState = mock(TrustPrivateState.class);
-        doAnswer(i -> {
-            trustPrivateStateMap.putAll(i.getArgument(0));
-            return null;
-        }).when(trustPrivateState).transition(any());
-        when(trustPrivateState.load()).thenAnswer(i -> new HashMap<>(trustPrivateStateMap));
+        trustPrivateState = new TrustController2(new Reconciliation("", "", "", ""),
+                new NamedResource<>(new MockKube().build().secrets().inNamespace("ns"), "foo"));
 
         storedStatuses = new LinkedHashMap<>();
         certificateOutputWriter = mock(CertificateOutputWriter.class);
@@ -121,7 +118,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     /** Test the transition NEW -> REQUESTED, where the issuer doesn't reply synchronously */
     @Test
     public void testNewToRequested() throws CertificateException {
-        when(trustPrivateState.load()).thenReturn(Map.of());
+//        when(trustPrivateState.load()).thenReturn(Map.of());
 
         storedStatuses.put(subjectIdentity, newStatus());
 
@@ -193,7 +190,6 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     }
 
     private void doRequestedToPending(List<IssuedCertificate> expectedIssuedCertificates) throws CertificateException {
-        when(trustPrivateState.load()).thenReturn(Map.of());
 
         storedStatuses.put(subjectIdentity, requestedStatus());
 
@@ -210,15 +206,14 @@ class CertificateControllerTest extends OpensslCaTestHarness {
 
         assertEquals(List.of(pendingStatus(issued)), List.copyOf(storedStatuses.values()));
         assertEquals(expectedIssuedCertificates, observedIssuedCertificates);
-        TrustRoot v1 = new TrustRoot(issued.rootCaCertificate(), TrustState.UNTRUSTED, null);
-        assertEquals(Map.of(v1.fingerprint(), v1), trustPrivateStateMap);
+        assertEquals(TrustState.UNTRUSTED, trustPrivateState.state(issued.rootCaFingerprint()));
 
         // And do it again, should be idempotent
         controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
 
         assertEquals(List.of(pendingStatus(issued)), List.copyOf(storedStatuses.values()));
         assertEquals(expectedIssuedCertificates, observedIssuedCertificates);
-        assertEquals(Map.of(v1.fingerprint(), v1), trustPrivateStateMap);
+        assertEquals(TrustState.UNTRUSTED, trustPrivateState.state(issued.rootCaFingerprint()));
     }
 
     /** Test the transition PENDING -> IN_USE, where the root is now trusted */
@@ -227,7 +222,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         trustPrivateStateMap.put(issued.rootCaFingerprint(),
                 TrustRoot.untrusted(issued.rootCaCertificate()).toTrusted("123"));
 
-        doPendingToInUse(TrustState.TRUSTED);
+        doPendingToInUse(TrustState.TRUSTED_NEW);
     }
 
     /** Test the transition PENDING -> IN_USE, where the root is in phase out, but there's no need to renew */
@@ -292,7 +287,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         assertEquals(List.of(requestedStatus()), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(issued), observedIssuedCertificates);
         // TODO really in the PHASE_OUT state? Or should this be zombie????
-        assertEquals(Map.of(value.fingerprint(), value.toPhaseOut()), trustPrivateStateMap);
+        assertEquals(TrustState.TRUSTED_USED, trustPrivateState.state(value.fingerprint()));
 
         // And do it again, should be idempotent
         controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
@@ -300,7 +295,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         assertEquals(List.of(requestedStatus()), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(issued), observedIssuedCertificates);
         // TODO really in the PHASE_OUT state? Or should this be zombie????
-        assertEquals(Map.of(value.fingerprint(), value.toPhaseOut()), trustPrivateStateMap);
+        assertEquals(TrustState.TRUSTED_USED, trustPrivateState.state(value.fingerprint()));
     }
 
     // TODO assertions on the result of reconcile, if we really need one???

@@ -11,7 +11,7 @@ import java.util.Objects;
 /**
  * A CA certificate together with it's current state.
  * {@code TrustRoot} is, perhaps, a slight misnomer, since the certificate is not necessarily
- * {@link TrustState#TRUSTED}.
+ * {@link TrustState#TRUSTED_NEW}.
  *
  * @see TrustController which manages the transitions UNTRUSTED -&gt; TRUSTED and others.
  * @see CertificateController which creates TrustRoots in the UNTRUSTED state and is responsible for the other transitions.
@@ -56,7 +56,7 @@ public class TrustRoot {
     }
 
     public TrustRoot toTrusted(String resourceVersion) {
-        return new TrustRoot(x509, TrustState.TRUSTED, resourceVersion);
+        return new TrustRoot(x509, TrustState.TRUSTED_NEW, resourceVersion);
     }
 
     public TrustRoot toPhaseOut() {
@@ -71,7 +71,7 @@ public class TrustRoot {
         return fingerprint == null ? fingerprint = PkiUtils.fingerprint(x509()) : fingerprint;
     }
 
-    X509Certificate x509() {
+    public X509Certificate x509() {
         return x509;
     }
 
