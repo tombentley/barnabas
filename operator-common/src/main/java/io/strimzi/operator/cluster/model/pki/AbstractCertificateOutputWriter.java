@@ -132,6 +132,10 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
         if (secret == null || secret.getData() == null || secret.getData().isEmpty()) {
             return CertificateStatus.createNew(subjectIdentity);
         } else {
+            // check for ${id}.requested (value would be the token)
+            // check for ${id}.pending (value would be issued cert and key and PEM or p12)
+            // otherwise lo
+
             String src = secret.getData().get(stateKey(subjectIdentity));
             if (src == null) {
                 return CertificateStatus.createNew(subjectIdentity);

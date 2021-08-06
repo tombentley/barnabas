@@ -11,7 +11,6 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.Base64;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -34,7 +33,7 @@ import static java.time.temporal.ChronoField.YEAR;
  * A TrustOutputWriter impl supporting the legacy layout, suitable for
  * {@code $CLUSTER-cluster-ca-certs} and {@code $CLUSTER-client-ca-certs}.
  */
-public class LegacyTrustOutputWriter implements TrustOutputWriter {
+public class LegacyTrustedCertificateWriter implements TrustedCertificateWriter {
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = new DateTimeFormatterBuilder()
             .appendValue(YEAR, 4)
@@ -57,20 +56,19 @@ public class LegacyTrustOutputWriter implements TrustOutputWriter {
 
     private final Resource<Secret> secretResource;
 
-    public LegacyTrustOutputWriter(Resource<Secret> secretResource) {
+    public LegacyTrustedCertificateWriter(Resource<Secret> secretResource) {
         this.secretResource = secretResource;
     }
 
     @Override
-    public void write(Collection<TrustRoot> trustRoot) throws CertificateEncodingException {
-        List<TrustRoot> collect = trustRoot.stream().sorted(Comparator.comparing(TrustRoot::notAfter)).collect(Collectors.toList());
+    public void write(Map<Fingerprint, X509Certificate> trustRoots) throws CertificateEncodingException {
+        List<X509Certificate> collect = trustRoots.values().stream().sorted(Comparator.comparing(cert -> cert.getNotAfter().toInstant())).collect(Collectors.toList());
         Map<String, String> data = new HashMap<>();
         if (!collect.isEmpty()) {
-            TrustRoot last = collect.remove(collect.size() - 1);
-            data.put("ca.crt", Base64.getEncoder().encodeToString(PkiUtils.asPemBytes(last.x509())));
-            for (TrustRoot root : collect) {
-                X509Certificate x509 = root.x509();
-                data.put("ca-" + DATE_TIME_FORMATTER.format(x509.getNotAfter().toInstant().atZone(ZoneId.of("UTC"))) + ".crt", Base64.getEncoder().encodeToString(PkiUtils.asPemString(x509).getBytes(StandardCharsets.ISO_8859_1)));
+            X509Certificate last = collect.remove(collect.size() - 1);
+            data.put("ca.crt", Base64.getEncoder().encodeToString(PkiUtils.asPemBytes(last)));
+            for (X509Certificate root : collect) {
+                data.put("ca-" + DATE_TIME_FORMATTER.format(root.getNotAfter().toInstant().atZone(ZoneId.of("UTC"))) + ".crt", Base64.getEncoder().encodeToString(PkiUtils.asPemString(root).getBytes(StandardCharsets.ISO_8859_1)));
             }
         }
         Secret secret = secretResource.get();

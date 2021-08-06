@@ -9,7 +9,7 @@ import java.util.Set;
 
 /**
  * <p>Manages the trust managing entity (i.e. CO) part of the shared-state protocol for managing trust.
- * See {@link TrustController2} for the full state machine.
+ * See {@link TrustController} for the full state machine.
  */
 public interface TrustManager {
     Set<X509Certificate> requiringTrust();

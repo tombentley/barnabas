@@ -82,17 +82,9 @@ public class CertificateStatus<Id extends SubjectIdentity> {
         }
     }
 
-    public Fingerprint fingerprint() {
-        return fingerprint == null ? fingerprint = PkiUtils.fingerprint(x509()) : fingerprint;
-    }
-
     @JsonProperty
     public Id subjectIdentity() {
         return subjectIdentity;
-    }
-
-    X509Certificate x509() {
-        return issuedCertificate().issuedCertificate();
     }
 
     @JsonProperty
@@ -109,17 +101,6 @@ public class CertificateStatus<Id extends SubjectIdentity> {
         }
     }
 
-    public Instant notBefore() {
-        return x509().getNotBefore().toInstant();
-    }
-
-    public Instant notAfter() {
-        return x509().getNotAfter().toInstant();
-    }
-
-    public boolean isValidAt(Instant time) {
-        return time.isAfter(notBefore()) && time.isBefore(notAfter());
-    }
 
     @Override
     public String toString() {

@@ -9,16 +9,17 @@ import java.util.Set;
 
 /**
  * <p>Manages the certificate issuing entity (i.e. CO or UO, depending on PKI) part of the shared-state protocol for managing trust.
- * See {@link TrustController2} for the full state machine.
+ * See {@link TrustController} for the full state machine.
  */
-public interface UseManager {
+public interface TrustDependencyManager {
     void requireTrust(X509Certificate cert);
 
     void depend(X509Certificate cert);
 
+    // TODO arrange for the CO and UO to call this
     void undepend(X509Certificate cert);
 
     TrustState state(Fingerprint rootCaFingerprint);
 
-    Set<X509Certificate> certsInStates(Set<TrustState> states);
+    Set<X509Certificate>    certsInStates(Set<TrustState> states);
 }

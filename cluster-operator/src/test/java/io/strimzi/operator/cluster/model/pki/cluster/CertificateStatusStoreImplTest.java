@@ -20,7 +20,7 @@ import io.strimzi.operator.cluster.model.pki.CertificateStatus;
 import io.strimzi.operator.cluster.model.pki.IssuedCertificate;
 import io.strimzi.operator.cluster.model.pki.NamedResource;
 import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
-import io.strimzi.operator.cluster.model.pki.TrustPrivateStateTest;
+import io.strimzi.operator.cluster.model.pki.CertHelper;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.mockkube.MockKube;
 import org.junit.jupiter.api.Assertions;
@@ -109,7 +109,7 @@ class CertificateStatusStoreImplTest {
     }
 
     IssuedCertificate issuedCertificate() throws IOException, CertificateException {
-        X509Certificate x509Certificate = TrustPrivateStateTest.getX509Certificate("/CLUSTER_CERT.pem");
+        X509Certificate x509Certificate = CertHelper.getX509Certificate("/CLUSTER_CERT.pem");
         return new IssuedCertificate(new byte[]{4, 5, 6}, x509Certificate, List.of(x509Certificate), x509Certificate);
     }
 }

@@ -5,8 +5,8 @@
 package io.strimzi.operator.cluster.model.pki;
 
 import java.security.cert.CertificateEncodingException;
+import java.security.cert.X509Certificate;
 import java.util.Base64;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -18,19 +18,19 @@ import io.fabric8.kubernetes.client.dsl.Resource;
  * A TrustOutputWriter impl supporting the new layout, suitable for
  * {@code $CLUSTER-$CA-trust}.
  */
-public class NewTrustOutputWriter implements TrustOutputWriter {
+public class NewTrustedCertificateWriter implements TrustedCertificateWriter {
 
     private final Resource<Secret> secretResource;
 
-    public NewTrustOutputWriter(Resource<Secret> secretResource) {
+    public NewTrustedCertificateWriter(Resource<Secret> secretResource) {
         this.secretResource = secretResource;
     }
 
     @Override
-    public void write(Collection<TrustRoot> trustRoots) throws CertificateEncodingException {
+    public void write(Map<Fingerprint, X509Certificate> trustRoots) throws CertificateEncodingException {
         Map<String, String> data = new HashMap<>();
-        for (TrustRoot root : trustRoots) {
-            data.put(root.fingerprint() + ".crt", Base64.getEncoder().encodeToString(PkiUtils.asPemBytes(root.x509())));
+        for (Map.Entry<Fingerprint, X509Certificate> root : trustRoots.entrySet()) {
+            data.put(root.getKey() + ".crt", Base64.getEncoder().encodeToString(PkiUtils.asPemBytes(root.getValue())));
             // TODO data.put(root.fingerprint() + ".p12", Base64.getEncoder().encodeToString(PkiUtils.asP12(root.x509())));
         }
         Secret secret = secretResource.get();

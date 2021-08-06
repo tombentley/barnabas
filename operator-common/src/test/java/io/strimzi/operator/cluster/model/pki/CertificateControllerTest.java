@@ -10,13 +10,15 @@ import java.security.cert.CertificateException;
 import java.security.cert.TrustAnchor;
 import java.security.spec.InvalidKeySpecException;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import io.strimzi.certs.Subject;
 import io.strimzi.operator.common.Reconciliation;
@@ -30,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class CertificateControllerTest extends OpensslCaTestHarness {
@@ -68,30 +71,28 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     private final int requestedValidity = 10;
     private final byte[] token = {1, 2, 3};
     private final IssuedCertificate issued = issuedCertificate();
-    private UseManager trustPrivateState;
-    private LinkedHashMap<Object, Object> storedStatuses;
+    private TrustDependencyManager trustDependencyManager;
+    private TrustManager trustManager;
+    //private LinkedHashMap<Object, Object> storedStatuses;
     private ArrayList<IssuedCertificate> observedIssuedCertificates;
-    private CertificateOutputWriter certificateOutputWriter;
+    private CertificateOutputWriter<TestId> certificateOutputWriter;
     private CertificateIssuer issuer;
     private Validator validator;
     private CertificateController controller;
-    private Map<Fingerprint, TrustRoot> trustPrivateStateMap;
+
 
     CertificateControllerTest() throws IOException, CertificateException {
     }
 
     @BeforeEach
     public void before() throws CertificateException, InvalidKeySpecException, KeyStoreException, IOException {
-        trustPrivateStateMap = new HashMap<>();
-        trustPrivateState = new TrustController2(new Reconciliation("", "", "", ""),
+        TrustController trustDependencyManager = new TrustController(new Reconciliation("", "", "", ""),
                 new NamedResource<>(new MockKube().build().secrets().inNamespace("ns"), "foo"));
+        this.trustDependencyManager = trustDependencyManager;
+        this.trustManager = trustDependencyManager;
 
-        storedStatuses = new LinkedHashMap<>();
         certificateOutputWriter = mock(CertificateOutputWriter.class);
-        when(certificateOutputWriter.loadStatus(subjectIdentity)).thenAnswer(i -> storedStatuses.get(i.getArgument(0)));
         Mockito.doAnswer(i -> {
-            CertificateStatus status = i.getArgument(0);
-            storedStatuses.put(status.subjectIdentity(), status);
             return null;
         }).when(certificateOutputWriter).storeStatus(any());
 
@@ -109,7 +110,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
 
         controller = new CertificateController(
                 new Reconciliation("test", "Kafka", "ns", "n"),
-                trustPrivateState,
+                this.trustDependencyManager,
                 issuer,
                 validator,
                 requestedValidity);
@@ -120,58 +121,58 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     public void testNewToRequested() throws CertificateException {
 //        when(trustPrivateState.load()).thenReturn(Map.of());
 
-        storedStatuses.put(subjectIdentity, newStatus());
-
+        when(certificateOutputWriter.loadStatus(subjectIdentity)).thenReturn(newStatus());
         when(issuer.requestCertificate(eq(subject), eq(requestedValidity))).thenReturn(token);
         when(issuer.pollForRequestedCertificate(eq(token))).thenReturn(Optional.empty());
-
         when(validator.validate(any(IssuedCertificate.class), any(Set.class))).thenReturn(Validator.Result.noTrustAnchor());
 
         // Do the reconcile
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
+        controller.reconcile(new RequiredCertificate<>(subjectIdentity, subject), certificateOutputWriter);
 
-        final CertificateStatus requested = requestedStatus();
-        assertEquals(List.of(requested), List.copyOf(storedStatuses.values()));
+        final CertificateStatus<TestId> requested = requestedStatus();
+        verify(certificateOutputWriter).loadStatus(any());
+        //verify(issuer).requestCertificate();
+        //verify(validator);
         assertEquals(List.of(), observedIssuedCertificates);
-        assertEquals(Map.of(), trustPrivateStateMap);
+        assertEquals(Map.of(), trustState());
 
         // Nothing should change if we reconcile again, but in particular we should not request another new certificate
         when(issuer.requestCertificate(eq(subject), eq(requestedValidity)))
                 .thenThrow(new AssertionError("Should not try to issue another cert"));
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
+        controller.reconcile(new RequiredCertificate<>(subjectIdentity, subject), certificateOutputWriter);
 
-        assertEquals(List.of(requested), List.copyOf(storedStatuses.values()));
+        verify(certificateOutputWriter);
         assertEquals(List.of(), observedIssuedCertificates);
-        assertEquals(Map.of(), trustPrivateStateMap);
+        assertEquals(Map.of(), trustState());
     }
 
-    private CertificateStatus newStatus() {
+    private CertificateStatus<TestId> newStatus() {
         return CertificateStatus.createNew(subjectIdentity);
     }
 
-    private CertificateStatus requestedStatus() {
-        return new CertificateStatus(
+    private CertificateStatus<TestId> requestedStatus() {
+        return new CertificateStatus<>(
                 CertificateState.REQUESTED,
                 subjectIdentity,
                 token, null, null);
     }
 
-    private CertificateStatus pendingStatus(IssuedCertificate issuedCertificate) {
-        return new CertificateStatus(
+    private CertificateStatus<TestId> pendingStatus(IssuedCertificate issuedCertificate) {
+        return new CertificateStatus<>(
                 CertificateState.PENDING,
                 subjectIdentity,
                 null, issuedCertificate, null);
     }
 
-    private CertificateStatus inUseStatus(IssuedCertificate issuedCertificate) {
-        return new CertificateStatus(
+    private CertificateStatus<TestId> inUseStatus(IssuedCertificate issuedCertificate) {
+        return new CertificateStatus<>(
                 CertificateState.IN_USE,
                 subjectIdentity,
                 null, issuedCertificate, null);
     }
 
-    private CertificateStatus notNeededStatus(IssuedCertificate issuedCertificate) {
-        return new CertificateStatus(
+    private CertificateStatus<TestId> notNeededStatus(IssuedCertificate issuedCertificate) {
+        return new CertificateStatus<>(
                 CertificateState.NOT_NEEDED,
                 subjectIdentity,
                 null, issuedCertificate, null);
@@ -191,7 +192,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
 
     private void doRequestedToPending(List<IssuedCertificate> expectedIssuedCertificates) throws CertificateException {
 
-        storedStatuses.put(subjectIdentity, requestedStatus());
+        when(certificateOutputWriter.loadStatus(subjectIdentity)).thenReturn(requestedStatus());
 
         when(issuer.requestCertificate(eq(subject), eq(requestedValidity)))
                 .thenThrow(new AssertionError("Should not try to issue again"));
@@ -202,40 +203,32 @@ class CertificateControllerTest extends OpensslCaTestHarness {
                 Validator.Result.noTrustAnchor());
 
         // Do the reconcile
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
+        controller.reconcile(new RequiredCertificate<>(subjectIdentity, subject), certificateOutputWriter);
 
-        assertEquals(List.of(pendingStatus(issued)), List.copyOf(storedStatuses.values()));
         assertEquals(expectedIssuedCertificates, observedIssuedCertificates);
-        assertEquals(TrustState.UNTRUSTED, trustPrivateState.state(issued.rootCaFingerprint()));
+        assertEquals(TrustState.UNTRUSTED, trustDependencyManager.state(issued.rootCaFingerprint()));
 
         // And do it again, should be idempotent
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
+        controller.reconcile(new RequiredCertificate<>(subjectIdentity, subject), certificateOutputWriter);
 
-        assertEquals(List.of(pendingStatus(issued)), List.copyOf(storedStatuses.values()));
         assertEquals(expectedIssuedCertificates, observedIssuedCertificates);
-        assertEquals(TrustState.UNTRUSTED, trustPrivateState.state(issued.rootCaFingerprint()));
+        assertEquals(TrustState.UNTRUSTED, trustDependencyManager.state(issued.rootCaFingerprint()));
     }
 
     /** Test the transition PENDING -> IN_USE, where the root is now trusted */
     @Test
     public void testPendingToInUseWhenRootIsTrusted() throws CertificateException {
-        trustPrivateStateMap.put(issued.rootCaFingerprint(),
-                TrustRoot.untrusted(issued.rootCaCertificate()).toTrusted("123"));
-
-        doPendingToInUse(TrustState.TRUSTED_NEW);
+        doPendingToInUse(TrustState.UNTRUSTED);
     }
 
     /** Test the transition PENDING -> IN_USE, where the root is in phase out, but there's no need to renew */
     @Test
     public void testPendingToInUseWhenRootIsPhaseOut() throws CertificateException {
-        trustPrivateStateMap.put(issued.rootCaFingerprint(),
-                TrustRoot.untrusted(issued.rootCaCertificate()).toTrusted("123").toPhaseOut());
-
-        doPendingToInUse(TrustState.PHASE_OUT);
+        doPendingToInUse(TrustState.ZOMBIE);
     }
 
     private void doPendingToInUse(TrustState expectedState) throws CertificateException {
-        storedStatuses.put(subjectIdentity, pendingStatus(issued));
+        when(certificateOutputWriter.loadStatus(subjectIdentity)).thenReturn(pendingStatus(issued));
 
         when(issuer.requestCertificate(eq(subject), eq(requestedValidity)))
                 .thenThrow(new AssertionError("Should not try to issue"));
@@ -247,29 +240,30 @@ class CertificateControllerTest extends OpensslCaTestHarness {
                 Validator.Result.ok(new TrustAnchor(issued.rootCaCertificate(), null)));
 
         // Do the reconcile
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
+        controller.reconcile(new RequiredCertificate<>(subjectIdentity, subject), certificateOutputWriter);
 
-        assertEquals(List.of(inUseStatus(issued)), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(issued), observedIssuedCertificates);
-        TrustRoot v1 = new TrustRoot(issued.rootCaCertificate(), expectedState, "123");
-        assertEquals(Map.of(v1.fingerprint(), v1), trustPrivateStateMap);
+        //TrustRoot v1 = new TrustRoot(issued.rootCaCertificate(), expectedState, "123");
+        assertEquals(Map.of(issued.rootCaFingerprint(), expectedState), trustState());
 
         // And do it again, should be idempotent
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
+        controller.reconcile(new RequiredCertificate<>(subjectIdentity, subject), certificateOutputWriter);
 
-        assertEquals(List.of(inUseStatus(issued)), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(issued), observedIssuedCertificates);
-        assertEquals(Map.of(v1.fingerprint(), v1), trustPrivateStateMap);
+        assertEquals(Map.of(issued.rootCaFingerprint(), expectedState), trustState());
+    }
+
+    Map<Fingerprint, TrustState> trustState() {
+        return trustDependencyManager.certsInStates(EnumSet.allOf(TrustState.class)).stream()
+                .map(PkiUtils::fingerprint)
+                .collect(Collectors.toMap(Function.identity(),
+                        fingerprint -> trustDependencyManager.state(fingerprint)));
     }
 
     /** Test the transition IN_USE -> NOT_NEEDED */
     @Test
     public void testInUseToNotNeeded() throws CertificateException {
-        TrustRoot value = TrustRoot.untrusted(issued.rootCaCertificate()).toTrusted("123");
-        trustPrivateStateMap.put(issued.rootCaFingerprint(),
-                value);
-
-        storedStatuses.put(subjectIdentity, inUseStatus(issued));
+        when(certificateOutputWriter.loadStatus(subjectIdentity)).thenReturn(inUseStatus(issued));
 
         // We're going to have to issue a new cert
         when(issuer.requestCertificate(eq(subject), eq(requestedValidity))).thenReturn(token);
@@ -282,20 +276,16 @@ class CertificateControllerTest extends OpensslCaTestHarness {
                 Validator.Result.willExpire(issued.rootCaCertificate(), new TrustAnchor(issued.rootCaCertificate(), null)));
 
         // Do the reconcile
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
+        controller.reconcile(new RequiredCertificate<>(subjectIdentity, subject), certificateOutputWriter);
 
-        assertEquals(List.of(requestedStatus()), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(issued), observedIssuedCertificates);
-        // TODO really in the PHASE_OUT state? Or should this be zombie????
-        assertEquals(TrustState.TRUSTED_USED, trustPrivateState.state(value.fingerprint()));
+        assertEquals(TrustState.TRUSTED_USED, trustDependencyManager.state(issued.rootCaFingerprint()));
 
         // And do it again, should be idempotent
-        controller.reconcile(new RequiredCertificate(subjectIdentity, subject), certificateOutputWriter);
+        controller.reconcile(new RequiredCertificate<>(subjectIdentity, subject), certificateOutputWriter);
 
-        assertEquals(List.of(requestedStatus()), List.copyOf(storedStatuses.values()));
         assertEquals(List.of(issued), observedIssuedCertificates);
-        // TODO really in the PHASE_OUT state? Or should this be zombie????
-        assertEquals(TrustState.TRUSTED_USED, trustPrivateState.state(value.fingerprint()));
+        assertEquals(TrustState.TRUSTED_USED, trustDependencyManager.state(issued.rootCaFingerprint()));
     }
 
     // TODO assertions on the result of reconcile, if we really need one???

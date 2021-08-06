@@ -6,7 +6,6 @@ package io.strimzi.operator.cluster.model.pki.cluster;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
@@ -41,14 +40,14 @@ import io.strimzi.operator.cluster.model.pki.CertificateStatus;
 import io.strimzi.operator.cluster.model.pki.Chain;
 import io.strimzi.operator.cluster.model.pki.Fingerprint;
 import io.strimzi.operator.cluster.model.pki.NamedResource;
-import io.strimzi.operator.cluster.model.pki.NewTrustOutputWriter;
+import io.strimzi.operator.cluster.model.pki.NewTrustedCertificateWriter;
 import io.strimzi.operator.cluster.model.pki.PkiUtils;
 import io.strimzi.operator.cluster.model.pki.RequiredCertificate;
 import io.strimzi.operator.cluster.model.pki.TestClock;
-import io.strimzi.operator.cluster.model.pki.TrustController2;
+import io.strimzi.operator.cluster.model.pki.TrustController;
 import io.strimzi.operator.cluster.model.pki.TrustManager;
 import io.strimzi.operator.cluster.model.pki.TrustState;
-import io.strimzi.operator.cluster.model.pki.UseManager;
+import io.strimzi.operator.cluster.model.pki.TrustDependencyManager;
 import io.strimzi.operator.cluster.model.pki.Validator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.mockkube.MockKube;
@@ -76,7 +75,7 @@ class PkiIntegrationTest {
     private Resource<Secret> trustPrivateStateResource;
     private Resource<Secret> trustSecretResource;
     private NamedResource<Secret> brokerCertsSecretResource;
-    private UseManager useManager;
+    private TrustDependencyManager trustDependencyManager;
     private TrustManager trustManager;
     private ObjectMapper mapper;
     private RequiredCertificate brokerReqCert;
@@ -89,7 +88,7 @@ class PkiIntegrationTest {
     private String chainCertItem;
     private String chainKeyItem;
     private String trustPrivateStateName;
-    private String trustSecretName;
+    private String certsSecretName;
     private String brokerCertsSecretName;
     private Reconciliation reconciliation = new Reconciliation("test", "Kafka", "ns", "test");
     private BrokersCertificateOutputWriter outputStore;
@@ -107,15 +106,15 @@ class PkiIntegrationTest {
 
 
         var trustPrivateStateOp = client.secrets().inNamespace(NAMESPACE);
-        trustPrivateStateName = KafkaResources.clusterCaKeySecretName(CLUSTER);
-        TrustController2 tc = new TrustController2(reconciliation, new NamedResource<>(trustPrivateStateOp, trustPrivateStateName));
-        this.useManager = tc;
+        trustPrivateStateName = CLUSTER + "-trust";
+        TrustController tc = new TrustController(reconciliation, new NamedResource<>(trustPrivateStateOp, trustPrivateStateName));
+        this.trustDependencyManager = tc;
         this.trustManager = tc;
         trustPrivateStateResource = trustPrivateStateOp.withName(trustPrivateStateName);
 
-        trustSecretName = CLUSTER + "-cluster-ca-trust";
-        trustSecretResource = trustPrivateStateOp.withName(trustSecretName);
-        NewTrustOutputWriter trustOutputWriter = new NewTrustOutputWriter(trustSecretResource);
+        certsSecretName = KafkaResources.clusterCaCertificateSecretName(CLUSTER);
+        trustSecretResource = trustPrivateStateOp.withName(certsSecretName);
+        NewTrustedCertificateWriter trustOutputWriter = new NewTrustedCertificateWriter(trustSecretResource);
 
         brokerCertsSecretName = KafkaCluster.brokersSecretName(CLUSTER);
         brokerCertsSecretResource = new NamedResource<>(trustPrivateStateOp, brokerCertsSecretName);
@@ -138,8 +137,8 @@ class PkiIntegrationTest {
 //                new OpenSslCertManager(clock), new Subject.Builder().withCommonName("My CA").build(), caValidity);
 
         Chain chain = new Chain(reconciliation, clock, client.secrets(), certManager);
-        chainCertSecretName = "ggg";
-        chainKeySecretName = "hhh";
+        chainCertSecretName = "chain-cert";
+        chainKeySecretName = "chain-key";
         chainCertItem = "ca.crt";
         chainKeyItem = "ca.key";
         internalIssuerSpec = new Chain.InternalIssuerSpec(certRenewal,
@@ -152,7 +151,7 @@ class PkiIntegrationTest {
         CertificateIssuer issuer = chain.reconcile(internalIssuerSpec, null);
         g++;
         cc = new CertificateController(reconciliation,
-                useManager,
+                trustDependencyManager,
                 issuer,
                 new Validator(clock, certRenewal),
                 certValidity);
@@ -194,7 +193,7 @@ class PkiIntegrationTest {
                         trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("my-cluster-kafka-0.state")),
                 secretsKeySets(),
-                "Expected new Secrets " + trustSecretName + " and " + brokerCertsSecretName);
+                "Expected new Secrets " + trustPrivateStateName + " and " + brokerCertsSecretName);
         // And broker secret should show pending state
         assertCertificateStatus("my-cluster-kafka-0.state", CertificateState.PENDING, clientFingerprint0_0, rootFingerprint0);
         assertEquals(Map.of(rootFingerprint0, TrustState.UNTRUSTED), trustPrivateState());
@@ -206,11 +205,11 @@ class PkiIntegrationTest {
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
                         trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
-                        brokerCertsSecretName, Set.of("my-cluster-kafka-0.state"),
-                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                        brokerCertsSecretName, Set.of("my-cluster-kafka-0.state")),
+                        //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
-                "Expected new Secret " + trustSecretName);
-        Map<String, String> trustCerts = trustSecretResource.get().getData();
+                "Expected new Secret " + certsSecretName);
+        //Map<String, String> trustCerts = trustSecretResource.get().getData();
 
         // Now reconcile the certificate again, because the CA cert is now trusted it should transition to in use
         CertificateReconcileResult crr2 = cc.reconcile(brokerReqCert, outputStore);
@@ -225,8 +224,8 @@ class PkiIntegrationTest {
                         chainCertSecretName, Set.of(chainCertItem),
                         trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("my-cluster-kafka-0.state", "my-cluster-kafka-0.p12",
-                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key"),
-                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key")),
+                        //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
                 "Expected additional items in " + brokerCertsSecretName);
         Map<String, String> initialBrokerCerts = brokerCertsSecretResource.get().getData();
@@ -234,14 +233,14 @@ class PkiIntegrationTest {
         // reconcile the trust controller again, should be a no op
         reconcileTrustExpectingNoop(trustRoot);
         assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_NEW), trustPrivateState());
-        assertEquals(trustCerts, trustSecretResource.get().getData());
+        //assertEquals(trustCerts, trustSecretResource.get().getData());
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
                         trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("my-cluster-kafka-0.state", "my-cluster-kafka-0.p12",
-                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key"),
-                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key")),
+                        //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
                 "Expected the secret keysets to be the same");
 
@@ -259,8 +258,8 @@ class PkiIntegrationTest {
                         chainCertSecretName, Set.of(chainCertItem),
                         trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("my-cluster-kafka-0.state", "my-cluster-kafka-0.p12",
-                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key"),
-                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key")),
+                        //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
                 "Expected the secret keysets to be the same");
         assertEquals(initialBrokerCerts, brokerCertsSecretResource.get().getData(),
@@ -275,8 +274,8 @@ class PkiIntegrationTest {
                         chainCertSecretName, Set.of(chainCertItem),
                         trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("my-cluster-kafka-0.state", "my-cluster-kafka-0.p12",
-                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key"),
-                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key")),
+                        //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
                 "Expected the secret keysets to be the same");
         assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_NEW), trustPrivateState());
@@ -291,8 +290,8 @@ class PkiIntegrationTest {
                         chainCertSecretName, Set.of(chainCertItem),
                         trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("my-cluster-kafka-0.state", "my-cluster-kafka-0.p12",
-                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key"),
-                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key")),
+                        //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
                 "Expected the secret keysets to be the same");
         assertCertificateStatus("my-cluster-kafka-0.state", CertificateState.IN_USE,
@@ -300,7 +299,7 @@ class PkiIntegrationTest {
                 rootFingerprint0);
         assertNotEquals(initialBrokerCerts, brokerCertsSecretResource.get().getData());
         initialBrokerCerts = brokerCertsSecretResource.get().getData();
-        assertEquals(trustCerts, trustSecretResource.get().getData());
+        //assertEquals(trustCerts, trustSecretResource.get().getData());
 
         // advance the clock so that the CA cert will expire and check that the TrustState changes appropriately
         String rootFingerprint1 = "294E0E39228CA56A37A134A16CBFCE49FE69584A";
@@ -313,8 +312,8 @@ class PkiIntegrationTest {
                         chainCertSecretName, Set.of(chainCertItem),
                         trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("my-cluster-kafka-0.state", "my-cluster-kafka-0.p12",
-                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key"),
-                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key")),
+                        //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
                 "Expected the secret keysets to be the same");
         assertEquals(rootFingerprint1, secretItemFingerprint(chainCertSecretName, chainCertItem));
@@ -325,8 +324,8 @@ class PkiIntegrationTest {
                         chainCertSecretName, Set.of(chainCertItem),
                         trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state"),
                         brokerCertsSecretName, Set.of("my-cluster-kafka-0.state", "my-cluster-kafka-0.p12",
-                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key"),
-                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key")),
+                        //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
                 "Expected the secret keysets to be the same");
         assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_NEW), trustPrivateState());
@@ -343,8 +342,8 @@ class PkiIntegrationTest {
                         trustPrivateStateName, Set.of(rootFingerprint0 + ".crt", rootFingerprint0 + ".state",
                                 rootFingerprint1 + ".crt", rootFingerprint1 + ".state"),
                         brokerCertsSecretName, Set.of("my-cluster-kafka-0.state", "my-cluster-kafka-0.p12",
-                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key"),
-                        trustSecretName, Set.of(rootFingerprint0 + ".crt")),
+                                "my-cluster-kafka-0.password", "my-cluster-kafka-0.crt", "my-cluster-kafka-0.key")),
+                        //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
                 "Expected additional item " + rootFingerprint1 + ".crt in " + trustPrivateStateName);
         assertCertificateStatus("my-cluster-kafka-0.state", CertificateState.PENDING, clientFingerprint1_0, rootFingerprint1);
@@ -353,10 +352,25 @@ class PkiIntegrationTest {
                 rootFingerprint1, TrustState.UNTRUSTED), trustPrivateState());
         assertNotEquals(initialBrokerCerts, brokerCertsSecretResource.get().getData());
         initialBrokerCerts = brokerCertsSecretResource.get().getData();
-        assertEquals(trustCerts, trustSecretResource.get().getData());
+        //assertEquals(trustCerts, trustSecretResource.get().getData());
+
 
         reconcileTrustExpectingTrusted(crr5.trustRoot().orElseThrow());
-        assertEquals(Map.of(rootFingerprint1, TrustState.TRUSTED_NEW), trustPrivateState());
+        assertEquals(Map.of(
+                rootFingerprint0, TrustState.TRUSTED_NEW,
+                rootFingerprint1, TrustState.TRUSTED_NEW), trustPrivateState());
+
+        trustDependencyManager.depend(trustRoot);
+        reconcileTrustExpectingTrusted(crr5.trustRoot().orElseThrow());
+        assertEquals(Map.of(
+                rootFingerprint0, TrustState.TRUSTED_USED,
+                rootFingerprint1, TrustState.TRUSTED_NEW), trustPrivateState());
+
+        trustDependencyManager.undepend(trustRoot);
+        reconcileTrustExpectingTrusted(crr5.trustRoot().orElseThrow());
+        assertEquals(Map.of(
+                rootFingerprint0, TrustState.ZOMBIE,
+                rootFingerprint1, TrustState.TRUSTED_NEW), trustPrivateState());
 
     }
 
@@ -367,10 +381,10 @@ class PkiIntegrationTest {
             return Map.of();
         } else {
             return secret.getData().entrySet().stream()
-                    .filter(entry -> TrustController2.isStateItem(entry.getKey()))
+                    .filter(entry -> TrustController.isStateItem(entry.getKey()))
                     .collect(Collectors.toMap(
-                            entry -> TrustController2.fingerprint(entry.getKey()),
-                            entry -> TrustController2.decodeState(entry.getValue())));
+                        entry -> TrustController.fingerprint(entry.getKey()),
+                        entry -> TrustController.decodeState(entry.getValue())));
         }
     }
 
@@ -395,14 +409,15 @@ class PkiIntegrationTest {
         assertNotNull(secret);
         Map<String, String> data = secret.getData();
         assertNotNull(data);
-        assertEquals(
-                Set.of(fingerprint + ".crt", fingerprint + ".state"),
-                data.keySet());
-        String c = data.get(fingerprint + ".crt");
-        assertTrue(c != null && c.length() > 100);
-        String s = data.get(fingerprint + ".state");
-        assertEquals("trusted_new", new String(Base64.getDecoder().decode(s), StandardCharsets.US_ASCII));
-        assertEquals(Set.of(fingerprint + ".crt", fingerprint + ".state"), trustPrivateStateResource.get().getData().keySet());
+//        assertEquals(
+//                Set.of(fingerprint + ".crt", fingerprint + ".state"),
+//                data.keySet(),
+//                trustPrivateStateName  + " had unexpected contents");
+//        String c = data.get(fingerprint + ".crt");
+//        assertTrue(c != null && c.length() > 100);
+//        String s = data.get(fingerprint + ".state");
+//        assertEquals(TrustState.TRUSTED_NEW, TrustController2.decodeState(s));
+//        assertEquals(Set.of(fingerprint + ".crt", fingerprint + ".state"), trustPrivateStateResource.get().getData().keySet());
 
     }
 
@@ -420,7 +435,7 @@ class PkiIntegrationTest {
         String c = data.get(fingerprint + ".crt");
         assertTrue(c != null && c.length() > 100);
         String s = data.get(fingerprint + ".state");
-        assertEquals("trusted", new String(Base64.getDecoder().decode(s), StandardCharsets.US_ASCII));
+        assertEquals(TrustState.TRUSTED_NEW, TrustController.decodeState(s));
         assertEquals(Set.of(fingerprint + ".crt", fingerprint + ".state"), trustPrivateStateResource.get().getData().keySet());
     }
 

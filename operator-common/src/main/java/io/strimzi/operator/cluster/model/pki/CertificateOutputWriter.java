@@ -7,10 +7,7 @@ package io.strimzi.operator.cluster.model.pki;
 import java.io.IOException;
 import java.security.KeyStoreException;
 import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
 import java.security.spec.InvalidKeySpecException;
-import java.util.Collection;
-import java.util.Set;
 
 /**
  * Abstraction for things which can store {@link CertificateStatus CertificateStatuses}

@@ -7,27 +7,18 @@ package io.strimzi.operator.cluster.model.pki.clients;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.time.Clock;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Objects;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.jsontype.NamedType;
 import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.strimzi.api.kafka.model.CertificateAuthority;
-import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.certs.CertManager;
 import io.strimzi.operator.cluster.model.pki.Chain;
-import io.strimzi.operator.cluster.model.pki.LegacyTrustOutputWriter;
 import io.strimzi.operator.cluster.model.pki.NamedResource;
 import io.strimzi.operator.cluster.model.pki.TrustController;
-import io.strimzi.operator.cluster.model.pki.TrustPrivateState;
-import io.strimzi.operator.cluster.model.pki.TrustRoot;
+import io.strimzi.operator.cluster.model.pki.TrustManager;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
 
@@ -44,35 +35,31 @@ public class ClientPkiCo {
     private final KubernetesClient client;
     private final Clock clock;
     private final CertManager certManager;
+    private final Reconciliation reconciliation;
+    private String namespace;
+    private String cluster;
 
-    ClientPkiCo(KubernetesClient client, CertManager certManager, Clock clock) {
+    ClientPkiCo(KubernetesClient client, CertManager certManager, Clock clock, Reconciliation reconciliation,
+                String namespace, String cluster) {
         this.clock = clock;
         this.client = client;
         this.certManager = certManager;
+        this.reconciliation = reconciliation;
+        this.namespace = namespace;
+        this.cluster = cluster;
     }
 
     public static class BootstrapResult {
-        private final TrustPrivateState trustPrivateState;
         private final Reconciliation reconciliation;
         private final String namespace;
         private final String cluster;
-        private final Set<TrustRoot> newTrustRoots;
-        private final Set<TrustRoot> usedTrustRoots;
-        private final HashSet<TrustRoot> existingTrust;
 
-        public BootstrapResult(TrustPrivateState trustPrivateState,
-                               Reconciliation reconciliation,
+        public BootstrapResult(Reconciliation reconciliation,
                                String namespace,
-                               String cluster,
-                               Set<TrustRoot> newTrustRoots,
-                               Set<TrustRoot> usedTrustRoots) {
-            this.trustPrivateState = trustPrivateState;
+                               String cluster) {
             this.reconciliation = reconciliation;
             this.namespace = namespace;
             this.cluster = cluster;
-            this.newTrustRoots = newTrustRoots;
-            this.usedTrustRoots = usedTrustRoots;
-            existingTrust = new HashSet<>(trustPrivateState.load().values());
         }
     }
 
@@ -93,45 +80,44 @@ public class ClientPkiCo {
                 certManager);
 
         // TODO fix the name
-        TrustPrivateState trustPrivateState = new TrustPrivateState(
-                ownerReference,
-                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-clients-pki-state"));
         chain.reconcile(Chain.clusterCaFromCrd(cluster, clientsCa),
                 clientsCa.isGenerateSecretOwnerReference() ? ownerReference : null);
         LOGGER.debugCr(reconciliation, "Chain reconciliation took {}ms",
                 (System.nanoTime() - t0) / 1_000_000.0);
 
-        final Set<TrustRoot> newTrustRoots = new HashSet<>();
-        final Set<TrustRoot> usedTrustRoots = new HashSet<>();
-        return new BootstrapResult(trustPrivateState, reconciliation, namespace, cluster, newTrustRoots, usedTrustRoots);
+        return new BootstrapResult(reconciliation, namespace, cluster);
     }
 
     // TODO this needs a test
     public void trust(BootstrapResult result)
             throws CertificateEncodingException {
+        TrustManager trustManager = new TrustController(reconciliation,
+                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"));
+        trustManager.haveTrust(trustManager.requiringTrust());
+        trustManager.delete(trustManager.zombies());
 
-        TrustController trustController = new TrustController(result.reconciliation,
-                result.trustPrivateState,
-                List.of(new LegacyTrustOutputWriter(client.secrets().inNamespace(result.namespace)
-                        .withName(KafkaResources.clusterCaCertificateSecretName(result.cluster)))));
-
-        Comparator<TrustRoot> comparator = Comparator.comparing(x -> x.fingerprint());
-        Set<TrustRoot> newState = result.trustPrivateState.load().values().stream().map(trustRoot -> {
-            if (result.newTrustRoots.contains(trustRoot)) {
-                // TODO this is fishy:
-                // a) what is enforcing the valid transitions
-                // b) why the need for the resourceVersion argument, then the TrustRoot already knows its rv?
-                // c) why is it only toTrusted that needs the rv?
-                return trustRoot.toTrusted(trustRoot.resourceVersion());
-            } else {
-                return trustRoot;
-            }
-        }).collect(Collectors.toCollection(() -> new TreeSet<>(comparator)));
-        Set<TrustRoot> toPhaseOut = new TreeSet<>(comparator);
-        toPhaseOut.removeAll(result.usedTrustRoots);
-        newState.addAll(toPhaseOut.stream().map(TrustRoot::toPhaseOut).collect(Collectors.toSet()));
-        // If a new CA cert was used this will
-        trustController.reconcile(newState);
+//        TrustController trustController = new TrustController(result.reconciliation,
+//                result.trustPrivateState,
+//                List.of(new LegacyTrustOutputWriter(client.secrets().inNamespace(result.namespace)
+//                        .withName(KafkaResources.clusterCaCertificateSecretName(result.cluster)))));
+//
+//        Comparator<TrustRoot> comparator = Comparator.comparing(x -> x.fingerprint());
+//        Set<TrustRoot> newState = result.trustPrivateState.load().values().stream().map(trustRoot -> {
+//            if (result.newTrustRoots.contains(trustRoot)) {
+//                // TODO this is fishy:
+//                // a) what is enforcing the valid transitions
+//                // b) why the need for the resourceVersion argument, then the TrustRoot already knows its rv?
+//                // c) why is it only toTrusted that needs the rv?
+//                return trustRoot.toTrusted(trustRoot.resourceVersion());
+//            } else {
+//                return trustRoot;
+//            }
+//        }).collect(Collectors.toCollection(() -> new TreeSet<>(comparator)));
+//        Set<TrustRoot> toPhaseOut = new TreeSet<>(comparator);
+//        toPhaseOut.removeAll(result.usedTrustRoots);
+//        newState.addAll(toPhaseOut.stream().map(TrustRoot::toPhaseOut).collect(Collectors.toSet()));
+//        // If a new CA cert was used this will
+//        trustController.reconcile(newState);
     }
 }
 

@@ -6,29 +6,30 @@ package io.strimzi.operator.cluster.model.pki.cluster;
 
 import java.io.IOException;
 import java.security.cert.CertificateException;
-import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.dsl.Resource;
-import io.strimzi.operator.cluster.model.pki.LegacyTrustOutputWriter;
-import io.strimzi.operator.cluster.model.pki.TrustPrivateStateTest;
-import io.strimzi.operator.cluster.model.pki.TrustRoot;
+import io.strimzi.operator.cluster.model.pki.CertHelper;
+import io.strimzi.operator.cluster.model.pki.LegacyTrustedCertificateWriter;
+import io.strimzi.operator.cluster.model.pki.PkiUtils;
 import io.strimzi.test.mockkube.MockKube;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-class LegacyTrustOutputWriterTest {
+class LegacyTrustedCertificateWriterTest {
 
     @Test
     public void testWrite() throws IOException, CertificateException {
         Resource<Secret> secretResource = new MockKube().build().secrets().inNamespace("ns").withName("name");
-        LegacyTrustOutputWriter writer = new LegacyTrustOutputWriter(secretResource);
+        LegacyTrustedCertificateWriter writer = new LegacyTrustedCertificateWriter(secretResource);
 
-        TrustRoot root1 = TrustRoot.untrusted(TrustPrivateStateTest.getX509Certificate("/CLUSTER_CERT.pem"));
-        TrustRoot root2 = TrustRoot.untrusted(TrustPrivateStateTest.getX509Certificate("/CLIENTS_CERT.pem")).toTrusted("123");
-        writer.write(List.of(root1, root2));
+        var root1 = CertHelper.getX509Certificate("/CLUSTER_CERT.pem");
+        var root2 = CertHelper.getX509Certificate("/CLIENTS_CERT.pem");
+        writer.write(Map.of(PkiUtils.fingerprint(root1), root1,
+                PkiUtils.fingerprint(root2), root2));
 
         assertEquals(
                 Set.of(

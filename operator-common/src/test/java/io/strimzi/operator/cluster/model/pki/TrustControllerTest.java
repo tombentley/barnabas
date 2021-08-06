@@ -29,7 +29,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-class TrustController2Test {
+class TrustControllerTest {
 
     private static X509Certificate cert;
     private static Fingerprint fingerprint;
@@ -54,8 +54,8 @@ class TrustController2Test {
     }
 
     @Test
-    public void testLifecycle() {
-        var tc = new TrustController2(reconciliation, new NamedResource<>(client.secrets().inNamespace("foo"), "bar"));
+    public void testExpectedLifecycle() {
+        var tc = new TrustController(reconciliation, new NamedResource<>(client.secrets().inNamespace("foo"), "bar"));
         assertEquals(Set.of(), tc.requiringTrust());
         assertEquals(Set.of(), tc.zombies());
         assertNull(client.secrets().inNamespace("foo").withName("bar").get());
@@ -71,7 +71,7 @@ class TrustController2Test {
         assertEquals(Set.of("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt", "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state"),
                 data.keySet());
         assertEquals(TrustState.UNTRUSTED,
-                TrustController2.decodeState(data.get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")));
+                TrustController.decodeState(data.get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")));
 
         tc.haveTrust(Set.of(cert));
         assertEquals(Set.of(), tc.requiringTrust());
@@ -82,7 +82,7 @@ class TrustController2Test {
         assertEquals(Set.of("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt", "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state"),
                 data.keySet());
         assertEquals(TrustState.TRUSTED_NEW,
-                TrustController2.decodeState(data.get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")));
+                TrustController.decodeState(data.get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")));
 
         tc.depend(cert);
         assertEquals(Set.of(), tc.requiringTrust());
@@ -93,7 +93,7 @@ class TrustController2Test {
         assertEquals(Set.of("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt", "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state"),
                 data.keySet());
         assertEquals(TrustState.TRUSTED_USED,
-                TrustController2.decodeState(data.get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")));
+                TrustController.decodeState(data.get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")));
 
         tc.undepend(cert);
         assertEquals(Set.of(), tc.requiringTrust());
@@ -104,7 +104,7 @@ class TrustController2Test {
         assertEquals(Set.of("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt", "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state"),
                 data.keySet());
         assertEquals(TrustState.ZOMBIE,
-                TrustController2.decodeState(data.get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")));
+                TrustController.decodeState(data.get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")));
 
         tc.delete(Set.of(cert));
         assertEquals(Set.of(), tc.requiringTrust());
@@ -130,7 +130,7 @@ class TrustController2Test {
                 throw new KubernetesClientException("Conflict", 409, null);
             }
         });
-        var tc = new TrustController2(reconciliation, resource);
+        var tc = new TrustController(reconciliation, resource);
         tc.requireTrust(cert);
         assertEquals(0, count.get());
     }

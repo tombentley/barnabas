@@ -99,7 +99,6 @@ import io.strimzi.operator.cluster.model.StorageDiff;
 import io.strimzi.operator.cluster.model.StorageUtils;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
 import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult;
-import io.strimzi.operator.cluster.model.pki.TrustRoot;
 import io.strimzi.operator.cluster.model.pki.cluster.ClusterPki;
 import io.strimzi.operator.cluster.operator.resource.ConcurrentDeletionException;
 import io.strimzi.operator.cluster.operator.resource.KafkaRoller;
@@ -671,7 +670,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterCerts.issueZkCertificates(kafkaAssembly).forEach(cr -> {
+                clusterCerts.reconcileZkCertificates(kafkaAssembly).forEach(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
                 return null;
@@ -680,7 +679,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterCerts.issueKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames).forEach(cr -> {
+                clusterCerts.reconcileKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames).forEach(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
                 return null;
@@ -689,7 +688,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                Optional.ofNullable(clusterCerts.issueEoCertificate(kafkaAssembly)).ifPresent(cr -> {
+                Optional.ofNullable(clusterCerts.reconcileEoCertificate(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
                 return null;
@@ -698,7 +697,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                Optional.ofNullable(clusterCerts.issueCoCertificate(kafkaAssembly)).ifPresent(cr -> {
+                Optional.ofNullable(clusterCerts.reconcileCoCertificate(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
                 return null;
@@ -707,7 +706,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                Optional.ofNullable(clusterCerts.issueKafkaExporterCertificates(kafkaAssembly)).ifPresent(cr -> {
+                Optional.ofNullable(clusterCerts.reconcileKafkaExporterCertificates(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
                 return null;
@@ -716,7 +715,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                Optional.ofNullable(clusterCerts.issueCcCertificate(kafkaAssembly)).ifPresent(cr -> {
+                Optional.ofNullable(clusterCerts.reconcileCcCertificate(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
                 return null;
