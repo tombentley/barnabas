@@ -55,29 +55,29 @@ class TrustControllerTest {
 
     @Test
     public void testExpectedLifecycle() {
-        var tc = new TrustController(reconciliation, new NamedResource<>(client.secrets().inNamespace("foo"), "bar"));
+        var tc = new TrustController(reconciliation, new NamedResource<>(client.secrets().inNamespace("foo"), "bar"), null);
         assertEquals(Set.of(), tc.requiringTrust());
         assertEquals(Set.of(), tc.zombies());
         assertNull(client.secrets().inNamespace("foo").withName("bar").get());
-        assertNull(tc.state(fingerprint));
-        assertEquals(Set.of(), tc.certsInStates(Set.of(TrustState.UNTRUSTED)));
+        assertNull(tc.stateOfRootCert(fingerprint));
+        assertEquals(Set.of(), tc.rootCertsInStates(Set.of(TrustState.UNTRUSTED)));
 
         tc.requireTrust(cert);
         assertEquals(Set.of(cert), tc.requiringTrust());
         assertEquals(Set.of(), tc.zombies());
-        assertEquals(TrustState.UNTRUSTED, tc.state(fingerprint));
-        assertEquals(Set.of(cert), tc.certsInStates(Set.of(TrustState.UNTRUSTED)));
+        assertEquals(TrustState.UNTRUSTED, tc.stateOfRootCert(fingerprint));
+        assertEquals(Set.of(cert), tc.rootCertsInStates(Set.of(TrustState.UNTRUSTED)));
         Map<String, String> data = client.secrets().inNamespace("foo").withName("bar").get().getData();
         assertEquals(Set.of("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt", "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state"),
                 data.keySet());
         assertEquals(TrustState.UNTRUSTED,
                 TrustController.decodeState(data.get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")));
 
-        tc.haveTrust(Set.of(cert));
+        tc.trustRootCerts(Set.of(cert));
         assertEquals(Set.of(), tc.requiringTrust());
         assertEquals(Set.of(), tc.zombies());
-        assertEquals(TrustState.TRUSTED_NEW, tc.state(fingerprint));
-        assertEquals(Set.of(cert), tc.certsInStates(Set.of(TrustState.TRUSTED_NEW)));
+        assertEquals(TrustState.TRUSTED_NEW, tc.stateOfRootCert(fingerprint));
+        assertEquals(Set.of(cert), tc.rootCertsInStates(Set.of(TrustState.TRUSTED_NEW)));
         data = client.secrets().inNamespace("foo").withName("bar").get().getData();
         assertEquals(Set.of("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt", "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state"),
                 data.keySet());
@@ -87,8 +87,8 @@ class TrustControllerTest {
         tc.depend(cert);
         assertEquals(Set.of(), tc.requiringTrust());
         assertEquals(Set.of(), tc.zombies());
-        assertEquals(TrustState.TRUSTED_USED, tc.state(fingerprint));
-        assertEquals(Set.of(cert), tc.certsInStates(Set.of(TrustState.TRUSTED_USED)));
+        assertEquals(TrustState.TRUSTED_USED, tc.stateOfRootCert(fingerprint));
+        assertEquals(Set.of(cert), tc.rootCertsInStates(Set.of(TrustState.TRUSTED_USED)));
         data = client.secrets().inNamespace("foo").withName("bar").get().getData();
         assertEquals(Set.of("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt", "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state"),
                 data.keySet());
@@ -98,8 +98,8 @@ class TrustControllerTest {
         tc.undepend(cert);
         assertEquals(Set.of(), tc.requiringTrust());
         assertEquals(Set.of(cert), tc.zombies());
-        assertEquals(TrustState.ZOMBIE, tc.state(fingerprint));
-        assertEquals(Set.of(cert), tc.certsInStates(Set.of(TrustState.ZOMBIE)));
+        assertEquals(TrustState.ZOMBIE, tc.stateOfRootCert(fingerprint));
+        assertEquals(Set.of(cert), tc.rootCertsInStates(Set.of(TrustState.ZOMBIE)));
         data = client.secrets().inNamespace("foo").withName("bar").get().getData();
         assertEquals(Set.of("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt", "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state"),
                 data.keySet());
@@ -109,8 +109,8 @@ class TrustControllerTest {
         tc.delete(Set.of(cert));
         assertEquals(Set.of(), tc.requiringTrust());
         assertEquals(Set.of(), tc.zombies());
-        assertNull(tc.state(fingerprint));
-        assertEquals(Set.of(), tc.certsInStates(EnumSet.allOf(TrustState.class)));
+        assertNull(tc.stateOfRootCert(fingerprint));
+        assertEquals(Set.of(), tc.rootCertsInStates(EnumSet.allOf(TrustState.class)));
         data = client.secrets().inNamespace("foo").withName("bar").get().getData();
         assertEquals(Set.of(), data.keySet());
     }
@@ -130,7 +130,7 @@ class TrustControllerTest {
                 throw new KubernetesClientException("Conflict", 409, null);
             }
         });
-        var tc = new TrustController(reconciliation, resource);
+        var tc = new TrustController(reconciliation, resource, null);
         tc.requireTrust(cert);
         assertEquals(0, count.get());
     }

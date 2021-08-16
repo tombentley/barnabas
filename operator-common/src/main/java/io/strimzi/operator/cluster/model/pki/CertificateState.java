@@ -17,7 +17,7 @@ public enum CertificateState {
      * <dt>REQUESTED</dt> <dd>Once it's been requested.</dd>
      * </dl>
      */
-    NEW("new"),
+    NEW("NEW"),
 
     /**
      * A certificate for the subject has been requested from the {@link CertificateIssuer}.
@@ -28,7 +28,7 @@ public enum CertificateState {
      * <dt>NOT_NEEDED</dt> <dd>If, by the time it's issued, the certificate is not needed any more.</dd>
      * </dl>
      */
-    REQUESTED("requested"),
+    REQUESTED("REQUESTED"),
 
     /**
      * A certificate for the subject has been issued by the {@link CertificateIssuer},
@@ -39,7 +39,7 @@ public enum CertificateState {
      * <dt>NOT_NEEDED</dt>  <dd>If the certificate is not needed before it's available for use.</dd>
      * </dl>
      */
-    PENDING("pending"),
+    PENDING("PENDING"),
 
     /**
      * A certificate for the subject is in use.
@@ -49,13 +49,13 @@ public enum CertificateState {
      * <dt>NOT_NEEDED</dt>  <dd>If it is not needed before it expires.</dd>
      * </dl>
      */
-    IN_USE("in-use"),
+    IN_USE("IN_USE"),
 
     /**
      * Not certificate for the subject is required any more.
      * This is the end state.
      */
-    NOT_NEEDED("not-needed");
+    NOT_NEEDED("NOT_NEEDED");
 
     private final String id;
 
@@ -69,15 +69,15 @@ public enum CertificateState {
 
     public static CertificateState fromId(String id) {
         switch (id) {
-            case "new":
+            case "NEW":
                 return NEW;
-            case "requested":
+            case "REQUESTED":
                 return REQUESTED;
-            case "pending":
+            case "PENDING":
                 return PENDING;
-            case "in-use":
+            case "IN_USE":
                 return IN_USE;
-            case "not-needed":
+            case "NOT_NEEDED":
                 return NOT_NEEDED;
             default:
                 throw new IllegalArgumentException(id);

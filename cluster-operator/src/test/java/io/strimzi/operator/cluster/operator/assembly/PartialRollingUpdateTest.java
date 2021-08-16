@@ -188,11 +188,6 @@ public class PartialRollingUpdateTest {
                     }
 
                     @Override
-                    Future<ReconciliationState> clusterPkiTrust() {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
                     Future<ReconciliationState> rollingUpdateForPki() {
                         return Future.succeededFuture(this);
                     }
@@ -291,11 +286,6 @@ public class PartialRollingUpdateTest {
 
                     @Override
                     Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterPkiTrust() {
                         return Future.succeededFuture(this);
                     }
 

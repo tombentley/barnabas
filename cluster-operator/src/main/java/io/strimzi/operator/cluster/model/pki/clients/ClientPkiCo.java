@@ -77,7 +77,7 @@ public class ClientPkiCo {
         long t0 = System.nanoTime();
         Chain chain = new Chain(reconciliation, clock,
                 client.secrets().inNamespace(namespace),
-                certManager);
+                certManager, Objects.requireNonNull(null));
 
         // TODO fix the name
         chain.reconcile(Chain.clusterCaFromCrd(cluster, clientsCa),
@@ -91,9 +91,11 @@ public class ClientPkiCo {
     // TODO this needs a test
     public void trust(BootstrapResult result)
             throws CertificateEncodingException {
-        TrustManager trustManager = new TrustController(reconciliation,
-                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"));
-        trustManager.haveTrust(trustManager.requiringTrust());
+        TrustManager trustManager = new TrustController(
+                reconciliation,
+                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"),
+                null);
+        trustManager.trustRootCerts(trustManager.requiringTrust());
         trustManager.delete(trustManager.zombies());
 
 //        TrustController trustController = new TrustController(result.reconciliation,

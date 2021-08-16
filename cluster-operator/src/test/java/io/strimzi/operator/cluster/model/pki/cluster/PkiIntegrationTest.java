@@ -107,7 +107,7 @@ class PkiIntegrationTest {
 
         var trustPrivateStateOp = client.secrets().inNamespace(NAMESPACE);
         trustPrivateStateName = CLUSTER + "-trust";
-        TrustController tc = new TrustController(reconciliation, new NamedResource<>(trustPrivateStateOp, trustPrivateStateName));
+        TrustController tc = new TrustController(reconciliation, new NamedResource<>(trustPrivateStateOp, trustPrivateStateName), null);
         this.trustDependencyManager = tc;
         this.trustManager = tc;
         trustPrivateStateResource = trustPrivateStateOp.withName(trustPrivateStateName);
@@ -136,7 +136,7 @@ class PkiIntegrationTest {
 //        InternalCertificateIssuer issuer = InternalCertificateIssuer.createRootIssuer(clock,
 //                new OpenSslCertManager(clock), new Subject.Builder().withCommonName("My CA").build(), caValidity);
 
-        Chain chain = new Chain(reconciliation, clock, client.secrets(), certManager);
+        Chain chain = new Chain(reconciliation, clock, client.secrets(), certManager, trustManager);
         chainCertSecretName = "chain-cert";
         chainKeySecretName = "chain-key";
         chainCertItem = "ca.crt";
@@ -404,7 +404,7 @@ class PkiIntegrationTest {
     private void reconcileTrustExpectingTrusted(X509Certificate trustRoot) throws CertificateEncodingException {
         Fingerprint fingerprint = PkiUtils.fingerprint(trustRoot);
         // We can reconcile the trust relationship
-        trustManager.haveTrust(Set.of(trustRoot));
+        trustManager.trustRootCerts(Set.of(trustRoot));
         Secret secret = trustPrivateStateResource.get();
         assertNotNull(secret);
         Map<String, String> data = secret.getData();
@@ -424,7 +424,7 @@ class PkiIntegrationTest {
     private void reconcileTrustExpectingNoop(X509Certificate trustRoot) throws CertificateEncodingException {
         Fingerprint fingerprint = PkiUtils.fingerprint(trustRoot);
         // We can reconcile the trust relationship
-        trustManager.haveTrust(Set.of(trustRoot));
+        trustManager.trustRootCerts(Set.of(trustRoot));
         Secret secret = trustPrivateStateResource.get();
         assertNotNull(secret);
         Map<String, String> data = secret.getData();
@@ -447,7 +447,6 @@ class PkiIntegrationTest {
         CertificateStatus certificateStatus = mapper.readValue(
                 Base64.getDecoder().decode(brokerSecret.getData().get(secretItem)), CertificateStatus.class);
         Assertions.assertEquals(state, certificateStatus.state());
-        assertEquals(new BrokerIdentity(0), certificateStatus.subjectIdentity());
         assertNull(certificateStatus.tokenBytes());
         assertNotNull(certificateStatus.issuedCertificate());
         assertEquals(expectedIssuedFingerprint, certificateStatus.issuedCertificate().issuedFingerprint().toString());

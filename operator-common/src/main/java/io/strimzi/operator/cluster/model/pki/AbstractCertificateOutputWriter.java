@@ -11,6 +11,7 @@ import java.security.cert.CertificateException;
 import java.security.spec.InvalidKeySpecException;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -29,21 +30,17 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
 
     protected final Reconciliation reconciliation;
     private final PasswordGenerator pg = new PasswordGenerator(12);
-    private final String baseEntryName;
     protected final ObjectMapper statusMapper;
     protected final OwnerReference ownerReference;
 
     public AbstractCertificateOutputWriter(Reconciliation reconciliation,
-                                           String baseEntryName,
                                            OwnerReference ownerReference,
                                            ObjectMapper statusMapper) {
         this.reconciliation = reconciliation;
-        this.baseEntryName = baseEntryName;
         this.ownerReference = ownerReference;
         this.statusMapper = statusMapper;
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public void writeIssued(Id subjectIdentity,
                             IssuedCertificate certificate)
@@ -68,6 +65,7 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
 
             String certKey = certKey(subjectIdentity);
             if (certKey != null) {
+                builder.removeFromData(pendingKey(subjectIdentity));
                 builder.addToData(certKey, Base64.getEncoder().encodeToString(PkiUtils.asPemCertChain(certificate.completeChain()).getBytes(StandardCharsets.US_ASCII)));
             }
             String keyKey = keyKey(subjectIdentity);
@@ -97,79 +95,95 @@ public abstract class AbstractCertificateOutputWriter<Id extends SubjectIdentity
     }
 
     protected String p12Key(Id id) {
-        if (baseEntryName == null) {
-            throw new AssertionError();
-        }
-        return baseEntryName + ".p12";
+        return keyPrefix(id) + ".p12";
     }
 
     protected String passwordKey(Id id) {
-        if (baseEntryName == null) {
-            throw new AssertionError();
-        }
-        return baseEntryName + ".password";
+        return keyPrefix(id) + ".password";
     }
 
     protected String certKey(Id id) {
-        if (baseEntryName == null) {
-            throw new AssertionError();
-        }
-        return baseEntryName + ".crt";
+        return keyPrefix(id) + ".crt";
     }
 
     protected String keyKey(Id id) {
-        if (baseEntryName == null) {
-            throw new AssertionError();
-        }
-        return baseEntryName + ".key";
+        return keyPrefix(id) + ".key";
     }
 
-    @SuppressWarnings("unchecked")
     @Override
-    public CertificateStatus<Id> loadStatus(Id subjectIdentity) {
+    public CertificateStatus loadStatus(Id subjectIdentity) {
         NamedResource<Secret> secretResource = statusResource(subjectIdentity);
         Secret secret = secretResource.get();
         if (secret == null || secret.getData() == null || secret.getData().isEmpty()) {
-            return CertificateStatus.createNew(subjectIdentity);
+            return CertificateStatus.createNew();
         } else {
-            // check for ${id}.requested (value would be the token)
-            // check for ${id}.pending (value would be issued cert and key and PEM or p12)
-            // otherwise lo
-
-            String src = secret.getData().get(stateKey(subjectIdentity));
-            if (src == null) {
-                return CertificateStatus.createNew(subjectIdentity);
-            } else {
-                try {
-                    byte[] s = Base64.getDecoder().decode(src);
-                    return statusMapper.readValue(s, CertificateStatus.class);
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+            try {
+                Map<String, String> data = secret.getData();
+                String src = data.get(requestedKey(subjectIdentity));
+                if (src != null) {
+                    return new CertificateStatus(CertificateState.REQUESTED, Base64.getDecoder().decode(src), null);
                 }
+                src = data.get(pendingKey(subjectIdentity));
+                if (src != null) {
+                    return new CertificateStatus(CertificateState.PENDING, null, statusMapper.readValue(Base64.getDecoder().decode(src), IssuedCertificate.class));
+                }
+                src = data.get(certKey(subjectIdentity));
+                if (src != null) {
+
+                    IssuedCertificate issuedCertificate = new IssuedCertificate(Base64.getDecoder().decode(data.get(keyKey(subjectIdentity))),
+                            PkiUtils.x509Certificate(Base64.getDecoder().decode(src)),
+                            List.of(),
+                            null);
+                    return new CertificateStatus(CertificateState.IN_USE, null, issuedCertificate);
+                }
+                return CertificateStatus.createNew();
+            } catch (IOException | CertificateException e) {
+                throw new RuntimeException(e);
             }
         }
 
     }
 
-    protected abstract String stateKey(Id id);
-
+    protected abstract String keyPrefix(Id id);
+    // TODO these are always the same vv
     protected abstract NamedResource<Secret> statusResource(Id id);
     protected abstract NamedResource<Secret> issuedResource(Id id);
 
+    private String pendingKey(Id subjectIdentity) {
+        return keyPrefix(subjectIdentity) + ".pending";
+    }
+
+    private String requestedKey(Id subjectIdentity) {
+        return keyPrefix(subjectIdentity) + ".requested";
+    }
+
     @Override
-    public void storeStatus(CertificateStatus<Id> certificateStatus) {
-        Id subjectIdentity = certificateStatus.subjectIdentity();
+    public void storeRequested(Id subjectIdentity, byte[] token) {
+        NamedResource<Secret> secretResource = statusResource(subjectIdentity);
+        Secret secret = secretResource.get();
+        SecretBuilder builder = secret != null ? new SecretBuilder(secret) : new SecretBuilder();
+        builder.editOrNewMetadata().withOwnerReferences(this.ownerReference == null ? List.of() : List.of(ownerReference)).endMetadata();
+        builder.addToData(requestedKey(subjectIdentity), Base64.getEncoder().encodeToString(token));
+        builder.removeFromData(pendingKey(subjectIdentity));
+        LOGGER.debugCr(reconciliation, "Storing requested certificate: identity: {}, secret: {}",
+                subjectIdentity, secretResource);
+        secretResource.createOrReplace(builder.build());
+    }
+
+    @Override
+    public void storePending(Id subjectIdentity, IssuedCertificate issuedCertificate) {
         NamedResource<Secret> secretResource = statusResource(subjectIdentity);
         Secret secret = secretResource.get();
         SecretBuilder builder = secret != null ? new SecretBuilder(secret) : new SecretBuilder();
         builder.editOrNewMetadata().withOwnerReferences(this.ownerReference == null ? List.of() : List.of(ownerReference)).endMetadata();
         try {
-            builder.addToData(stateKey(subjectIdentity), Base64.getEncoder().encodeToString(statusMapper.writeValueAsBytes(certificateStatus)));
+            builder.addToData(pendingKey(subjectIdentity), Base64.getEncoder().encodeToString(statusMapper.writeValueAsBytes(issuedCertificate)));
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
-        LOGGER.debugCr(reconciliation, "Storing certificate: identity: {}, state: {}, secret: {}",
-                certificateStatus.subjectIdentity(), certificateStatus.state(), secretResource);
+        builder.removeFromData(requestedKey(subjectIdentity));
+        LOGGER.debugCr(reconciliation, "Storing requested certificate: identity: {}, secret: {}",
+                subjectIdentity, secretResource);
         secretResource.createOrReplace(builder.build());
     }
 }

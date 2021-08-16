@@ -12,11 +12,26 @@ import java.util.Set;
  * See {@link TrustController} for the full state machine.
  */
 public interface TrustManager {
+    /**
+     * Find the roots which need to be trusted.
+     * @return The certs with state {@link TrustState#UNTRUSTED}.
+     */
     Set<X509Certificate> requiringTrust();
 
+    /**
+     * Records that a set of root certs are now trusted.
+     * Updates the states for each cert to {@link TrustState#TRUSTED_NEW}.
+     * @param rootCerts The certs
+     */
     // TODO Does this need to be batched
-    void haveTrust(Set<X509Certificate> certs);
+    void trustRootCerts(Set<X509Certificate> rootCerts);
 
+    void phaseOut(Set<X509Certificate> rootCerts);
+
+    /**
+     * Find the roots which need to be trusted.
+     * @return The certs with state {@link TrustState#ZOMBIE}.
+     */
     Set<X509Certificate> zombies();
 
     // TODO Does this need to be batched

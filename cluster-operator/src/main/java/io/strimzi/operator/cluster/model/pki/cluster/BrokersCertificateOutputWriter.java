@@ -50,7 +50,7 @@ public class BrokersCertificateOutputWriter extends AbstractCertificateOutputWri
                                    OwnerReference ownerReference,
                                    boolean includePem,
                                    boolean includeP12) {
-        super(reconciliation,  null, ownerReference, MAPPER);
+        super(reconciliation, ownerReference, MAPPER);
         this.statusResource = statusResource;
         this.issuedResource = secretResource;
         this.cluster = cluster;
@@ -60,27 +60,27 @@ public class BrokersCertificateOutputWriter extends AbstractCertificateOutputWri
 
     @Override
     protected String p12Key(BrokerIdentity id) {
-        return includeP12 ? KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".p12" : null;
+        return includeP12 ? super.p12Key(id) : null;
     }
 
     @Override
     protected String passwordKey(BrokerIdentity id) {
-        return includeP12 ? KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".password" : null;
+        return includeP12 ? super.passwordKey(id) : null;
     }
 
     @Override
     protected String certKey(BrokerIdentity id) {
-        return includePem ? KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".crt" : null;
+        return includePem ? super.certKey(id) : null;
     }
 
     @Override
     protected String keyKey(BrokerIdentity id) {
-        return includePem ? KafkaCluster.kafkaPodName(cluster, id.brokerId()) + ".key" : null;
+        return includePem ? super.keyKey(id) : null;
     }
 
     @Override
-    protected String stateKey(BrokerIdentity id) {
-        return KafkaCluster.kafkaPodName(cluster, ((BrokerIdentity) id).brokerId()) + ".state";
+    protected String keyPrefix(BrokerIdentity id) {
+        return KafkaCluster.kafkaPodName(cluster, ((BrokerIdentity) id).brokerId());
     }
 
     @Override

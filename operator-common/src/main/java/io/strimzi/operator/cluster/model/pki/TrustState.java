@@ -15,30 +15,34 @@ public enum TrustState {
     // logically there's also a HOLD state (from CRL) and a REVOKED state.
     // And when using an external CA we can't assume that a CRL or OCSP aren't being used.
 
-    UNKNOWN("unknown"),
+    UNKNOWN("UNKNOWN"),
 
     /**
      * <p>This is the start state.
      * The certificate is not yet trusted everywhere it needs to be (it may be trusted in some components, but not all).
      */
-    UNTRUSTED("untrusted"),
+    UNTRUSTED("UNTRUSTED"),
 
     /**
      * <p>The certificate is trusted everywhere it needs to be, but end entity certificates signed with is have not yet been deployed.</p>
      */
-    TRUSTED_NEW("trusted_new"),
+    TRUSTED_NEW("TRUSTED_NEW"),
 
     /**
      * <p>The certificate is trusted everywhere it needs to be, and end entity certificates signed with is have been deployed.</p>
      */
-    TRUSTED_USED("trusted_used"),
+    TRUSTED_USED("TRUSTED_USED"),
 
+    /* The cert is trusted and  and end entity certificates signed with is have been deployed, but
+       it's been annotated to be replaced or renewed
+     */
+    PHASE_OUT("PHASE_OUT"),
 
     /**
      * <p>The cert is still trusted by at least some components, but is not relied on by any party.
      * One a certificate is in the ZOMBIE state it maby be deletedfrom trust stores. This is the end state.
      */
-    ZOMBIE("zombie");
+    ZOMBIE("ZOMBIE");
 
     private final String id;
 
@@ -58,15 +62,15 @@ public enum TrustState {
     public static TrustState fromId(String id) {
         Objects.requireNonNull(id);
         switch (id) {
-            case "unknown":
+            case "UNKNOWN":
                 return UNKNOWN;
-            case "untrusted":
+            case "UNTRUSTED":
                 return UNTRUSTED;
-            case "trusted_new":
+            case "TRUSTED_NEW":
                 return TRUSTED_NEW;
-            case "trusted_used":
+            case "TRUSTED_USED":
                 return TRUSTED_USED;
-            case "zombie":
+            case "ZOMBIE":
                 return ZOMBIE;
             default:
                 throw new IllegalArgumentException(id);

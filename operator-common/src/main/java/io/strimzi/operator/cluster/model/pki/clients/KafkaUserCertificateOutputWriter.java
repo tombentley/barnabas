@@ -24,35 +24,15 @@ public class KafkaUserCertificateOutputWriter extends AbstractCertificateOutputW
                                             NonNamespaceOperation<Secret, SecretList, Resource<Secret>> secretResource,
                                             OwnerReference ownerReference,
                                             ObjectMapper mapper) {
-        super(reconciliation, "user", ownerReference, mapper);
+        super(reconciliation, ownerReference, mapper);
         this.secretResource = secretResource;
     }
 
     // TODO a user secret also contains the trusted CA certificate(s)
 
     @Override
-    protected String p12Key(KafkaUserIdentity kafkaUserIdentity) {
-        return "user.p12";
-    }
-
-    @Override
-    protected String passwordKey(KafkaUserIdentity kafkaUserIdentity) {
-        return "user.password";
-    }
-
-    @Override
-    protected String certKey(KafkaUserIdentity kafkaUserIdentity) {
-        return "user.crt";
-    }
-
-    @Override
-    protected String keyKey(KafkaUserIdentity kafkaUserIdentity) {
-        return "user.key";
-    }
-
-    @Override
-    protected String stateKey(KafkaUserIdentity id) {
-        return id.username() + ".state";
+    protected String keyPrefix(KafkaUserIdentity id) {
+        return "user";
     }
 
     @Override

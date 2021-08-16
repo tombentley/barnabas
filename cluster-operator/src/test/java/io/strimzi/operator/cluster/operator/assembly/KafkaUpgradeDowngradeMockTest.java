@@ -166,11 +166,6 @@ public class KafkaUpgradeDowngradeMockTest {
                     }
 
                     @Override
-                    Future<ReconciliationState> clusterPkiTrust() {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
                     Future<ReconciliationState> rollingUpdateForPki() {
                         return Future.succeededFuture(this);
                     }

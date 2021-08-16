@@ -21,13 +21,16 @@ public interface CertificateOutputWriter<I extends SubjectIdentity> {
      * @return Its status. If the given {@code subjectIdentity} doesn't have a status then a new one in
      * state {@link CertificateState#NEW} should be returned.
      */
-    CertificateStatus<I> loadStatus(I subjectIdentity);
+    CertificateStatus loadStatus(I subjectIdentity);
 
     /**
      * Store the given {@code certificateStatus} for later retrieval by {@link #loadStatus(SubjectIdentity)}.
-     * @param certificateStatus The status
+     * @param subjectIdentity The subject
+     * @param issuedCertificate The pending certificate
      */
-    void storeStatus(CertificateStatus<I> certificateStatus);
+    void storePending(I subjectIdentity, IssuedCertificate issuedCertificate);
+
+    void storeRequested(I subjectIdentity, byte[] token);
 
     /**
      * Write the given {@code certificate} that was issued for the given {@code subjectIdentity}

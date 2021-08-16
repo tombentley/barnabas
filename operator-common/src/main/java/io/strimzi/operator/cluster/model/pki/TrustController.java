@@ -16,6 +16,7 @@ import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.KubernetesClientException;
@@ -46,7 +47,7 @@ import io.strimzi.operator.common.ReconciliationLogger;
  *     <dt>UNTRUSTED -&gt; {@link TrustState#TRUSTED_NEW}</dt>
  *     <dd>On observing a certificate in the UNTRUSTED state, the trust managing entity performs the orchestration necessary for the
  *     certificate to become trusted. Once this is complete it transitions the trust root to TRUSTED_NEW by calling
- *     {@link #haveTrust(Set)}</dd>
+ *     {@link #trustRootCerts(Set)}</dd>
  *
  *     <dt>TRUSTED_NEW -&gt; {@link TrustState#TRUSTED_USED}</dt>
  *     <dd>On observing a certificate in the TRUSTED_NEW state, the issuing entity can deploy the
@@ -86,10 +87,13 @@ public class TrustController implements TrustManager, TrustDependencyManager {
 
     private final NamedResource<Secret> secretResource;
     private final Reconciliation reconciliation;
+    private final OwnerReference ownerReference;
 
-    public TrustController(Reconciliation reconciliation, NamedResource<Secret> secretResource) {
+    public TrustController(Reconciliation reconciliation, NamedResource<Secret> secretResource,
+                           OwnerReference ownerReference) {
         this.reconciliation = reconciliation;
         this.secretResource = secretResource;
+        this.ownerReference = ownerReference;
     }
 
     public static String encode(TrustState state) {
@@ -117,58 +121,87 @@ public class TrustController implements TrustManager, TrustDependencyManager {
         while (true) {
             Secret oldSecret = secretResource.get();
             if (oldSecret == null) {
-                oldSecret = secretResource.create(new Secret());
+                oldSecret = secretResource.create(new SecretBuilder().withNewMetadata().withOwnerReferences(ownerReference).endMetadata().build());
             }
             Replaceable<Secret> secretReplaceable = secretResource.lockResourceVersion(oldSecret.getMetadata().getResourceVersion());
             if (oldSecret.getData() == null) {
                 oldSecret.setData(Map.of());
             }
-            Secret build = fn.apply(oldSecret);
-            try {
-                secretReplaceable.replace(build);
-                return;
-            } catch (KubernetesClientException e) {
-                if (e.getCode() == 409 && delayBoundMs < 10_000) {
-                    try {
-                        int delayMs = new Random().nextInt(delayBoundMs);
-                        LOGGER.debugCr(reconciliation, "Conflict updating {} retrying in {}ms", secretResource, delayMs);
-                        Thread.sleep(delayMs);
-                    } catch (InterruptedException interruptedException) {
-                        throw new RuntimeException(interruptedException);
+            Secret replacement = fn.apply(oldSecret);
+            if (LOGGER.isDebugEnabled()) {
+                logTransitions(oldSecret.getData(), replacement.getData());
+            }
+            if (!oldSecret.getData().equals(replacement.getData())) {
+                try {
+                    secretReplaceable.replace(replacement);
+                    return;
+                } catch (KubernetesClientException e) {
+                    if (e.getCode() == 409 && delayBoundMs < 10_000) {
+                        try {
+                            int delayMs = new Random().nextInt(delayBoundMs);
+                            LOGGER.debugCr(reconciliation, "Conflict updating {} retrying in {}ms", secretResource, delayMs);
+                            Thread.sleep(delayMs);
+                        } catch (InterruptedException interruptedException) {
+                            throw new RuntimeException(interruptedException);
+                        }
+                        delayBoundMs *= 2;
+                    } else {
+                        throw e;
                     }
-                    delayBoundMs *= 2;
-                } else {
-                    throw e;
                 }
+            } else {
+                LOGGER.debugCr(reconciliation, "Replacement of {} would be a noop", secretResource);
+                return;
             }
         }
     }
 
-    /**
-     * Request a root cert be trusted.
-     * Updates the state for that cert to UNTRUSTED
-     * @param cert The cert
-     */
+    private void logTransitions(Map<String, String> oldData, Map<String, String> replacementData) {
+        oldData.entrySet().stream()
+                .filter(oldEntry -> isStateItem(oldEntry.getKey()))
+                .forEach(oldEntry -> {
+                    String oldKey = oldEntry.getKey();
+                    String oldValue = oldEntry.getValue();
+                    String replacementValue = replacementData.get(oldKey);
+                    if (replacementValue == null) {
+                        LOGGER.infoCr(reconciliation, "Cert {} in {}: Removed with state '{}'",
+                                fingerprint(oldKey), secretResource, decodeState(oldValue));
+                    } else if (replacementValue.equals(oldValue)) {
+                        LOGGER.debugCr(reconciliation, "Cert {} in {}: Unchanged '{}'",
+                                fingerprint(oldKey), secretResource, decodeState(oldValue));
+                    } else {
+                        LOGGER.infoCr(reconciliation, "Cert {} in {}: Transition '{}' -> '{}'",
+                                fingerprint(oldKey), secretResource,
+                                decodeState(oldValue), decodeState(replacementValue));
+                    }
+                });
+        replacementData.entrySet().stream()
+                .filter(replacementEntry -> isStateItem(replacementEntry.getKey()))
+                .forEach(replacementEntry -> {
+                    String replacementKey = replacementEntry.getKey();
+                    String replacementValue = replacementEntry.getValue();
+                    String oldValue = oldData.get(replacementKey);
+                    if (oldValue == null) {
+                        LOGGER.infoCr(reconciliation, "Cert {} in {}: Added in state '{}'",
+                                fingerprint(replacementKey), secretResource, decodeState(replacementValue));
+                    }
+                });
+    }
+
     // Called by UO to request a root cert be trusted
     // i.e. add t S with state UNTRUSTED
     // xxx.cert=...
     // xxx.state=untrusted
     @Override
-    public void requireTrust(X509Certificate cert) {
+    public void requireTrust(X509Certificate rootCert) {
         replace(oldSecret -> {
             try {
                 TrustState newState = TrustState.UNTRUSTED;
-                Fingerprint fingerprint = PkiUtils.fingerprint(cert);
+                Fingerprint fingerprint = PkiUtils.fingerprint(rootCert);
                 String stateItem = stateKey(fingerprint);
-                String existingState = oldSecret.getData().get(stateItem);
-                if (existingState != null) {
-                    LOGGER.debugCr(reconciliation, "Transitioning state of {} in {} from {} to {}", fingerprint, secretResource, decodeState(existingState), newState);
-                } else {
-                    LOGGER.debugCr(reconciliation, "Transitioning state of {} in {} to {} (no existing state)", fingerprint, secretResource, newState);
-                }
                 return new SecretBuilder(oldSecret)
                         .addToData(stateItem, encode(newState))
-                        .addToData(certKey(fingerprint), encode(cert))
+                        .addToData(certKey(fingerprint), encode(rootCert))
                         .build();
             } catch (CertificateEncodingException e) {
                 throw new RuntimeException(e);
@@ -176,74 +209,67 @@ public class TrustController implements TrustManager, TrustDependencyManager {
         });
     }
 
-    /**
-     * Find the roots which need to be trusted.
-     * @return The certs with state UNTRUSTED
-     */
     // Called by the CO to find the roots which need to be trusted (i
     // i.e. all those in C with state UNTRUSTED
     @Override
     public Set<X509Certificate> requiringTrust() {
-        return certsInStates(Set.of(TrustState.UNTRUSTED));
+        return rootCertsInStates(Set.of(TrustState.UNTRUSTED));
     }
 
-    /**
-     * Records that a set of root certs are now trusted.
-     * Updates the states for each cert to TRUSTED_NEW
-     * @param certs The certs
-     */
+    // TODO all these methods for transitioning states are very similar
+    // Refactor!!
+
     // Called by CO to say that those certs are now trusted
     // i.e. update S with state TRUSTED
     // xxx.cert=...
     // xxx.state=trusted_new
     @Override
-    public void haveTrust(Set<X509Certificate> certs) {
+    public void trustRootCerts(Set<X509Certificate> rootCerts) {
         replace(oldSecret -> {
             SecretBuilder sb = new SecretBuilder(oldSecret);
-            for (X509Certificate cert : certs) {
+            for (X509Certificate cert : rootCerts) {
                 Fingerprint fingerprint = PkiUtils.fingerprint(cert);
-                LOGGER.debugCr(reconciliation, "Transitioning {} to {} in {}", fingerprint, TrustState.TRUSTED_NEW, secretResource);
                 sb.addToData(stateKey(fingerprint), encode(TrustState.TRUSTED_NEW));
             }
             return sb.build();
         });
     }
 
-    /**
-     * Records that a root cert is no being used.
-     * Updates the state for that cert to TRUSTED_USED
-     * @param cert The cert
-     */
+    @Override
+    public void phaseOut(Set<X509Certificate> rootCerts) {
+        replace(oldSecret -> {
+            SecretBuilder sb = new SecretBuilder(oldSecret);
+            for (X509Certificate cert : rootCerts) {
+                Fingerprint fingerprint = PkiUtils.fingerprint(cert);
+                sb.addToData(stateKey(fingerprint), encode(TrustState.PHASE_OUT));
+            }
+            return sb.build();
+        });
+    }
+
     // Called by the UO when an EE certificate is "deployed" and the root is now depended on
     // ie. update S with a count
     // xxx.cert=...
     // xxx.state=trusted_used
     @Override
-    public void depend(X509Certificate cert) {
+    public void depend(X509Certificate rootCert) {
         replace(oldSecret -> {
             SecretBuilder sb = new SecretBuilder(oldSecret);
-            Fingerprint fingerprint = PkiUtils.fingerprint(cert);
-            LOGGER.debugCr(reconciliation, "Transitioning {} to {} in {}", fingerprint, TrustState.TRUSTED_USED, secretResource);
+            Fingerprint fingerprint = PkiUtils.fingerprint(rootCert);
             sb.addToData(stateKey(fingerprint), encode(TrustState.TRUSTED_USED));
             return sb.build();
         });
     }
 
-    /**
-     * Records that a root cert is no longer being used.
-     * Updates the state for that cert to ZOMBIE
-     * @param cert The cert
-     */
     // Called by the UO when the root certificate is no longer depended on by any EE certs
     // ie. update S with a count
     // xxx.cert=...
     // xxx.state=zombie
     @Override
-    public void undepend(X509Certificate cert) {
+    public void undepend(X509Certificate rootCert) {
         replace(oldSecret -> {
             SecretBuilder sb = new SecretBuilder(oldSecret);
-            Fingerprint fingerprint = PkiUtils.fingerprint(cert);
-            LOGGER.debugCr(reconciliation, "Transitioning {} to {} in {}", fingerprint, TrustState.ZOMBIE, secretResource);
+            Fingerprint fingerprint = PkiUtils.fingerprint(rootCert);
             sb.addToData(stateKey(fingerprint), encode(TrustState.ZOMBIE));
 
             return sb.build();
@@ -251,35 +277,34 @@ public class TrustController implements TrustManager, TrustDependencyManager {
     }
 
     @Override
-    public TrustState state(Fingerprint rootCaFingerprint) {
+    public TrustState stateOfRootCert(Fingerprint rootCaFingerprint) {
+        TrustState result = null;
         Secret secret = secretResource.get();
-        if (secret == null
-                || secret.getData() == null) {
-            return null;
-        } else {
+        if (secret != null
+                && secret.getData() != null) {
             String s = secret.getData().get(stateKey(rootCaFingerprint));
-            if (s == null) {
-                return null;
-            } else {
-                return decodeState(s);
+            if (s != null) {
+                result = decodeState(s);
             }
         }
+        return result;
     }
 
     @Override
-    public Set<X509Certificate> certsInStates(Set<TrustState> states) {
+    public Set<X509Certificate> rootCertsInStates(Set<TrustState> states) {
+        Set<X509Certificate> result;
         Secret secret = secretResource.get();
         if (secret == null
                 || secret.getData() == null
                 || secret.getData().isEmpty()) {
-            return Set.of();
+            result = Set.of();
         } else {
             var entries = secret.getData().entrySet();
             Set<String> collect = entries.stream()
                     .filter(e -> isStateItem(e.getKey()) && states.contains(decodeState(e.getValue())))
                     .map(e -> fingerprint(e.getKey()))
                     .collect(Collectors.toSet());
-            return entries.stream()
+            result = entries.stream()
                     .filter(entry -> isCertItem(entry.getKey())
                             && collect.contains(fingerprint(entry.getKey())))
                     .map(entry -> {
@@ -292,6 +317,14 @@ public class TrustController implements TrustManager, TrustDependencyManager {
                     .collect(Collectors.toSet());
 
         }
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debugCr(reconciliation, "Certs in {} in states {}: {}", secretResource, states,
+                    result.stream()
+                            .map(PkiUtils::fingerprint)
+                            .map(Object::toString)
+                            .collect(Collectors.joining(", ", "[", "]")));
+        }
+        return result;
     }
 
     public static String fingerprint(String key) {
@@ -331,7 +364,7 @@ public class TrustController implements TrustManager, TrustDependencyManager {
     // Called by the CO to find the root which are no longer needed
     @Override
     public Set<X509Certificate> zombies() {
-        return certsInStates(Set.of(TrustState.ZOMBIE));
+        return rootCertsInStates(Set.of(TrustState.ZOMBIE));
     }
 
     /**

@@ -6,6 +6,7 @@ package io.strimzi.operator.cluster.model.pki.cluster;
 
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +39,7 @@ import io.strimzi.operator.cluster.model.pki.CertificateReconcileResult;
 import io.strimzi.operator.cluster.model.pki.Chain;
 import io.strimzi.operator.cluster.model.pki.NamedResource;
 import io.strimzi.operator.cluster.model.pki.RequiredCertificate;
+import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
 import io.strimzi.operator.cluster.model.pki.TrustController;
 import io.strimzi.operator.cluster.model.pki.TrustManager;
 import io.strimzi.operator.cluster.model.pki.TrustDependencyManager;
@@ -109,6 +111,8 @@ public class ClusterPki {
         private final AbstractCertificateOutputWriter<KafkaExporterIdentity> exporterCertWriter;
         private final AbstractCertificateOutputWriter<CruiseControlIdentity> ccCertWriter;
         private final AbstractCertificateOutputWriter<ClusterOperatorIdentity> coCertWriter;
+        private Set<X509Certificate> requiringTrust;
+        private Set<X509Certificate> zombies;
 
         public ClusterCerts(KubernetesClient client,
                             TrustController useManager,
@@ -132,12 +136,10 @@ public class ClusterPki {
                     new NamedResource<>(client.secrets().inNamespace(namespace), KafkaCluster.brokersSecretName(cluster)),
                     new NamedResource<>(client.secrets().inNamespace(namespace), KafkaCluster.brokersSecretName(cluster)),
                     ownerReference, true, true);
-            this.eoCertWriter = new AbstractCertificateOutputWriter<>(reconciliation,
-                    "entity-operator",
-                    ownerReference, MAPPER) {
+            this.eoCertWriter = new AbstractCertificateOutputWriter<>(reconciliation, ownerReference, MAPPER) {
                 @Override
-                protected String stateKey(EntityOperatorIdentity id) {
-                    return "entity-operator.state";
+                protected String keyPrefix(EntityOperatorIdentity id) {
+                    return "entity-operator";
                 }
 
                 @Override
@@ -150,12 +152,10 @@ public class ClusterPki {
                     return new NamedResource<>(client.secrets().inNamespace(namespace), KafkaResources.entityOperatorSecretName(cluster));
                 }
             };
-            this.exporterCertWriter = new AbstractCertificateOutputWriter<>(reconciliation,
-                    "kafka-exporter",
-                    ownerReference, MAPPER) {
+            this.exporterCertWriter = new AbstractCertificateOutputWriter<>(reconciliation, ownerReference, MAPPER) {
                 @Override
-                protected String stateKey(KafkaExporterIdentity id) {
-                    return "kafka-exporter.state";
+                protected String keyPrefix(KafkaExporterIdentity id) {
+                    return "kafka-exporter";
                 }
 
                 @Override
@@ -168,9 +168,7 @@ public class ClusterPki {
                     return new NamedResource<>(client.secrets().inNamespace(namespace), KafkaExporterResources.secretName(cluster));
                 }
             };
-            this.ccCertWriter = new AbstractCertificateOutputWriter<>(reconciliation,
-                    "cruise-control",
-                    ownerReference, MAPPER) {
+            this.ccCertWriter = new AbstractCertificateOutputWriter<>(reconciliation, ownerReference, MAPPER) {
                 @Override
                 protected NamedResource<Secret> issuedResource(CruiseControlIdentity id) {
                     return new NamedResource<>(client.secrets().inNamespace(namespace), CruiseControl.secretName(cluster));
@@ -182,16 +180,14 @@ public class ClusterPki {
                 }
 
                 @Override
-                protected String stateKey(CruiseControlIdentity id) {
-                    return "cruise-control.state";
+                protected String keyPrefix(CruiseControlIdentity id) {
+                    return "cruise-control";
                 }
             };
-            this.coCertWriter = new AbstractCertificateOutputWriter<>(reconciliation,
-                    "cluster-operator",
-                    ownerReference, MAPPER) {
+            this.coCertWriter = new AbstractCertificateOutputWriter<>(reconciliation, ownerReference, MAPPER) {
                 @Override
-                protected String stateKey(ClusterOperatorIdentity id) {
-                    return "cluster-operator.state";
+                protected String keyPrefix(ClusterOperatorIdentity id) {
+                    return "cluster-operator";
                 }
 
                 @Override
@@ -214,9 +210,7 @@ public class ClusterPki {
             List<CertificateReconcileResult> results = new ArrayList<>(zkReplicas);
             for (int podId = 0; podId < zkReplicas; podId++) {
                 RequiredCertificate<ZooKeeperNodeIdentity> requiredCertificate = zkSubject(namespace, cluster, podId);
-                CertificateReconcileResult reconcileResult = controller.reconcile(requiredCertificate, zkCertsWriter);
-
-                LOGGER.debugCr(reconciliation, "Reconcile result of {} was {}", requiredCertificate, reconcileResult);
+                CertificateReconcileResult reconcileResult = reconcile(requiredCertificate, zkCertsWriter);
                 results.add(reconcileResult);
             }
             LOGGER.debugCr(reconciliation, "ZK certificate reconciliation took {}ms",
@@ -232,13 +226,9 @@ public class ClusterPki {
             int kafkaReplicas = kafka.getSpec().getKafka().getReplicas();
             List<CertificateReconcileResult> results = new ArrayList<>(kafkaReplicas);
             for (int brokerId = 0; brokerId < kafkaReplicas; brokerId++) {
-                RequiredCertificate<BrokerIdentity> requiredCertificate = brokerSubject(namespace, cluster, brokerId,
-                        externalBootstrapAddresses, externalAddresses);
-                CertificateReconcileResult reconcileResult = controller.reconcile(
-                        requiredCertificate,
-                        kafkaCertsWriter);
-                LOGGER.debugCr(reconciliation, "Reconcile result of {} was {}", requiredCertificate, reconcileResult);
-                results.add(reconcileResult);
+                results.add(reconcile(
+                        brokerSubject(namespace, cluster, brokerId, externalBootstrapAddresses, externalAddresses),
+                        kafkaCertsWriter));
             }
             LOGGER.debugCr(reconciliation, "Kafka certificate reconciliation took {}ms",
                     (System.nanoTime() - t0) / 1_000_000.0);
@@ -248,19 +238,14 @@ public class ClusterPki {
         public CertificateReconcileResult reconcileEoCertificate(Kafka kafka) throws CertificateException {
             io.strimzi.api.kafka.model.EntityOperatorSpec entityOperator = kafka.getSpec().getEntityOperator();
             if (entityOperator != null) {
-                long t0 = System.nanoTime();
-
-                RequiredCertificate<EntityOperatorIdentity> requiredCertificate = new RequiredCertificate<>(new EntityOperatorIdentity(),
-                        new Subject.Builder()
-                                .withCommonName(entityOperatorName(cluster))
-                                .withOrganizationName(Ca.IO_STRIMZI)
-                                .build());
-                CertificateReconcileResult reconcileResult = controller.reconcile(requiredCertificate,
+                return reconcile(
+                        new RequiredCertificate<>(
+                                new EntityOperatorIdentity(),
+                                new Subject.Builder()
+                                    .withCommonName(entityOperatorName(cluster))
+                                    .withOrganizationName(Ca.IO_STRIMZI)
+                                    .build()),
                         eoCertWriter);
-                LOGGER.debugCr(reconciliation, "Reconcile result of {} was {}", requiredCertificate, reconcileResult);
-                LOGGER.debugCr(reconciliation, "EO certificate issuance took {}ms",
-                        (System.nanoTime() - t0) / 1_000_000.0);
-                return reconcileResult;
             }
             return null;
         }
@@ -268,18 +253,14 @@ public class ClusterPki {
         public CertificateReconcileResult reconcileKafkaExporterCertificates(Kafka kafka) throws CertificateException {
             io.strimzi.api.kafka.model.KafkaExporterSpec i = kafka.getSpec().getKafkaExporter();
             if (i != null) {
-                long t0 = System.nanoTime();
-                RequiredCertificate<KafkaExporterIdentity> requiredCertificate = new RequiredCertificate<>(new KafkaExporterIdentity(),
-                        new Subject.Builder()
-                                .withCommonName(KafkaExporterResources.deploymentName(cluster))
-                                .withOrganizationName(Ca.IO_STRIMZI)
-                                .build());
-                CertificateReconcileResult reconcileResult = controller.reconcile(requiredCertificate,
+                return reconcile(
+                        new RequiredCertificate<>(
+                                new KafkaExporterIdentity(),
+                                new Subject.Builder()
+                                    .withCommonName(KafkaExporterResources.deploymentName(cluster))
+                                    .withOrganizationName(Ca.IO_STRIMZI)
+                                    .build()),
                         exporterCertWriter);
-                LOGGER.debugCr(reconciliation, "Reconcile result of {} was {}", requiredCertificate, reconcileResult);
-                LOGGER.debugCr(reconciliation, "Kafka Exporter certificate issuance took {}ms",
-                        (System.nanoTime() - t0) / 1_000_000.0);
-                return reconcileResult;
             }
             return null;
         }
@@ -287,38 +268,56 @@ public class ClusterPki {
         public CertificateReconcileResult reconcileCcCertificate(Kafka kafka) throws CertificateException {
             if (kafka.getSpec().getCruiseControl() != null) {
                 // TODO collect all the certs which we're waiting for trust on
-                long t0 = System.nanoTime();
-                RequiredCertificate<CruiseControlIdentity> requiredCertificate = new RequiredCertificate<>(new CruiseControlIdentity(),
-                        new Subject.Builder()
-                                .withCommonName(CruiseControlResources.deploymentName(cluster))
-                                .withOrganizationName(Ca.IO_STRIMZI)
-                                .build());
-                CertificateReconcileResult reconcileResult = controller.reconcile(requiredCertificate,
+                return reconcile(
+                        new RequiredCertificate<>(
+                                new CruiseControlIdentity(),
+                                new Subject.Builder()
+                                        .withCommonName(CruiseControlResources.deploymentName(cluster))
+                                        .withOrganizationName(Ca.IO_STRIMZI)
+                                        .build()),
                         ccCertWriter);
-                LOGGER.debugCr(reconciliation, "Reconcile result of {} was {}", requiredCertificate, reconcileResult);
-                LOGGER.debugCr(reconciliation, "Cruise Control certificate issuance took {}ms",
-                        (System.nanoTime() - t0) / 1_000_000.0);
-                return reconcileResult;
             }
             return null;
         }
 
         public CertificateReconcileResult reconcileCoCertificate(Kafka kafka) throws CertificateException {
-            long t0 = System.nanoTime();
-            RequiredCertificate<ClusterOperatorIdentity> requiredCertificate = new RequiredCertificate<>(new ClusterOperatorIdentity(),
-                    new Subject.Builder()
-                            .withCommonName("cluster-operator")
-                            .withOrganizationName(Ca.IO_STRIMZI)
-                            .build());
-            CertificateReconcileResult reconcileResult = controller.reconcile(requiredCertificate,
+            return reconcile(
+                    new RequiredCertificate<>(
+                            new ClusterOperatorIdentity(),
+                            new Subject.Builder()
+                                    .withCommonName("cluster-operator")
+                                    .withOrganizationName(Ca.IO_STRIMZI)
+                                    .build()),
                     coCertWriter);
-            LOGGER.debugCr(reconciliation, "Reconcile result of {} was {}", requiredCertificate, reconcileResult);
-            LOGGER.debugCr(reconciliation, "Cluster Operator certificate issuance took {}ms",
-                    (System.nanoTime() - t0) / 1_000_000.0);
-            return reconcileResult;
             // TODO It will figure out the unused certs too, somehow.
             // It should return something which we can feed to the KafkaRoller predicate
             // And also ZK etc.
+        }
+
+        private <I extends SubjectIdentity> CertificateReconcileResult reconcile(
+                RequiredCertificate<I> requiredCertificate,
+                AbstractCertificateOutputWriter<I> outputWriter) throws CertificateException {
+            long t0 = System.nanoTime();
+            CertificateReconcileResult reconcileResult = controller.reconcile(requiredCertificate, outputWriter);
+            LOGGER.debugCr(reconciliation, "Certificate for {} reconciled with result {} in {}ms",
+                    requiredCertificate.subjectIdentity(),
+                    reconcileResult,
+                    (System.nanoTime() - t0) / 1_000_000.0);
+            return reconcileResult;
+        }
+
+        public void foo() throws CertificateEncodingException {
+            // We should get the zombies and the requiringTrust after issuing, before rolling
+            // and then pass them after rolling to this method.
+            this.requiringTrust = trustManager.requiringTrust();
+            this.zombies = trustManager.zombies();
+        }
+
+        public void trust() throws CertificateEncodingException {
+            // We should get the zombies and the requiringTrust after issuing, before rolling
+            // and then pass them after rolling to this method.
+            trustManager.trustRootCerts(requiringTrust);
+            trustManager.delete(zombies);
         }
     }
 
@@ -344,16 +343,20 @@ public class ClusterPki {
             clusterCa.setRenewalDays(30);
         }
         long t0 = System.nanoTime();
+        TrustController useManager = new TrustController(
+                reconciliation,
+                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"),
+                ownerReference);
+
         Chain chain = new Chain(reconciliation, clock,
                 client.secrets().inNamespace(namespace),
-                certManager);
+                certManager, useManager);
 
         // TODO fix the name
 //        TrustPrivateState trustPrivateState = new TrustPrivateState(
 //                ownerReference,
 //                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"));
-        TrustController useManager = new TrustController(reconciliation,
-                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"));
+
         CertificateIssuer issuer = chain.reconcile(Chain.clusterCaFromCrd(cluster, clusterCa),
                 clusterCa.isGenerateSecretOwnerReference() ? ownerReference : null);
         LOGGER.debugCr(reconciliation, "Chain reconciliation took {}ms",
@@ -441,54 +444,54 @@ public class ClusterPki {
         return new RequiredCertificate<>(new ZooKeeperNodeIdentity(podId), subject.build());
     }
 
-    // TODO this needs a test
-    public void trust(ClusterCerts result) throws CertificateEncodingException {
-        // We should get the zombies and the requiringTrust after issuing, before rolling
-        // and then pass them after rolling to this method.
-        result.trustManager.haveTrust(result.trustManager.requiringTrust());
-        result.trustManager.delete(result.trustManager.zombies());
-
-        ////////////////////////////////////////////////////////////////////////////////////
-
-        // TODO adding usedTrustRoots doesn't solve the problem for the UO though does it?
-        // We still have the situation where the CO (TC) doesn't know which root certs can be removed because it's the UO (CC) which knows about the EE certs
-        // We need some kind of shared state.
-        // For example if the Uo, on a full reconciliation, recorded a count for each root cert of the number of live EE certs
-        // <root cert fingerprint>: <count of ee certs>
-        // 1234567890abcdef: 4
-        // abcdef1234567890: 2
-        // (this could be part of the trust state)
-        // Then the CO could see what states each of these root certs was in
-        // When the state was PHASE_OUT and the count is zero we can transition to ZOMBIE be do the rolling to remove from trust
-
-
-//        TrustController trustController = new TrustController(result.reconciliation,
-//                result.trustPrivateState,
-//                List.of(new LegacyTrustOutputWriter(client.secrets().inNamespace(result.namespace)
-//                        .withName(KafkaResources.clusterCaCertificateSecretName(result.cluster)))));
-
+//    // TODO this needs a test
+//    public void trust(ClusterCerts result) throws CertificateEncodingException {
+//        // We should get the zombies and the requiringTrust after issuing, before rolling
+//        // and then pass them after rolling to this method.
+//        result.trustManager.trustRootCerts(result.trustManager.requiringTrust());
+//        result.trustManager.delete(result.trustManager.zombies());
 //
-//        Comparator<TrustRoot> comparator = Comparator.comparing(TrustRoot::fingerprint);
-//        Set<TrustRoot> newState = result.trustPrivateState.load().values().stream().map(trustRoot -> {
-//            if (trustRoot.state() == TrustState.UNTRUSTED) {
-//                // TODO this is fishy:
-//                // a) what is enforcing the valid transitions
-//                // b) why the need for the resourceVersion argument, then the TrustRoot already knows its rv?
-//                // c) why is it only toTrusted that needs the rv?
-//                return trustRoot.toTrusted(trustRoot.resourceVersion());
-//            } else {
-//                return trustRoot;
-//            }
-//        }).collect(Collectors.toCollection(() -> new TreeSet<>(comparator)));
-//        Set<TrustRoot> toPhaseOut = new TreeSet<>(comparator);
-//        // TODO Here we want to know all the EE certs in CertificateReconcileResult.WaitingForTrust, OkIssued or OkNoop
-//        // I.e. Root certs with state PENDING or IN_USE
-//        // In kube we could do this using a label, allowing us to select by status
-//        // But vault doesn't really support a usable LIST (https://www.vaultproject.io/api-docs/secret/kv/kv-v1)
-//        // with selection semantic. The best we could do would be to LIST.map(GET).filter(STATE)
-//        toPhaseOut.removeAll(usedTrustRoots);
-//        newState.addAll(toPhaseOut.stream().map(TrustRoot::toPhaseOut).collect(Collectors.toSet()));
-//        // If a new CA cert was used this will
-//        trustController.reconcile(newState);
-    }
+//        ////////////////////////////////////////////////////////////////////////////////////
+//
+//        // TODO adding usedTrustRoots doesn't solve the problem for the UO though does it?
+//        // We still have the situation where the CO (TC) doesn't know which root certs can be removed because it's the UO (CC) which knows about the EE certs
+//        // We need some kind of shared state.
+//        // For example if the Uo, on a full reconciliation, recorded a count for each root cert of the number of live EE certs
+//        // <root cert fingerprint>: <count of ee certs>
+//        // 1234567890abcdef: 4
+//        // abcdef1234567890: 2
+//        // (this could be part of the trust state)
+//        // Then the CO could see what states each of these root certs was in
+//        // When the state was PHASE_OUT and the count is zero we can transition to ZOMBIE be do the rolling to remove from trust
+//
+//
+////        TrustController trustController = new TrustController(result.reconciliation,
+////                result.trustPrivateState,
+////                List.of(new LegacyTrustOutputWriter(client.secrets().inNamespace(result.namespace)
+////                        .withName(KafkaResources.clusterCaCertificateSecretName(result.cluster)))));
+//
+////
+////        Comparator<TrustRoot> comparator = Comparator.comparing(TrustRoot::fingerprint);
+////        Set<TrustRoot> newState = result.trustPrivateState.load().values().stream().map(trustRoot -> {
+////            if (trustRoot.state() == TrustState.UNTRUSTED) {
+////                // TODO this is fishy:
+////                // a) what is enforcing the valid transitions
+////                // b) why the need for the resourceVersion argument, then the TrustRoot already knows its rv?
+////                // c) why is it only toTrusted that needs the rv?
+////                return trustRoot.toTrusted(trustRoot.resourceVersion());
+////            } else {
+////                return trustRoot;
+////            }
+////        }).collect(Collectors.toCollection(() -> new TreeSet<>(comparator)));
+////        Set<TrustRoot> toPhaseOut = new TreeSet<>(comparator);
+////        // TODO Here we want to know all the EE certs in CertificateReconcileResult.WaitingForTrust, OkIssued or OkNoop
+////        // I.e. Root certs with state PENDING or IN_USE
+////        // In kube we could do this using a label, allowing us to select by status
+////        // But vault doesn't really support a usable LIST (https://www.vaultproject.io/api-docs/secret/kv/kv-v1)
+////        // with selection semantic. The best we could do would be to LIST.map(GET).filter(STATE)
+////        toPhaseOut.removeAll(usedTrustRoots);
+////        newState.addAll(toPhaseOut.stream().map(TrustRoot::toPhaseOut).collect(Collectors.toSet()));
+////        // If a new CA cert was used this will
+////        trustController.reconcile(newState);
+//    }
 }

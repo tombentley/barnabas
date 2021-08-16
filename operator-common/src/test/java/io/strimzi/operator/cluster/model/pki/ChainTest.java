@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Base64;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -56,7 +57,7 @@ class ChainTest {
         clock = new TestClock(Clock.fixed(Instant.ofEpochMilli(0), ZoneId.of("UTC")));
         KubernetesClient client = new MockKube().build();
         secrets = client.secrets();
-        chain = new Chain(reconciliation, clock, secrets, new OpenSslCertManager());
+        chain = new Chain(reconciliation, clock, secrets, new OpenSslCertManager(), Objects.requireNonNull(null));
     }
 
     public static List<CertificateAuthority> clusterCaSource() {

@@ -30,35 +30,15 @@ public class ZookeeperCertificateOutputWriter extends AbstractCertificateOutputW
                                             NamedResource<Secret> statusResource,
                                             NamedResource<Secret> issuedResource,
                                             OwnerReference ownerReference) {
-        super(reconciliation,  null, ownerReference, MAPPER);
+        super(reconciliation,  ownerReference, MAPPER);
         this.statusResource = statusResource;
         this.issuedResource = issuedResource;
         this.cluster = cluster;
     }
 
     @Override
-    protected String p12Key(ZooKeeperNodeIdentity id) {
-        return ZookeeperCluster.zookeeperPodName(cluster, id.nodeId()) + ".p12";
-    }
-
-    @Override
-    protected String passwordKey(ZooKeeperNodeIdentity id) {
-        return ZookeeperCluster.zookeeperPodName(cluster, id.nodeId()) + ".password";
-    }
-
-    @Override
-    protected String certKey(ZooKeeperNodeIdentity id) {
-        return ZookeeperCluster.zookeeperPodName(cluster, id.nodeId()) + ".crt";
-    }
-
-    @Override
-    protected String keyKey(ZooKeeperNodeIdentity id) {
-        return ZookeeperCluster.zookeeperPodName(cluster, id.nodeId()) + ".key";
-    }
-
-    @Override
-    protected String stateKey(ZooKeeperNodeIdentity id) {
-        return ZookeeperCluster.zookeeperPodName(cluster, ((ZooKeeperNodeIdentity) id).nodeId()) + ".state";
+    protected String keyPrefix(ZooKeeperNodeIdentity id) {
+        return ZookeeperCluster.zookeeperPodName(cluster, id.nodeId());
     }
 
     @Override

@@ -239,15 +239,18 @@ public class Chain {
     private final Clock clock;
     private final NonNamespaceOperation<Secret, SecretList, Resource<Secret>> secrets;
     private final CertManager certManager;
+    private final TrustManager trustManager;
 
     public Chain(Reconciliation reconciliation,
                  Clock clock,
                  NonNamespaceOperation<Secret, SecretList, Resource<Secret>> secrets,
-                 CertManager certManager) {
+                 CertManager certManager,
+                 TrustManager trustManager) {
         this.reconciliation = reconciliation;
         this.clock = clock;
         this.secrets = secrets;
         this.certManager = certManager;
+        this.trustManager = trustManager;
     }
 
     public CertificateIssuer reconcile(InternalIssuerSpec chain, OwnerReference ownerRef) throws CertificateException {
@@ -384,19 +387,24 @@ public class Chain {
 
     private CertAndKey loadCertAndKey(String certSecretName, String certificateId, String keySecretName, String keyId) throws CertificateException {
         Secret certSecret = secrets.withName(certSecretName).get();
+        LOGGER.debugCr(reconciliation, "Loaded existing CA cert from {}: {}", keySecretName, certSecret);
         final X509Certificate cert;
         if (certSecret == null || certSecret.getData() == null) {
-            cert = null;
-        } else if (Annotations.booleanAnnotation(certSecret, Annotations.ANNO_STRIMZI_IO_FORCE_RENEW, false)) {
-            LOGGER.infoCr(reconciliation, "Secret {} annotated with {}: No loading existing cert",
-                    certSecretName, Annotations.ANNO_STRIMZI_IO_FORCE_RENEW);
             cert = null;
         } else {
             String src = certSecret.getData().get(certificateId);
             if (src == null) {
                 cert = null;
             } else {
-                cert = PkiUtils.x509Certificate(Base64.getDecoder().decode(src));
+                X509Certificate cert2 = PkiUtils.x509Certificate(Base64.getDecoder().decode(src));
+                if (Annotations.booleanAnnotation(certSecret, Annotations.ANNO_STRIMZI_IO_FORCE_RENEW, false)) {
+                    LOGGER.infoCr(reconciliation, "Secret {} annotated with {}: Not loading existing cert",
+                            certSecretName, Annotations.ANNO_STRIMZI_IO_FORCE_RENEW);
+                    trustManager.phaseOut(Set.of(cert2));
+                    cert = null;
+                } else {
+                    cert = cert2;
+                }
             }
         }
 
@@ -406,19 +414,28 @@ public class Chain {
         } else {
             keySecret = secrets.withName(keySecretName).get();
         }
+        LOGGER.debugCr(reconciliation, "Loaded existing CA key from {}: ", keySecretName, keySecret);
         final byte[] key;
         if (keySecret == null || keySecret.getData() == null) {
-            key = null;
-        } else if (Annotations.booleanAnnotation(keySecret, Annotations.ANNO_STRIMZI_IO_FORCE_REPLACE, false)) {
-            LOGGER.infoCr(reconciliation, "Secret {} annotated with {}: No loading existing key",
-                    keySecretName, Annotations.ANNO_STRIMZI_IO_FORCE_REPLACE);
             key = null;
         } else {
             String src = keySecret.getData().get(keyId);
             if (src == null) {
                 key = null;
             } else {
-                key = Base64.getDecoder().decode(src);
+                byte[] key2 = Base64.getDecoder().decode(src);
+                if (Annotations.booleanAnnotation(keySecret, Annotations.ANNO_STRIMZI_IO_FORCE_REPLACE, false)) {
+                    LOGGER.debugCr(reconciliation, "Secret {} annotated with {}: Not loading existing key",
+                            keySecretName, Annotations.ANNO_STRIMZI_IO_FORCE_REPLACE);
+                    if (cert != null) {
+                        trustManager.phaseOut(Set.of(cert));
+                    } else {
+                        LOGGER.warnCr(reconciliation, "Couldn't find existing cert, so cannot transition it to PHASE_OUT");
+                    }
+                    key = null;
+                } else {
+                    key = key2;
+                }
             }
         }
         return new CertAndKey(cert, key);

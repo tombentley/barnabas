@@ -4,8 +4,6 @@
  */
 package io.strimzi.operator.cluster.model.pki;
 
-import java.security.cert.X509Certificate;
-import java.time.Instant;
 import java.util.Arrays;
 import java.util.Objects;
 
@@ -19,58 +17,48 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * and not for use by components (e.g. brokers) needing to use a certificate, for which there is a separate
  * interface, {@link CertificateOutputWriter}.
  */
-public class CertificateStatus<Id extends SubjectIdentity> {
+public class CertificateStatus {
     private final CertificateState state;
-    private final Id subjectIdentity;
     private final IssuedCertificate issuedCertificate;
     private final byte[] token;
-    private Fingerprint fingerprint = null;
 
     @JsonCreator
     public CertificateStatus(
             @JsonProperty("state") CertificateState state,
-            @JsonProperty("subjectIdentity") Id subjectIdentity,
             @JsonProperty("requestToken") byte[] token,
             @JsonProperty("pending") IssuedCertificate pending) {
-        this(state, subjectIdentity, token, pending, null);
-    }
-
-    CertificateStatus(CertificateState state, Id subjectIdentity, byte[] token, IssuedCertificate issuedCertificate, Fingerprint fingerprint) {
         this.state = Objects.requireNonNull(state);
-        this.subjectIdentity = Objects.requireNonNull(subjectIdentity);
-        this.issuedCertificate = issuedCertificate;
+        this.issuedCertificate = pending;
         this.token = token;
-        this.fingerprint = fingerprint;
     }
 
-    public static <Id extends SubjectIdentity> CertificateStatus<Id> createNew(Id subjectIdentity) {
-        Objects.requireNonNull(subjectIdentity);
-        return new CertificateStatus<>(CertificateState.NEW, subjectIdentity, null, null, null);
+    public static CertificateStatus createNew() {
+        return new CertificateStatus(CertificateState.NEW, null, null);
     }
 
-    public CertificateStatus<Id> toRequested(byte[] token) {
+    public CertificateStatus toRequested(byte[] token) {
         if (this.state != CertificateState.NEW && this.state != CertificateState.IN_USE)
             throw new AssertionError("Unexpected state transition: " + this.state + "->" + CertificateState.REQUESTED);
-        return new CertificateStatus<>(CertificateState.REQUESTED, this.subjectIdentity, token, null, null);
+        return new CertificateStatus(CertificateState.REQUESTED, token, null);
     }
 
-    public CertificateStatus<Id> toPending(IssuedCertificate issuedCertificate) {
+    public CertificateStatus toPending(IssuedCertificate issuedCertificate) {
         Objects.requireNonNull(issuedCertificate);
         if (this.state != CertificateState.REQUESTED)
             throw new AssertionError("Unexpected state transition: " + this.state + "->" + CertificateState.PENDING);
-        return new CertificateStatus<>(CertificateState.PENDING, this.subjectIdentity, null, issuedCertificate, null);
+        return new CertificateStatus(CertificateState.PENDING, null, issuedCertificate);
     }
 
-    public CertificateStatus<Id> toInUse() {
+    public CertificateStatus toInUse() {
         if (this.state != CertificateState.PENDING)
             throw new AssertionError("Unexpected state transition: " + this.state + "->" + CertificateState.IN_USE);
-        return new CertificateStatus<>(CertificateState.IN_USE, this.subjectIdentity, null, this.issuedCertificate, this.fingerprint);
+        return new CertificateStatus(CertificateState.IN_USE, null, this.issuedCertificate);
     }
 
-    public CertificateStatus<Id> toNotNeeded() {
+    public CertificateStatus toNotNeeded() {
         if (this.state != CertificateState.IN_USE)
             throw new AssertionError("Unexpected state transition: " + this.state + "->" + CertificateState.NOT_NEEDED);
-        return new CertificateStatus<>(CertificateState.NOT_NEEDED, this.subjectIdentity, null, null, this.fingerprint);
+        return new CertificateStatus(CertificateState.NOT_NEEDED, null, null);
     }
 
     @JsonProperty("requestToken")
@@ -82,10 +70,6 @@ public class CertificateStatus<Id extends SubjectIdentity> {
         }
     }
 
-    @JsonProperty
-    public Id subjectIdentity() {
-        return subjectIdentity;
-    }
 
     @JsonProperty
     public CertificateState state() {
@@ -106,10 +90,8 @@ public class CertificateStatus<Id extends SubjectIdentity> {
     public String toString() {
         return "CertificateStatus(" +
                 "state=" + state +
-                ", subjectIdentity=" + subjectIdentity +
                 ", issuedCertificate=" + issuedCertificate +
                 ", token=" + Arrays.toString(token) +
-                ", fingerprint=" + fingerprint +
                 ')';
     }
 
@@ -117,17 +99,15 @@ public class CertificateStatus<Id extends SubjectIdentity> {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        CertificateStatus<?> that = (CertificateStatus<?>) o;
+        CertificateStatus that = (CertificateStatus) o;
         return state == that.state &&
-                Objects.equals(subjectIdentity, that.subjectIdentity) &&
                 Objects.equals(issuedCertificate, that.issuedCertificate) &&
-                Arrays.equals(token, that.token) &&
-                Objects.equals(fingerprint, that.fingerprint);
+                Arrays.equals(token, that.token);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(state, subjectIdentity, issuedCertificate, fingerprint);
+        int result = Objects.hash(state, issuedCertificate);
         result = 31 * result + Arrays.hashCode(token);
         return result;
     }

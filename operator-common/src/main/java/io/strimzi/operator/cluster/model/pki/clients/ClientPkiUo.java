@@ -11,13 +11,11 @@ import java.util.Objects;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.jsontype.NamedType;
 import io.fabric8.kubernetes.api.model.OwnerReference;
-import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.strimzi.api.kafka.model.CertificateAuthority;
 import io.strimzi.api.kafka.model.KafkaUser;
 import io.strimzi.certs.CertManager;
 import io.strimzi.certs.Subject;
-import io.strimzi.operator.cluster.model.pki.AbstractCertificateOutputWriter;
 import io.strimzi.operator.cluster.model.pki.CertificateController;
 import io.strimzi.operator.cluster.model.pki.CertificateIssuer;
 import io.strimzi.operator.cluster.model.pki.CertificateOutputWriter;
@@ -95,26 +93,10 @@ public class ClientPkiUo {
         public void issue(KafkaUser user) throws CertificateException {
 
             OwnerReference ownerReference = null;
-            CertificateOutputWriter<KafkaUserIdentity> certificateOutputWriter = new AbstractCertificateOutputWriter<>(reconciliation,
-                    null,
+            CertificateOutputWriter<KafkaUserIdentity> certificateOutputWriter = new KafkaUserCertificateOutputWriter(reconciliation,
+                    client.secrets().inNamespace(namespace),
                     ownerReference,
-                    MAPPER) {
-
-                @Override
-                protected String stateKey(KafkaUserIdentity subjectIdentity) {
-                    return "user.state";
-                }
-
-                @Override
-                protected NamedResource<Secret> statusResource(KafkaUserIdentity subjectIdentity) {
-                    return new NamedResource<>(client.secrets().inNamespace(namespace), user.getMetadata().getName());
-                }
-
-                @Override
-                protected NamedResource<Secret> issuedResource(KafkaUserIdentity subjectIdentity) {
-                    return new NamedResource<>(client.secrets().inNamespace(namespace), user.getMetadata().getName());
-                }
-            };
+                    MAPPER);
 
             CertificateReconcileResult reconcile = certificateController.reconcile(new RequiredCertificate<>(new KafkaUserIdentity(user.getCRDName()),
                     new Subject.Builder().withCommonName(user.getMetadata().getName()).build()), certificateOutputWriter);
@@ -136,13 +118,16 @@ public class ClientPkiUo {
         long t0 = System.nanoTime();
         Chain chain = new Chain(reconciliation, clock,
                 client.secrets().inNamespace(namespace),
-                certManager);
+                certManager, Objects.requireNonNull(null));
 
         // TODO fix the name
 //        TrustPrivateState trustPrivateState = new TrustPrivateState(
 //                ownerReference,
 //                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"));
-        TrustController useManager = new TrustController(reconciliation, new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"));
+        TrustController useManager = new TrustController(
+                reconciliation,
+                new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"),
+                ownerReference);
         // TODO we don't ourselves reconcile the chain here. We somehow need to instantiate an issuer based on
         // what's present in the Secrets and/or the Kafka CR
         // Does this that Chain ought to be composed of two parts
