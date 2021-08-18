@@ -110,7 +110,7 @@ Example of complex type.
 |Property    |Description
 |bar  1.2+<.<a|
 |string
-|timerService  1.2+<.<a|
+|foo  1.2+<.<a|
 |string
 |====
 

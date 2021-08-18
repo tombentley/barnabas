@@ -46,7 +46,6 @@ import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.operator.resource.PodOperator;
-import io.strimzi.operator.common.process.TimerService;
 import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
@@ -125,7 +124,6 @@ public class KafkaRoller {
     private final Reconciliation reconciliation;
     private final boolean allowReconfiguration;
     private Admin allClient;
-    private TimerService ts;
 
     public KafkaRoller(Reconciliation reconciliation, Vertx vertx, PodOperator podOperations,
                        long pollingIntervalMs, long operationTimeoutMs, Supplier<BackOff> backOffSupplier,
@@ -166,8 +164,8 @@ public class KafkaRoller {
         return podOperations.getAsync(namespace, KafkaCluster.kafkaPodName(cluster, podId));
     }
 
-    private final ScheduledExecutorService singleExecutor = ts.registerExecutorService(() -> Executors.newSingleThreadScheduledExecutor(
-        runnable -> new Thread(runnable, "kafka-roller")));
+    private final ScheduledExecutorService singleExecutor = Executors.newSingleThreadScheduledExecutor(
+        runnable -> new Thread(runnable, "kafka-roller"));
 
     private ConcurrentHashMap<Integer, RestartContext> podToContext = new ConcurrentHashMap<>();
     private Function<Pod, List<String>> podNeedsRestart;

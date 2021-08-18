@@ -1977,8 +1977,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                                 kafkaStatus.setClusterId(kafkaAdmin.describeCluster().clusterId().get());
                             } catch (KafkaException e) {
                                 LOGGER.warnCr(reconciliation, "Kafka exception getting clusterId {}", e.getMessage());
-//                            } catch (InterruptedException e) {
-//                                LOGGER.warnCr(reconciliation, "Interrupted exception getting clusterId {}", e.getMessage());
+                            } catch (InterruptedException e) {
+                                LOGGER.warnCr(reconciliation, "Interrupted exception getting clusterId {}", e.getMessage());
                             } catch (ExecutionException e) {
                                 LOGGER.warnCr(reconciliation, "Execution exception getting clusterId {}", e.getMessage());
                             } finally {
