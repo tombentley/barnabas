@@ -4,12 +4,24 @@
  */
 package io.strimzi.operator.cluster.operator.resource;
 
+import java.io.ByteArrayInputStream;
+import java.security.cert.CertificateException;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.certs.CertAndKey;
 import io.strimzi.operator.cluster.model.Ca;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
+import io.strimzi.operator.cluster.model.pki.PkiUtils;
 import io.strimzi.operator.common.BackOff;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
@@ -25,16 +37,6 @@ import io.vertx.core.net.NetClientOptions;
 import io.vertx.core.net.NetSocket;
 import io.vertx.core.net.PemKeyCertOptions;
 import io.vertx.core.net.PemTrustOptions;
-
-import java.io.ByteArrayInputStream;
-import java.security.cert.CertificateException;
-import java.security.cert.CertificateFactory;
-import java.util.Base64;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Supplier;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import static java.lang.Integer.parseInt;
 
@@ -68,31 +70,20 @@ public class ZookeeperLeaderFinder {
                 .setPemTrustOptions(trustOptions(reconciliation, clusterCaCertificateSecret));
     }
 
-    private CertificateFactory x509Factory() {
-        CertificateFactory x509;
-        try {
-            x509 = CertificateFactory.getInstance("X.509");
-        } catch (CertificateException e) {
-            throw new RuntimeException("No security provider supports X.509");
-        }
-        return x509;
-    }
-
     /**
      * Validate the cluster CA certificate(s) passed in the given Secret
      * and return the PemTrustOptions for trusting them.
      */
     protected PemTrustOptions trustOptions(Reconciliation reconciliation, Secret clusterCaCertificateSecret) {
         Base64.Decoder decoder = Base64.getDecoder();
-        CertificateFactory x509 = x509Factory();
         PemTrustOptions pto = new PemTrustOptions();
         for (Map.Entry<String, String> entry : clusterCaCertificateSecret.getData().entrySet()) {
             String entryName = entry.getKey();
             if (entryName.endsWith(".crt")) {
-                LOGGER.infoCr(reconciliation, "Trusting certificate {} from Secret {}", entryName, clusterCaCertificateSecret.getMetadata().getName());
                 byte[] certBytes = decoder.decode(entry.getValue());
                 try {
-                    x509.generateCertificate(new ByteArrayInputStream(certBytes));
+                    X509Certificate certificate = PkiUtils.x509Certificate(certBytes);
+                    LOGGER.infoCr(reconciliation, "Trusting certificate {} fingerprint={} from Secret {}", entryName, PkiUtils.fingerprint(certificate), clusterCaCertificateSecret.getMetadata().getName());
                 } catch (CertificateException e) {
                     throw corruptCertificate(clusterCaCertificateSecret, entryName, e);
                 }
@@ -120,9 +111,8 @@ public class ZookeeperLeaderFinder {
         if (coCertKey == null) {
             throw Util.missingSecretException(coCertKeySecret.getMetadata().getNamespace(), coCertKeySecret.getMetadata().getName());
         }
-        CertificateFactory x509 = x509Factory();
         try {
-            x509.generateCertificate(new ByteArrayInputStream(coCertKey.cert()));
+            PkiUtils.x509Certificate(coCertKey.cert());
         } catch (CertificateException e) {
             throw corruptCertificate(coCertKeySecret, "cluster-operator.crt", e);
         }

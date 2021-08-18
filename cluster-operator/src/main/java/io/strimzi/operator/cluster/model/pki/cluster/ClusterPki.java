@@ -343,14 +343,14 @@ public class ClusterPki {
             clusterCa.setRenewalDays(30);
         }
         long t0 = System.nanoTime();
-        TrustController useManager = new TrustController(
+        TrustController trustController = new TrustController(
                 reconciliation,
                 new NamedResource<>(client.secrets().inNamespace(namespace), cluster + "-cluster-pki-state"),
                 ownerReference);
 
         Chain chain = new Chain(reconciliation, clock,
                 client.secrets().inNamespace(namespace),
-                certManager, useManager);
+                certManager, trustController);
 
         // TODO fix the name
 //        TrustPrivateState trustPrivateState = new TrustPrivateState(
@@ -363,12 +363,12 @@ public class ClusterPki {
                 (System.nanoTime() - t0) / 1_000_000.0);
         Validator validator = new Validator(clock, clusterCa.getRenewalDays());
         CertificateController controller = new CertificateController(reconciliation,
-                useManager,
+                trustController,
                 issuer,
                 validator,
                 clusterCa.getValidityDays());
         return new ClusterCerts(client,
-                useManager,
+                trustController,
                 reconciliation,
                 controller,
                 namespace,

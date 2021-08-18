@@ -282,16 +282,18 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         reconcileState.initialStatus()
                 .compose(state -> state.reconcileCas(this::dateSupplier))
-                .compose(state -> newMode ? state.clusterCaBootstrap(this::dateSupplier) : Future.succeededFuture(state))
-                .compose(state -> newMode ? state.clusterCaIssueClusterOperatorCertificate(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> newMode ? state.clusterPkiBootstrap(this::dateSupplier) : Future.succeededFuture(state))
+                // TODO this may issue a new CO Cert (or a new Root Cert)
+                .compose(state -> state.info("clusterPkiCoCertificate() #1"))
+                .compose(state -> newMode ? state.clusterPkiCoCertificate(this::dateSupplier) : Future.succeededFuture(state))
                 .compose(state -> state.info("getKafkaClusterDescription()"))
                 .compose(state -> state.getKafkaClusterDescription())
                 .compose(state -> state.info("prepareVersionChange()"))
                 .compose(state -> state.prepareVersionChange())
                 // Roll everything if a new CA is added to the trust store.
                 .compose(state -> state.info("rollingUpdateForNewCaKey()"))
+                // TODO The the CO cert rec caused a new Root cert it should now be trusted, but won't have transitioned
                 .compose(state -> newMode ? Future.succeededFuture(state) : state.rollingUpdateForNewCaKey(
-                        // TODO Can state.newClusterPkiTrust ever be true here?
                         newMode ? state.newClusterPkiTrust : state.clusterCaKeyReplaced,
                         state.clientsCa.keyReplaced()))
 
@@ -329,16 +331,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.kafkaRoutesReady())
                 .compose(state -> state.kafkaIngressesReady())
                 .compose(state -> state.kafkaIngressesV1Beta1Ready())
-                .compose(state -> state.info("clusterCaIssueZkCertificates() #1"))
-                .compose(state -> newMode ? state.clusterCaIssueZkCertificates(this::dateSupplier) : Future.succeededFuture(state))
-                .compose(state -> state.info("clusterCaIssueBrokerCertificates() #1"))
-                .compose(state -> newMode ? state.clusterCaIssueBrokerCertificates(this::dateSupplier) : Future.succeededFuture(state))
-                .compose(state -> state.info("clusterCaIssueEntityOperatorCertificate() #1"))
-                .compose(state -> newMode ? state.clusterCaIssueEntityOperatorCertificate(this::dateSupplier) : Future.succeededFuture(state))
-                .compose(state -> state.info("clusterCaIssueCruiseControlCertificate() #1"))
-                .compose(state -> newMode ? state.clusterCaIssueCruiseControlCertificate(this::dateSupplier) : Future.succeededFuture(state))
-                .compose(state -> state.info("clusterCaIssueKafkaExporterCertificate() #1"))
-                .compose(state -> newMode ? state.clusterCaIssueKafkaExporterCertificate(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> state.info("clusterCaIssueCertificates() #1"))
+                .compose(state -> newMode ? state.clusterPkiIssueCertificates(this::dateSupplier) : Future.succeededFuture(state))
                 .compose(state -> state.customListenerCertificates())
                 .compose(state -> state.kafkaAncillaryCm())
                 .compose(state -> newMode ? Future.succeededFuture(state) : state.kafkaBrokersSecret())
@@ -351,18 +345,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 // TODO does this actually cause a roll? Remember that if it hasn't touched the output Secret then maybe it won't cause the roll?
                 .compose(state -> state.info("rollingUpdateForPki()"))
                 .compose(state -> newMode ? state.rollingUpdateForPki() : Future.succeededFuture(state))
-                .compose(state -> state.info("clusterCaIssueZkCertificates() #2"))
-                .compose(state -> newMode ? state.clusterCaIssueZkCertificates(this::dateSupplier) : Future.succeededFuture(state))
-                .compose(state -> state.info("clusterCaIssueBrokerCertificates() #2"))
-                .compose(state -> newMode ? state.clusterCaIssueBrokerCertificates(this::dateSupplier) : Future.succeededFuture(state))
-                .compose(state -> state.info("clusterCaIssueClusterOperatorCertificate() #2"))
-                .compose(state -> newMode ? state.clusterCaIssueClusterOperatorCertificate(this::dateSupplier) : Future.succeededFuture(state))
-                .compose(state -> state.info("clusterCaIssueEntityOperatorCertificate() #2"))
-                .compose(state -> newMode ? state.clusterCaIssueEntityOperatorCertificate(this::dateSupplier) : Future.succeededFuture(state))
-                .compose(state -> state.info("clusterCaIssueCruiseControlCertificate() #2"))
-                .compose(state -> newMode ? state.clusterCaIssueCruiseControlCertificate(this::dateSupplier) : Future.succeededFuture(state))
-                .compose(state -> state.info("clusterCaIssueKafkaExporterCertificate() #2"))
-                .compose(state -> newMode ? state.clusterCaIssueKafkaExporterCertificate(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> state.info("clusterPkiIssueCertificates() #2"))
+                .compose(state -> newMode ? state.clusterPkiIssueCertificates(this::dateSupplier) : Future.succeededFuture(state))
+                .compose(state -> state.info("clusterPkiCoCertificate() #2"))
+                .compose(state -> newMode ? state.clusterPkiCoCertificate(this::dateSupplier) : Future.succeededFuture(state))
 
                 // By this point ZK nodes need to trust all client certs that will be presented to them.
                 // (ZK, Kafka, TopicOperator, UserOperator, ClusterOperator, CC)
@@ -375,8 +361,8 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.zkPodsReady())
                 .compose(state -> state.info("zkScalingUp()"))
                 .compose(state -> state.zkScalingUp())
-                //.compose(state -> state.info("zkScalingCheck()"))
-                //.compose(state -> state.zkScalingCheck())
+                .compose(state -> state.info("zkScalingCheck()"))
+                .compose(state -> state.zkScalingCheck())
                 .compose(state -> state.info("zkServiceEndpointReadiness()"))
                 .compose(state -> state.zkServiceEndpointReadiness())
                 .compose(state -> state.info("zkHeadlessServiceEndpointReadiness()"))
@@ -670,61 +656,37 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             }
         }
 
-        Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+        Future<ReconciliationState> clusterPkiBootstrap(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
                 this.clusterCerts = clusterPki.bootstrapCa(reconciliation, namespace, name, kafkaAssembly.getSpec().getClusterCa(), ownerReference());
                 return null;
             });
         }
 
-        Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
+        Future<ReconciliationState> clusterPkiIssueCertificates(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
                 clusterCerts.reconcileZkCertificates(kafkaAssembly).forEach(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
-                return null;
-            });
-        }
-
-        Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
-            return async(dateSupplier, () -> {
                 clusterCerts.reconcileKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames).forEach(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
-                return null;
-            });
-        }
-
-        Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
-            return async(dateSupplier, () -> {
                 Optional.ofNullable(clusterCerts.reconcileEoCertificate(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
-                return null;
-            });
-        }
-
-        Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
-            return async(dateSupplier, () -> {
-                Optional.ofNullable(clusterCerts.reconcileCoCertificate(kafkaAssembly)).ifPresent(cr -> {
-                    newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
-                });
-                return null;
-            });
-        }
-
-        Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
-            return async(dateSupplier, () -> {
                 Optional.ofNullable(clusterCerts.reconcileKafkaExporterCertificates(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
+                Optional.ofNullable(clusterCerts.reconcileCcCertificate(kafkaAssembly)).ifPresent(cr -> {
+                    newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
+                });
                 return null;
             });
         }
 
-        Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
+        Future<ReconciliationState> clusterPkiCoCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                Optional.ofNullable(clusterCerts.reconcileCcCertificate(kafkaAssembly)).ifPresent(cr -> {
+                Optional.ofNullable(clusterCerts.reconcileCoCertificate(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
                 return null;

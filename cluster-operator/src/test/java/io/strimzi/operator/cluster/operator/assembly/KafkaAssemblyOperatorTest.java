@@ -1421,7 +1421,7 @@ public class KafkaAssemblyOperatorTest {
             public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
                 return new ReconciliationState(r, ka) {
                     @Override
-                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                    Future<ReconciliationState> clusterPkiBootstrap(Supplier<Date> dateSupplier) {
                         return Future.succeededFuture(this);
                     }
                 };

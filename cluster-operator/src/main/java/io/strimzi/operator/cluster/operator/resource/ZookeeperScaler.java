@@ -278,7 +278,7 @@ public class ZookeeperScaler implements AutoCloseable {
         vertx.executeBlocking(promise -> {
             try {
                 ZKClientConfig clientConfig = new ZKClientConfig();
-
+                LOGGER.debugCr(reconciliation, "Using Secret {} and item {} for zookeeper client trust store", clusterCaCertSecret.getMetadata().getName(), Ca.CA_CRT);
                 trustStoreFile = Util.createFileTrustStore(getClass().getName(), "p12", Ca.cert(clusterCaCertSecret, Ca.CA_CRT), trustStorePassword.toCharArray());
                 keyStoreFile = Util.createFileStore(getClass().getName(), "p12", Util.decodeFromSecret(coKeySecret, "cluster-operator.p12"));
 

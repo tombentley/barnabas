@@ -254,13 +254,6 @@ public class Chain {
     }
 
     public CertificateIssuer reconcile(InternalIssuerSpec chain, OwnerReference ownerRef) throws CertificateException {
-        /*
-         * kind: Secret
-         * metadata:
-         *   name: my-cluster-FOO
-         * data:
-         *   type: Internal
-         */
         Validator validator = new Validator(clock, chain.getRenewalDays());
         List<X509Certificate> partialCertChain = new ArrayList<>();
         CertAndKey certificate = null;

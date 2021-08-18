@@ -147,36 +147,16 @@ public class JbodStorageTest {
             public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
                 return new ReconciliationState(r, ka) {
                     @Override
-                    Future<ReconciliationState> clusterCaBootstrap(Supplier<Date> dateSupplier) {
+                    Future<ReconciliationState> clusterPkiBootstrap(Supplier<Date> dateSupplier) {
                         return Future.succeededFuture(this);
                     }
                     @Override
-                    Future<ReconciliationState> clusterCaIssueZkCertificates(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueBrokerCertificates(Supplier<Date> dateSupplier) {
+                    Future<ReconciliationState> clusterPkiIssueCertificates(Supplier<Date> dateSupplier) {
                         return Future.succeededFuture(this);
                     }
 
                     @Override
-                    Future<ReconciliationState> clusterCaIssueEntityOperatorCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueClusterOperatorCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueKafkaExporterCertificate(Supplier<Date> dateSupplier) {
-                        return Future.succeededFuture(this);
-                    }
-
-                    @Override
-                    Future<ReconciliationState> clusterCaIssueCruiseControlCertificate(Supplier<Date> dateSupplier) {
+                    Future<ReconciliationState> clusterPkiCoCertificate(Supplier<Date> dateSupplier) {
                         return Future.succeededFuture(this);
                     }
 
