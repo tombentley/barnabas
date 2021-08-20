@@ -12,7 +12,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Base64;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -41,6 +40,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ChainTest {
+    public static final String NAMESPACE = "ns";
+    public static final String CLUSTER = "test";
     // TODO when happens when root CA is going to expire
     // TODO what happens when root CA has expired
     // TODO what happens when intermediate CA is going to expire
@@ -49,15 +50,15 @@ class ChainTest {
     Chain chain;
     private MixedOperation<Secret, SecretList, Resource<Secret>> secrets;
     private TestClock clock;
-    private String clusterName;
-    private Reconciliation reconciliation = new Reconciliation("test", "Kafka", "ns", "test");
+    private final Reconciliation reconciliation = new Reconciliation("test", "Kafka", NAMESPACE, CLUSTER);
 
     @BeforeEach
     public void setup() {
         clock = new TestClock(Clock.fixed(Instant.ofEpochMilli(0), ZoneId.of("UTC")));
         KubernetesClient client = new MockKube().build();
         secrets = client.secrets();
-        chain = new Chain(reconciliation, clock, secrets, new OpenSslCertManager(), Objects.requireNonNull(null));
+        TrustManager trustManager = new TrustController(reconciliation, new NamedResource<>(client.secrets(), NAMESPACE), null);
+        chain = new Chain(reconciliation, clock, secrets, new OpenSslCertManager(), trustManager);
     }
 
     public static List<CertificateAuthority> clusterCaSource() {
@@ -106,14 +107,13 @@ class ChainTest {
         int validityDays = ca.getValidityDays();
         assertEquals(Set.of(), secretNames());
 
-        clusterName = "test-cluster";
-        Chain.InternalIssuerSpec internalIssuerSpec = Chain.clusterCaFromCrd(clusterName, ca);
+        Chain.InternalIssuerSpec internalIssuerSpec = Chain.clusterCaFromCrd(CLUSTER, ca);
 
         OwnerReference ownerReference;
         if (ca.isGenerateSecretOwnerReference()) {
             ownerReference = new OwnerReferenceBuilder()
                     .withKind("Kafka")
-                    .withName(clusterName)
+                    .withName(CLUSTER)
                     .build();
         } else {
             ownerReference = null;
@@ -125,52 +125,52 @@ class ChainTest {
         } else {
             PkiException pkiException = assertThrows(PkiException.class,
                 () -> chain.reconcile(internalIssuerSpec, ownerReference));
-            assertEquals("CA Certificate ca.crt in secret test-cluster-cluster-ca-cert does not exist and is not configured to allow automatic issuance", pkiException.getMessage());
+            assertEquals("CA Certificate ca.crt in secret " + CLUSTER + "-cluster-ca-cert does not exist and is not configured to allow automatic issuance", pkiException.getMessage());
             return;
         }
-        assertEquals(Set.of("test-cluster-cluster-ca", "test-cluster-cluster-ca-cert"), secretNames());
+        assertEquals(Set.of(CLUSTER + "-cluster-ca", CLUSTER + "-cluster-ca-cert"), secretNames());
 
-        assertEquals(1, secrets.withName("test-cluster-cluster-ca-cert").get().getMetadata().getGeneration());
-        assertEquals(Set.of("ca.crt"), secrets.withName("test-cluster-cluster-ca-cert").get().getData().keySet());
-        assertOwnerReferences(ownerReference, "test-cluster-cluster-ca-cert");
-        X509Certificate cert = x509FromBase64String(secrets.withName("test-cluster-cluster-ca-cert").get().getData().get("ca.crt"));
+        assertEquals(1, secrets.withName(CLUSTER + "-cluster-ca-cert").get().getMetadata().getGeneration());
+        assertEquals(Set.of("ca.crt"), secrets.withName(CLUSTER + "-cluster-ca-cert").get().getData().keySet());
+        assertOwnerReferences(ownerReference, CLUSTER + "-cluster-ca-cert");
+        X509Certificate cert = x509FromBase64String(secrets.withName(CLUSTER + "-cluster-ca-cert").get().getData().get("ca.crt"));
         assertEquals(Instant.ofEpochMilli(0), cert.getNotBefore().toInstant());
         assertEquals(Instant.ofEpochMilli(0).plus(validityDays, DAYS), cert.getNotAfter().toInstant());
         assertEquals("CN=cluster-ca v1, O=io.strimzi", cert.getSubjectDN().toString());
         assertEquals("CN=cluster-ca v1, O=io.strimzi", cert.getIssuerDN().toString());
         assertEquals(0, cert.getBasicConstraints(), "Expected path length of 0");
 
-        assertEquals(1, secrets.withName("test-cluster-cluster-ca").get().getMetadata().getGeneration());
-        assertEquals(Set.of("ca.key"), secrets.withName("test-cluster-cluster-ca").get().getData().keySet());
-        assertOwnerReferences(ownerReference, "test-cluster-cluster-ca");
-        String key = secrets.withName("test-cluster-cluster-ca").get().getData().get("ca.key");
+        assertEquals(1, secrets.withName(CLUSTER + "-cluster-ca").get().getMetadata().getGeneration());
+        assertEquals(Set.of("ca.key"), secrets.withName(CLUSTER + "-cluster-ca").get().getData().keySet());
+        assertOwnerReferences(ownerReference, CLUSTER + "-cluster-ca");
+        String key = secrets.withName(CLUSTER + "-cluster-ca").get().getData().get("ca.key");
         assertNotNull(key);
 
         // Reconcile a day later shouldn't change anything
         clock.advanceFromOrigin(Duration.ofDays(1));
         chain.reconcile(internalIssuerSpec, ownerReference);
-        assertEquals(1, secrets.withName("test-cluster-cluster-ca").get().getMetadata().getGeneration());
-        assertEquals(1, secrets.withName("test-cluster-cluster-ca-cert").get().getMetadata().getGeneration());
+        assertEquals(1, secrets.withName(CLUSTER + "-cluster-ca").get().getMetadata().getGeneration());
+        assertEquals(1, secrets.withName(CLUSTER + "-cluster-ca-cert").get().getMetadata().getGeneration());
 
         // Reconcile within the renewal period should change
         clock.advanceFromOrigin(Duration.ofDays(ca.getValidityDays() - ca.getRenewalDays() + 1));
         chain.reconcile(internalIssuerSpec, ownerReference);
-        assertEquals(2, secrets.withName("test-cluster-cluster-ca").get().getMetadata().getGeneration());
-        assertEquals(2, secrets.withName("test-cluster-cluster-ca-cert").get().getMetadata().getGeneration());
+        assertEquals(2, secrets.withName(CLUSTER + "-cluster-ca").get().getMetadata().getGeneration());
+        assertEquals(2, secrets.withName(CLUSTER + "-cluster-ca-cert").get().getMetadata().getGeneration());
         switch (ca.getCertificateExpirationPolicy()) {
             case REPLACE_KEY:
-                assertNotEquals(key, secrets.withName("test-cluster-cluster-ca").get().getData().get("ca.key"));
+                assertNotEquals(key, secrets.withName(CLUSTER + "-cluster-ca").get().getData().get("ca.key"));
                 break;
             case RENEW_CERTIFICATE:
-                assertEquals(key, secrets.withName("test-cluster-cluster-ca").get().getData().get("ca.key"));
+                assertEquals(key, secrets.withName(CLUSTER + "-cluster-ca").get().getData().get("ca.key"));
                 break;
         }
 
         // Reconcile a day later shouldn't change anything
         clock.advanceFromOrigin(Duration.ofDays(ca.getValidityDays() - ca.getRenewalDays() + 2));
         chain.reconcile(internalIssuerSpec, ownerReference);
-        assertEquals(2, secrets.withName("test-cluster-cluster-ca").get().getMetadata().getGeneration());
-        assertEquals(2, secrets.withName("test-cluster-cluster-ca-cert").get().getMetadata().getGeneration());
+        assertEquals(2, secrets.withName(CLUSTER + "-cluster-ca").get().getMetadata().getGeneration());
+        assertEquals(2, secrets.withName(CLUSTER + "-cluster-ca-cert").get().getMetadata().getGeneration());
     }
 
     public static List<Chain.InternalIssuerSpec> intermediateIssuerSource() {

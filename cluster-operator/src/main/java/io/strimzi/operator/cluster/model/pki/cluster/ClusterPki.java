@@ -41,8 +41,8 @@ import io.strimzi.operator.cluster.model.pki.NamedResource;
 import io.strimzi.operator.cluster.model.pki.RequiredCertificate;
 import io.strimzi.operator.cluster.model.pki.SubjectIdentity;
 import io.strimzi.operator.cluster.model.pki.TrustController;
-import io.strimzi.operator.cluster.model.pki.TrustManager;
 import io.strimzi.operator.cluster.model.pki.TrustDependencyManager;
+import io.strimzi.operator.cluster.model.pki.TrustManager;
 import io.strimzi.operator.cluster.model.pki.Validator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
@@ -105,12 +105,12 @@ public class ClusterPki {
         private final TrustDependencyManager trustDependencyManager;
         private final String namespace;
         private final String cluster;
-        private final ZookeeperCertificateOutputWriter zkCertsWriter;
-        private final BrokersCertificateOutputWriter kafkaCertsWriter;
-        private final AbstractCertificateOutputWriter<EntityOperatorIdentity> eoCertWriter;
-        private final AbstractCertificateOutputWriter<KafkaExporterIdentity> exporterCertWriter;
-        private final AbstractCertificateOutputWriter<CruiseControlIdentity> ccCertWriter;
-        private final AbstractCertificateOutputWriter<ClusterOperatorIdentity> coCertWriter;
+        final ZookeeperCertificateOutputWriter zkCertsWriter;
+        final BrokersCertificateOutputWriter kafkaCertsWriter;
+        final AbstractCertificateOutputWriter<EntityOperatorIdentity> eoCertWriter;
+        final AbstractCertificateOutputWriter<KafkaExporterIdentity> exporterCertWriter;
+        final AbstractCertificateOutputWriter<CruiseControlIdentity> ccCertWriter;
+        final AbstractCertificateOutputWriter<ClusterOperatorIdentity> coCertWriter;
         private Set<X509Certificate> requiringTrust;
         private Set<X509Certificate> zombies;
 
@@ -202,6 +202,7 @@ public class ClusterPki {
             };
 
         }
+
 
         public List<CertificateReconcileResult> reconcileZkCertificates(Kafka kafka) throws CertificateException {
             long t0 = System.nanoTime();
@@ -306,16 +307,12 @@ public class ClusterPki {
             return reconcileResult;
         }
 
-        public void foo() throws CertificateEncodingException {
-            // We should get the zombies and the requiringTrust after issuing, before rolling
-            // and then pass them after rolling to this method.
+        public void recordTrustChanges() throws CertificateEncodingException {
             this.requiringTrust = trustManager.requiringTrust();
             this.zombies = trustManager.zombies();
         }
 
-        public void trust() throws CertificateEncodingException {
-            // We should get the zombies and the requiringTrust after issuing, before rolling
-            // and then pass them after rolling to this method.
+        public void doTrustChanges() throws CertificateEncodingException {
             trustManager.trustRootCerts(requiringTrust);
             trustManager.delete(zombies);
         }

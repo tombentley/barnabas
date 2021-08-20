@@ -9,6 +9,7 @@ import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -121,7 +122,7 @@ public class TrustController implements TrustManager, TrustDependencyManager {
         while (true) {
             Secret oldSecret = secretResource.get();
             if (oldSecret == null) {
-                oldSecret = secretResource.create(new SecretBuilder().withNewMetadata().withOwnerReferences(ownerReference).endMetadata().build());
+                oldSecret = secretResource.create(new SecretBuilder().withNewMetadata().withOwnerReferences(ownerReference == null ? List.of() : List.of(ownerReference)).endMetadata().build());
             }
             Replaceable<Secret> secretReplaceable = secretResource.lockResourceVersion(oldSecret.getMetadata().getResourceVersion());
             if (oldSecret.getData() == null) {

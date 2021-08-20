@@ -183,14 +183,16 @@ public class Chain {
     static class CertAndKey {
         private final X509Certificate cert;
         private final byte[] key;
+        private final boolean reissue;
 
-        public CertAndKey(X509Certificate cert, byte[] key) {
+        public CertAndKey(X509Certificate cert, byte[] key, boolean reissue) {
             this.cert = cert;
             this.key = key;
+            this.reissue = reissue;
         }
     }
 
-    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(Chain.class.getName());
+    private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(Chain.class);
 
     private static final ZoneId UTC = ZoneId.of("UTC");
 
@@ -256,76 +258,86 @@ public class Chain {
     public CertificateIssuer reconcile(InternalIssuerSpec chain, OwnerReference ownerRef) throws CertificateException {
         Validator validator = new Validator(clock, chain.getRenewalDays());
         List<X509Certificate> partialCertChain = new ArrayList<>();
-        CertAndKey certificate = null;
+        CertAndKey originalCertificate = null;
         byte[] prevKey = null;
         X509Certificate prevCert = null;
         boolean anyIssued = false;
         // For each cert starting from the root:
         for (CaCertificateReference certReference : chain.getChain()) {
+            CertAndKey newCertificate = null;
             int pathLen = chain.getChain().size() - partialCertChain.size() - 1;
             //  Get the cert
-            certificate = loadCertAndKey(
+            originalCertificate = loadCertAndKey(
                     certReference.getCertificateSecret(),
                     certReference.getCertificateItem(),
                     certReference.getKeySecret(),
                     certReference.getKeySecretItem());
-            boolean issued = false;
-            if (certificate.cert == null || certificate.key == null || anyIssued) {
+            anyIssued |= originalCertificate.reissue;
+            if (anyIssued) {
                 if (certReference.isIssuable()) {
                     LOGGER.infoCr(reconciliation, "{} does not exist; creating", certReference);
-                    certificate = issue(certReference.getIssuanceParams(), prevCert, prevKey, certificate.key, pathLen);
-                    anyIssued = issued = true;
+                    newCertificate = issue(certReference.getIssuanceParams(), prevCert, prevKey, originalCertificate.key, pathLen);
+                    // validate the issued cert
+                    Validator.Result.Type type = validate(validator, validationChain(partialCertChain, newCertificate), newCertificate.cert).type();
+                    if (type != Validator.Result.Type.OK) {
+                        throw new IllegalStateException("Reissued certificate " + certReference + " is not valid: " + type);
+                    }
                 } else {
                     throw new PkiException(
-                            certificate.cert == null ?
+                            originalCertificate.cert == null ?
                                     String.format("CA Certificate %s in secret %s does not exist and is not configured to allow automatic issuance",
                                             certReference.certificateItem, certReference.certificateSecret) :
-                                    certificate.key == null ?
+                                    originalCertificate.key == null ?
                                             String.format("CA Key %s in secret %s does not exist and is not configured to allow automatic issuance",
                                                     certReference.keySecretItem, certReference.keySecret) :
                                             "A previous certificate in the path needed to be reissued, but this one could not be.");
                 }
-            }
-            // Validate it using the partial chain built so far
-            Validator.Result validate = validate(validator, validationChain(partialCertChain, certificate), certificate.cert);
-            switch (validate.type()) {
-                case OK:
-                    LOGGER.debugCr(reconciliation, "CA certificate {} is valid", certReference);
-                    break;
-                case WILL_EXPIRE:
-                case HAS_EXPIRED:
-                    LOGGER.infoCr(reconciliation, "{} {}, reissuing", certReference, validate.type());
-                    // reissue if possible
-                    certificate = issue(certReference.getIssuanceParams(), prevCert, prevKey, certificate.key, pathLen);
-                    anyIssued = issued = true;
-                    // validate the issued cert
-                    Validator.Result.Type type = validate(validator, validationChain(partialCertChain, certificate), certificate.cert).type();
-                    if (type != Validator.Result.Type.OK) {
-                        throw new IllegalStateException("Reissued certificate " + certReference + " is not valid: " + type);
-                    }
-                    break;
-                default:
-                    throw new IllegalStateException("Unexpected validation result " + validate);
+            } else {
+                // Validate it using the partial chain built so far
+                Validator.Result validate = validate(validator, validationChain(partialCertChain, originalCertificate), originalCertificate.cert);
+                switch (validate.type()) {
+                    case OK:
+                        LOGGER.debugCr(reconciliation, "CA certificate {} is valid", certReference);
+                        break;
+                    case WILL_EXPIRE:
+                    case HAS_EXPIRED:
+                        LOGGER.infoCr(reconciliation, "{} {}, reissuing", certReference, validate.type());
+                        // reissue if possible
+                        newCertificate = issue(certReference.getIssuanceParams(), prevCert, prevKey, originalCertificate.key, pathLen);
+                        anyIssued = true;
+                        // validate the issued cert
+                        Validator.Result.Type type = validate(validator, validationChain(partialCertChain, newCertificate), newCertificate.cert).type();
+                        if (type != Validator.Result.Type.OK) {
+                            throw new IllegalStateException("Reissued certificate " + certReference + " is not valid: " + type);
+                        }
+                        break;
+                    default:
+                        throw new IllegalStateException("Unexpected validation result " + validate);
+                }
             }
             // store this cert and key
-            if (issued) { //TODO we can't do this conditionally, if we need to reconcile the owner ref
+            if (anyIssued) { //TODO we can't do this conditionally, if we need to reconcile the owner ref
                 storeCertAndKey(
                         certReference.getCertificateSecret(),
                         certReference.getCertificateItem(),
                         certReference.getKeySecret(),
                         certReference.getKeySecretItem(),
-                        certificate, ownerRef);
+                        newCertificate, ownerRef);
+                if (originalCertificate.cert != null) {
+                    trustManager.phaseOut(Set.of(originalCertificate.cert));
+                }
+                originalCertificate = newCertificate;
             }
-            partialCertChain.add(certificate.cert);
-            prevCert = certificate.cert;
-            prevKey = certificate.key;
+            partialCertChain.add(originalCertificate.cert);
+            prevCert = originalCertificate.cert;
+            prevKey = originalCertificate.key;
         }
 
 //    }
 //
 //    public CertificateIssuer instantiate() throws CertificateException {
 
-        return new InternalCertificateIssuer(reconciliation, clock, certManager, partialCertChain, certificate.key, certificate.cert);
+        return new InternalCertificateIssuer(reconciliation, clock, certManager, partialCertChain, originalCertificate.key, originalCertificate.cert);
     }
 
     private ArrayList<X509Certificate> validationChain(List<X509Certificate> partialCertChain, CertAndKey certificate) {
@@ -380,23 +392,27 @@ public class Chain {
 
     private CertAndKey loadCertAndKey(String certSecretName, String certificateId, String keySecretName, String keyId) throws CertificateException {
         Secret certSecret = secrets.withName(certSecretName).get();
-        LOGGER.debugCr(reconciliation, "Loaded existing CA cert from {}: {}", keySecretName, certSecret);
+        LOGGER.debugCr(reconciliation, "Loading existing CA cert from {} item {}", certSecretName, certificateId);
         final X509Certificate cert;
+        boolean reissue = false;
         if (certSecret == null || certSecret.getData() == null) {
+            LOGGER.debugCr(reconciliation, "Cert does not exist");
             cert = null;
+            reissue = true;
         } else {
             String src = certSecret.getData().get(certificateId);
             if (src == null) {
+                LOGGER.debugCr(reconciliation, "Cert does not exist");
                 cert = null;
+                reissue = true;
             } else {
-                X509Certificate cert2 = PkiUtils.x509Certificate(Base64.getDecoder().decode(src));
+                cert = PkiUtils.x509Certificate(Base64.getDecoder().decode(src));
                 if (Annotations.booleanAnnotation(certSecret, Annotations.ANNO_STRIMZI_IO_FORCE_RENEW, false)) {
                     LOGGER.infoCr(reconciliation, "Secret {} annotated with {}: Not loading existing cert",
                             certSecretName, Annotations.ANNO_STRIMZI_IO_FORCE_RENEW);
-                    trustManager.phaseOut(Set.of(cert2));
-                    cert = null;
+                    reissue = true;
                 } else {
-                    cert = cert2;
+                    LOGGER.debugCr(reconciliation, "Cert exists");
                 }
             }
         }
@@ -407,31 +423,30 @@ public class Chain {
         } else {
             keySecret = secrets.withName(keySecretName).get();
         }
-        LOGGER.debugCr(reconciliation, "Loaded existing CA key from {}: ", keySecretName, keySecret);
+        LOGGER.debugCr(reconciliation, "Loading existing CA key from {} item {}", keySecretName, keyId);
         final byte[] key;
         if (keySecret == null || keySecret.getData() == null) {
+            LOGGER.debugCr(reconciliation, "Key does not exist");
             key = null;
+            reissue = true;
         } else {
             String src = keySecret.getData().get(keyId);
             if (src == null) {
+                LOGGER.debugCr(reconciliation, "Key does not exist");
                 key = null;
+                reissue = true;
             } else {
-                byte[] key2 = Base64.getDecoder().decode(src);
+                key = Base64.getDecoder().decode(src);
                 if (Annotations.booleanAnnotation(keySecret, Annotations.ANNO_STRIMZI_IO_FORCE_REPLACE, false)) {
                     LOGGER.debugCr(reconciliation, "Secret {} annotated with {}: Not loading existing key",
                             keySecretName, Annotations.ANNO_STRIMZI_IO_FORCE_REPLACE);
-                    if (cert != null) {
-                        trustManager.phaseOut(Set.of(cert));
-                    } else {
-                        LOGGER.warnCr(reconciliation, "Couldn't find existing cert, so cannot transition it to PHASE_OUT");
-                    }
-                    key = null;
+                    reissue = true;
                 } else {
-                    key = key2;
+                    LOGGER.debugCr(reconciliation, "Key existsq");
                 }
             }
         }
-        return new CertAndKey(cert, key);
+        return new CertAndKey(cert, key, reissue);
     }
 
     private CertAndKey issue(IssuanceParams issuanceParams, X509Certificate issuerCert, byte[] issuerKey, byte[] existingSubjectKey, int pathLen) {
@@ -481,7 +496,7 @@ public class Chain {
             delete(issuerCertPath);
             delete(subjectCertPath);
         }
-        return new CertAndKey(cert, key);
+        return new CertAndKey(cert, key, false);
     }
 
 }

@@ -450,7 +450,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         private String highestLogMessageFormatVersion;
         private String highestInterBrokerProtocolVersion;
 
-        private ClusterPki.ClusterCerts clusterCerts;
+        private ClusterPki.ClusterCerts clusterPkiCerts;
         private boolean newClusterPkiTrust = false;
         boolean clusterCaKeyReplaced;
         private Secret clusterCaCertSecret;
@@ -658,26 +658,26 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterPkiBootstrap(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                this.clusterCerts = clusterPki.bootstrapCa(reconciliation, namespace, name, kafkaAssembly.getSpec().getClusterCa(), ownerReference());
+                this.clusterPkiCerts = clusterPki.bootstrapCa(reconciliation, namespace, name, kafkaAssembly.getSpec().getClusterCa(), ownerReference());
                 return null;
             });
         }
 
         Future<ReconciliationState> clusterPkiIssueCertificates(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                clusterCerts.reconcileZkCertificates(kafkaAssembly).forEach(cr -> {
+                clusterPkiCerts.reconcileZkCertificates(kafkaAssembly).forEach(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
-                clusterCerts.reconcileKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames).forEach(cr -> {
+                clusterPkiCerts.reconcileKafkaCertificates(kafkaAssembly, this.kafkaBootstrapDnsName, this.kafkaBrokerDnsNames).forEach(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
-                Optional.ofNullable(clusterCerts.reconcileEoCertificate(kafkaAssembly)).ifPresent(cr -> {
+                Optional.ofNullable(clusterPkiCerts.reconcileEoCertificate(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
-                Optional.ofNullable(clusterCerts.reconcileKafkaExporterCertificates(kafkaAssembly)).ifPresent(cr -> {
+                Optional.ofNullable(clusterPkiCerts.reconcileKafkaExporterCertificates(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
-                Optional.ofNullable(clusterCerts.reconcileCcCertificate(kafkaAssembly)).ifPresent(cr -> {
+                Optional.ofNullable(clusterPkiCerts.reconcileCcCertificate(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
                 return null;
@@ -686,7 +686,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         Future<ReconciliationState> clusterPkiCoCertificate(Supplier<Date> dateSupplier) {
             return async(dateSupplier, () -> {
-                Optional.ofNullable(clusterCerts.reconcileCoCertificate(kafkaAssembly)).ifPresent(cr -> {
+                Optional.ofNullable(clusterPkiCerts.reconcileCoCertificate(kafkaAssembly)).ifPresent(cr -> {
                     newClusterPkiTrust |= cr instanceof CertificateReconcileResult.WaitingForTrust;
                 });
                 return null;
@@ -696,7 +696,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         Future<ReconciliationState> rollingUpdateForPki() {
             try {
                 this.clusterCaCertSecret = secretOperations.get(namespace, KafkaResources.clusterCaCertificateSecretName(name));
-                this.clusterCerts.foo();
+                this.clusterPkiCerts.recordTrustChanges();
             } catch (CertificateEncodingException e) {
                 return Future.failedFuture(e);
             }
@@ -704,8 +704,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             return rollingUpdateForNewCaKey(newClusterPkiTrust, false)
                     .compose(i -> {
                         try {
-                            this.clusterCerts.foo();
-                            this.clusterCerts.trust();
+                            this.clusterPkiCerts.doTrustChanges();
                             return Future.succeededFuture(this);
                         } catch (CertificateEncodingException e) {
                             return Future.failedFuture(e);

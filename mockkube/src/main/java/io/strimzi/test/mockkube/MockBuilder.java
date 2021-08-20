@@ -293,6 +293,10 @@ class MockBuilder<T extends HasMetadata,
                 return doCreate(resourceName, resource2);
             }
         });
+        when(resource.replace(any())).thenAnswer(i -> {
+            T resource2 = i.getArgument(0);
+            return doReplace(resourceName, null, resource2);
+        });
 
         when(resource.withGracePeriod(anyLong())).thenReturn(resource);
         mockWithPropagationPolicy(resource);

@@ -70,6 +70,8 @@ public enum TrustState {
                 return TRUSTED_NEW;
             case "TRUSTED_USED":
                 return TRUSTED_USED;
+            case "PHASE_OUT":
+                return PHASE_OUT;
             case "ZOMBIE":
                 return ZOMBIE;
             default:
