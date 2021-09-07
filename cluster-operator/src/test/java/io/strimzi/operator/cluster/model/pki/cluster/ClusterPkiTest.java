@@ -76,7 +76,7 @@ class ClusterPkiTest {
     public void clusterCreation() throws CertificateException {
         Reconciliation reconciliation = new Reconciliation("test", "Kafka", NAMESPACE, CLUSTER);
 
-        // Bootstrap the CA
+        // (1) Bootstrap the CA
         final ClusterPki.ClusterCerts clusterCerts = pki.bootstrapCa(reconciliation, NAMESPACE, CLUSTER, kafka.getSpec().getClusterCa(), ownerReference);
         assertEquals(
                 Map.of("my-cluster-cluster-ca", Set.of("ca.key"),
@@ -87,7 +87,7 @@ class ClusterPkiTest {
         final Fingerprint ca0 = PkiUtils.fingerprint(rootCaCert0);
         assertEquals(0, rootCaCert0.getBasicConstraints(), "Expect new CA cert to actually _be_ a _CA_ cert");
 
-        // Cause a EE cert to be issued
+        // (2) Cause a EE cert to be issued
         CertificateReconcileResult crr0 = clusterCerts.reconcileCoCertificate(kafka);
         assertEquals(
                 Map.of("my-cluster-cluster-ca", Set.of("ca.key"),
@@ -98,7 +98,7 @@ class ClusterPkiTest {
         assertEquals(rootCaCert0, loadCaCert(), "Don't expect the CA cert to change as a result of EE reconciliation");
         assertEquals(new CertificateReconcileResult.WaitingForTrust(rootCaCert0), crr0);
 
-
+        // (3) remember some stuff in memory
         clusterCerts.recordTrustChanges();
         assertEquals(
                 Map.of("my-cluster-cluster-ca", Set.of("ca.key"),
@@ -110,9 +110,9 @@ class ClusterPkiTest {
         assertEquals(CertificateState.PENDING, clusterCerts.coCertWriter.loadStatus(new ClusterOperatorIdentity()).state());
 
 
-        // In real life a rolling update happens here then we infer that those certs are now trusted
+        // (4) In real life a rolling update happens here then we infer that those certs are now trusted, in this test we just take it as read
 
-
+        // (5) Use state from step (3) to update the certs we consider trusted
         clusterCerts.doTrustChanges();
         assertEquals(
                 Map.of("my-cluster-cluster-ca", Set.of("ca.key"),
@@ -123,13 +123,12 @@ class ClusterPkiTest {
         assertEquals(TrustState.TRUSTED_NEW, caTrustState(ca0));
         assertEquals(CertificateState.PENDING, clusterCerts.coCertWriter.loadStatus(new ClusterOperatorIdentity()).state());
 
-        // Now deploy the EE cert
+        // (6) Now deploy the EE cert
         final CertificateReconcileResult crr1 = clusterCerts.reconcileCoCertificate(kafka);
         X509Certificate rootCaCert1 = loadCaCert();
         assertEquals(rootCaCert0, rootCaCert1);
         assertEquals(0, rootCaCert1.getBasicConstraints());
-        assertEquals(new CertificateReconcileResult.WaitingForTrust(rootCaCert1), crr0);
-
+        assertEquals(new CertificateReconcileResult.OkIssued(rootCaCert1), crr1);
         assertEquals(
                 Map.of("my-cluster-cluster-ca", Set.of("ca.key"),
                         "my-cluster-cluster-ca-cert", Set.of("ca.crt"),
@@ -185,6 +184,8 @@ class ClusterPkiTest {
         final Fingerprint ca0 = PkiUtils.fingerprint(rootCaCert0);
 
         Reconciliation reconciliation = new Reconciliation("test", "Kafka", NAMESPACE, CLUSTER);
+
+        // (1) Bootstrap the internal CA
         ClusterPki.ClusterCerts clusterCerts = pki.bootstrapCa(reconciliation, NAMESPACE, CLUSTER, kafka.getSpec().getClusterCa(), ownerReference);
 
         // ^^ updates the ca.key and ca.crt only. The pki-state isn't updated yet, but will be once a cert has been issued
@@ -201,6 +202,7 @@ class ClusterPkiTest {
         assertNotEquals(ca0, ca1, "Expected a _new_ CA cert");
         assertEquals(0, rootCaCert1.getBasicConstraints(), "Expect new CA cert to actually _be_ a _CA_ cert");
 
+        // (2) Cause a EE cert to be issued
         CertificateReconcileResult crr0 = clusterCerts.reconcileCoCertificate(kafka);
         assertEquals(
                 Map.of("my-cluster-cluster-ca", Set.of("ca.key"),
@@ -214,6 +216,7 @@ class ClusterPkiTest {
 
         assertEquals(new CertificateReconcileResult.WaitingForTrust(rootCaCert1), crr0, "Expect new CO cert issued by _new_ CA");
 
+        // (3) remember some stuff in memory
         clusterCerts.recordTrustChanges();
         assertEquals(
                 Map.of("my-cluster-cluster-ca", Set.of("ca.key"),
@@ -226,9 +229,10 @@ class ClusterPkiTest {
         assertEquals(CertificateState.PENDING, clusterCerts.coCertWriter.loadStatus(new ClusterOperatorIdentity()).state());
 
 
-        // In real life a rolling update happens here then we infer that those certs are now trusted
+        // (4) In real life a rolling update happens here then we infer that those certs are now trusted, in this test we just take it as read
 
 
+        // (5) Use state from step (3) to update the certs we consider trusted
         clusterCerts.doTrustChanges();
         assertEquals(
                 Map.of("my-cluster-cluster-ca", Set.of("ca.key"),
@@ -240,7 +244,7 @@ class ClusterPkiTest {
         assertEquals(TrustState.TRUSTED_NEW, caTrustState(ca1));
         assertEquals(CertificateState.PENDING, clusterCerts.coCertWriter.loadStatus(new ClusterOperatorIdentity()).state());
 
-        // Now deploy the EE cert
+        // (6) Now deploy the EE cert
         final CertificateReconcileResult crr1 = clusterCerts.reconcileCoCertificate(kafka);
         assertEquals(rootCaCert1, loadCaCert());
         assertEquals(new CertificateReconcileResult.OkIssued(rootCaCert1), crr1);

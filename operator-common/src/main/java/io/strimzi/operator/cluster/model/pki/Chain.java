@@ -199,26 +199,29 @@ public class Chain {
     // TODO we need to increment the version
     // to do that we probably need make fromCrd non-static, load the secret to find the existing version
     // and increment it.
-    static final String VERSION = "1";
+    static int clusterVersion = 0;
+    static int clientsVersion = 0;
 
     public static InternalIssuerSpec clusterCaFromCrd(String clusterName, CertificateAuthority ca) {
+        clusterVersion++;
         return fromCrd(KafkaResources.clusterCaKeySecretName(clusterName),
                 KafkaResources.clusterCaCertificateSecretName(clusterName),
                 new Subject.Builder()
                         // Key replacements does not work if both old and new CA certs have the same subject DN, so include the
                         // key generation in the DN so the certificates appear distinct during CA key replacement.
-                        .withCommonName("cluster-ca v" + VERSION)
+                        .withCommonName("cluster-ca v" + clusterVersion)
                         .withOrganizationName("io.strimzi").build(),
                 ca);
     }
 
     public static InternalIssuerSpec clientsCaFromCrd(String clusterName, CertificateAuthority ca) {
+        clientsVersion++;
         return fromCrd(KafkaResources.clientsCaKeySecretName(clusterName),
                 KafkaResources.clientsCaCertificateSecretName(clusterName),
                 new Subject.Builder()
                         // Key replacements does not work if both old and new CA certs have the same subject DN, so include the
                         // key generation in the DN so the certificates appear distinct during CA key replacement.
-                        .withCommonName("clients-ca v" + VERSION)
+                        .withCommonName("clients-ca v" + clientsVersion)
                         .withOrganizationName("io.strimzi").build(),
                 ca);
     }

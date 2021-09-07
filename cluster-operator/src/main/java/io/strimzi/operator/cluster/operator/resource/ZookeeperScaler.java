@@ -66,7 +66,14 @@ public class ZookeeperScaler implements AutoCloseable {
      *
      * @return  ZookeeperScaler instance
      */
-    protected ZookeeperScaler(Reconciliation reconciliation, Vertx vertx, ZooKeeperAdminProvider zooAdminProvider, String zookeeperConnectionString, Function<Integer, String> zkNodeAddress, Secret clusterCaCertSecret, Secret coKeySecret, long operationTimeoutMs) {
+    protected ZookeeperScaler(Reconciliation reconciliation,
+                              Vertx vertx,
+                              ZooKeeperAdminProvider zooAdminProvider,
+                              String zookeeperConnectionString,
+                              Function<Integer, String> zkNodeAddress,
+                              Secret clusterCaCertSecret,
+                              Secret coKeySecret,
+                              long operationTimeoutMs) {
         this.reconciliation = reconciliation;
 
         LOGGER.debugCr(reconciliation, "Creating Zookeeper Scaler for cluster {}", zookeeperConnectionString);
@@ -278,8 +285,9 @@ public class ZookeeperScaler implements AutoCloseable {
         vertx.executeBlocking(promise -> {
             try {
                 ZKClientConfig clientConfig = new ZKClientConfig();
-                LOGGER.debugCr(reconciliation, "Using Secret {} and item {} for zookeeper client trust store", clusterCaCertSecret.getMetadata().getName(), Ca.CA_CRT);
+                LOGGER.debugCr(reconciliation, "Trusting item {} from Secret {}", clusterCaCertSecret.getMetadata().getName(), Ca.CA_CRT);
                 trustStoreFile = Util.createFileTrustStore(getClass().getName(), "p12", Ca.cert(clusterCaCertSecret, Ca.CA_CRT), trustStorePassword.toCharArray());
+                LOGGER.debugCr(reconciliation, "Using key+cert item {} from Secret {}", coKeySecret.getMetadata().getName(), "cluster-operator.p12");
                 keyStoreFile = Util.createFileStore(getClass().getName(), "p12", Util.decodeFromSecret(coKeySecret, "cluster-operator.p12"));
 
                 clientConfig.setProperty("zookeeper.clientCnxnSocket", "org.apache.zookeeper.ClientCnxnSocketNetty");

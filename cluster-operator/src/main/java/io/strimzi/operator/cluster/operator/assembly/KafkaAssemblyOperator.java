@@ -282,8 +282,10 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         reconcileState.initialStatus()
                 .compose(state -> state.reconcileCas(this::dateSupplier))
+                // (1) Bootstrap the internal CA
                 .compose(state -> newMode ? state.clusterPkiBootstrap(this::dateSupplier) : Future.succeededFuture(state))
                 // TODO this may issue a new CO Cert (or a new Root Cert)
+                // (2) Cause a EE cert to be issued
                 .compose(state -> state.info("clusterPkiCoCertificate() #1"))
                 .compose(state -> newMode ? state.clusterPkiCoCertificate(this::dateSupplier) : Future.succeededFuture(state))
                 .compose(state -> state.info("getKafkaClusterDescription()"))
@@ -343,8 +345,13 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 .compose(state -> state.getCruiseControlDescription())
                 .compose(state -> state.getKafkaExporterDescription())
                 // TODO does this actually cause a roll? Remember that if it hasn't touched the output Secret then maybe it won't cause the roll?
+                // (3) remember some stuff in memory
+                // (4)
+                // (5) Use state from step (3) to update the certs we consider trusted
                 .compose(state -> state.info("rollingUpdateForPki()"))
                 .compose(state -> newMode ? state.rollingUpdateForPki() : Future.succeededFuture(state))
+
+                // (6) Now deploy the EE cert
                 .compose(state -> state.info("clusterPkiIssueCertificates() #2"))
                 .compose(state -> newMode ? state.clusterPkiIssueCertificates(this::dateSupplier) : Future.succeededFuture(state))
                 .compose(state -> state.info("clusterPkiCoCertificate() #2"))
@@ -696,6 +703,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         Future<ReconciliationState> rollingUpdateForPki() {
             try {
                 this.clusterCaCertSecret = secretOperations.get(namespace, KafkaResources.clusterCaCertificateSecretName(name));
+                this.oldCoSecret = secretOperations.get(namespace, ClusterOperator.secretName(name));
                 this.clusterPkiCerts.recordTrustChanges();
             } catch (CertificateEncodingException e) {
                 return Future.failedFuture(e);
@@ -1462,7 +1470,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          */
         Future<ZookeeperScaler> zkScaler(int connectToReplicas)  {
             Future<Secret> clusterCaCertSecretFuture = secretOperations.getAsync(namespace, KafkaResources.clusterCaCertificateSecretName(name));
-            Future<Secret> coKeySecretFuture = secretOperations.getAsync(namespace, ClusterOperator.secretName(name));
+            Future<Secret> coKeySecretFuture = this.clusterCaKeyReplaced ? Future.succeededFuture(oldCoSecret) : secretOperations.getAsync(namespace, ClusterOperator.secretName(name));
 
             return CompositeFuture.join(clusterCaCertSecretFuture, coKeySecretFuture)
                     .compose(compositeFuture -> {
