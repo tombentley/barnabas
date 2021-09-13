@@ -1469,7 +1469,9 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          * @return                      Zookeeper scaler instance.
          */
         Future<ZookeeperScaler> zkScaler(int connectToReplicas)  {
-            Future<Secret> clusterCaCertSecretFuture = secretOperations.getAsync(namespace, KafkaResources.clusterCaCertificateSecretName(name));
+            this.clusterCaKeyReplaced = true;
+            LOGGER.debugCr(reconciliation, "Using {} Secret for zkScaler", this.clusterCaKeyReplaced ? "old" : "new");
+            Future<Secret> clusterCaCertSecretFuture = this.clusterCaKeyReplaced ? Future.succeededFuture(this.clusterCaCertSecret) : secretOperations.getAsync(namespace, KafkaResources.clusterCaCertificateSecretName(name));
             Future<Secret> coKeySecretFuture = this.clusterCaKeyReplaced ? Future.succeededFuture(oldCoSecret) : secretOperations.getAsync(namespace, ClusterOperator.secretName(name));
 
             return CompositeFuture.join(clusterCaCertSecretFuture, coKeySecretFuture)

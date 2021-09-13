@@ -158,15 +158,15 @@ public final class PkiUtils {
     public static String asPemCertChain(List<X509Certificate> x509s) throws CertificateEncodingException {
         Base64.Encoder encoder = Base64.getEncoder();
         StringBuilder sb = new StringBuilder();
-        boolean first = true;
+//        boolean first = true;
         for (X509Certificate x509 : checkCertChain(x509s)) {
-            if (!first) {
-                sb.append("\n");
-            }
-            first = false;
+//            if (!first) {
+//                sb.append("\n");
+//            }
+//            first = false;
             sb.append(BEGIN_CERTIFICATE).append("\n");
             sb.append(encoder.encodeToString(x509.getEncoded()));
-            sb.append("\n").append(END_CERTIFICATE);
+            sb.append("\n").append(END_CERTIFICATE).append("\n");
         }
         return sb.toString();
     }
