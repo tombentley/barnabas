@@ -200,7 +200,7 @@ class PkiIntegrationTest {
 
         // Reconcile the trust controller, to establish trust in the CA certificate
         reconcileTrustExpectingTrusted(trustRoot);
-        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_NEW), trustPrivateState());
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_UNUSED), trustPrivateState());
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
@@ -215,7 +215,7 @@ class PkiIntegrationTest {
         CertificateReconcileResult crr2 = cc.reconcile(brokerReqCert, outputStore);
         Assertions.assertEquals(OkIssued.class, crr2.getClass());
         assertEquals(rootFingerprint0, PkiUtils.fingerprint(crr2.trustRoot().orElseThrow()).toString(), "Expected the root CA as trust root");
-        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_NEW), trustPrivateState());
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_UNUSED), trustPrivateState());
         assertCertificateStatus("my-cluster-kafka-0.state", CertificateState.IN_USE,
                 clientFingerprint0_0,
                 rootFingerprint0);
@@ -232,7 +232,7 @@ class PkiIntegrationTest {
 
         // reconcile the trust controller again, should be a no op
         reconcileTrustExpectingNoop(trustRoot);
-        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_NEW), trustPrivateState());
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_UNUSED), trustPrivateState());
         //assertEquals(trustCerts, trustSecretResource.get().getData());
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
@@ -249,7 +249,7 @@ class PkiIntegrationTest {
         // And we have a trust relationship
         Assertions.assertEquals(OkNoop.class, crr3.getClass());
         assertEquals(rootFingerprint0, PkiUtils.fingerprint(crr3.trustRoot().orElseThrow()).toString(), "Expected the root CA as trust root");
-        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_NEW), trustPrivateState());
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_UNUSED), trustPrivateState());
         assertCertificateStatus("my-cluster-kafka-0.state", CertificateState.IN_USE,
                 clientFingerprint0_0,
                 rootFingerprint0);
@@ -278,13 +278,13 @@ class PkiIntegrationTest {
                         //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
                 "Expected the secret keysets to be the same");
-        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_NEW), trustPrivateState());
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_UNUSED), trustPrivateState());
 
         CertificateReconcileResult crr4 = cc.reconcile(brokerReqCert, outputStore);
         // And we have a trust relationship
         Assertions.assertEquals(CertificateReconcileResult.OkIssued.class, crr4.getClass());
         assertEquals(rootFingerprint0, PkiUtils.fingerprint(crr4.trustRoot().orElseThrow()).toString(), "Expected the root CA as trust root");
-        assertEquals(Map.of(PkiUtils.fingerprint(trustRoot).toString(), TrustState.TRUSTED_NEW), trustPrivateState());
+        assertEquals(Map.of(PkiUtils.fingerprint(trustRoot).toString(), TrustState.TRUSTED_UNUSED), trustPrivateState());
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
@@ -328,14 +328,14 @@ class PkiIntegrationTest {
                         //certsSecretName, Set.of(rootFingerprint0 + ".crt")),
                 secretsKeySets(),
                 "Expected the secret keysets to be the same");
-        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_NEW), trustPrivateState());
+        assertEquals(Map.of(rootFingerprint0, TrustState.TRUSTED_UNUSED), trustPrivateState());
 
         CertificateReconcileResult crr5 = cc.reconcile(brokerReqCert, outputStore);
         // We should be waiting for a trust relationship
         Assertions.assertEquals(WaitingForTrust.class, crr5.getClass());
         assertNotNull(((WaitingForTrust) crr5).trustRoot(), "Expected a trust root");
         assertEquals(Map.of(rootFingerprint1, TrustState.UNTRUSTED,
-                rootFingerprint0, TrustState.TRUSTED_NEW), trustPrivateState());
+                rootFingerprint0, TrustState.TRUSTED_UNUSED), trustPrivateState());
         assertEquals(
                 Map.of(chainKeySecretName, Set.of(chainKeyItem),
                         chainCertSecretName, Set.of(chainCertItem),
@@ -348,7 +348,7 @@ class PkiIntegrationTest {
                 "Expected additional item " + rootFingerprint1 + ".crt in " + trustPrivateStateName);
         assertCertificateStatus("my-cluster-kafka-0.state", CertificateState.PENDING, clientFingerprint1_0, rootFingerprint1);
         assertEquals(Map.of(
-                rootFingerprint0, TrustState.TRUSTED_NEW,
+                rootFingerprint0, TrustState.TRUSTED_UNUSED,
                 rootFingerprint1, TrustState.UNTRUSTED), trustPrivateState());
         assertNotEquals(initialBrokerCerts, brokerCertsSecretResource.get().getData());
         initialBrokerCerts = brokerCertsSecretResource.get().getData();
@@ -357,20 +357,20 @@ class PkiIntegrationTest {
 
         reconcileTrustExpectingTrusted(crr5.trustRoot().orElseThrow());
         assertEquals(Map.of(
-                rootFingerprint0, TrustState.TRUSTED_NEW,
-                rootFingerprint1, TrustState.TRUSTED_NEW), trustPrivateState());
+                rootFingerprint0, TrustState.TRUSTED_UNUSED,
+                rootFingerprint1, TrustState.TRUSTED_UNUSED), trustPrivateState());
 
         trustDependencyManager.depend(trustRoot);
         reconcileTrustExpectingTrusted(crr5.trustRoot().orElseThrow());
         assertEquals(Map.of(
                 rootFingerprint0, TrustState.TRUSTED_USED,
-                rootFingerprint1, TrustState.TRUSTED_NEW), trustPrivateState());
+                rootFingerprint1, TrustState.TRUSTED_UNUSED), trustPrivateState());
 
         trustDependencyManager.undepend(trustRoot);
         reconcileTrustExpectingTrusted(crr5.trustRoot().orElseThrow());
         assertEquals(Map.of(
                 rootFingerprint0, TrustState.ZOMBIE,
-                rootFingerprint1, TrustState.TRUSTED_NEW), trustPrivateState());
+                rootFingerprint1, TrustState.TRUSTED_UNUSED), trustPrivateState());
 
     }
 
@@ -435,7 +435,7 @@ class PkiIntegrationTest {
         String c = data.get(fingerprint + ".crt");
         assertTrue(c != null && c.length() > 100);
         String s = data.get(fingerprint + ".state");
-        assertEquals(TrustState.TRUSTED_NEW, TrustController.decodeState(s));
+        assertEquals(TrustState.TRUSTED_UNUSED, TrustController.decodeState(s));
         assertEquals(Set.of(fingerprint + ".crt", fingerprint + ".state"), trustPrivateStateResource.get().getData().keySet());
     }
 

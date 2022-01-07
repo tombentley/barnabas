@@ -19,7 +19,7 @@ public interface CertificateOutputWriter<I extends SubjectIdentity> {
      * Load the certificate status for the given {@code subjectIdentity}
      * @param subjectIdentity The subject
      * @return Its status. If the given {@code subjectIdentity} doesn't have a status then a new one in
-     * state {@link CertificateState#NEW} should be returned.
+     * state {@link CertificateState#REQUIRED} should be returned.
      */
     CertificateStatus loadStatus(I subjectIdentity);
 

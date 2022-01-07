@@ -33,11 +33,11 @@ public class CertificateStatus {
     }
 
     public static CertificateStatus createNew() {
-        return new CertificateStatus(CertificateState.NEW, null, null);
+        return new CertificateStatus(CertificateState.REQUIRED, null, null);
     }
 
     public CertificateStatus toRequested(byte[] token) {
-        if (this.state != CertificateState.NEW && this.state != CertificateState.IN_USE)
+        if (this.state != CertificateState.REQUIRED && this.state != CertificateState.IN_USE)
             throw new AssertionError("Unexpected state transition: " + this.state + "->" + CertificateState.REQUESTED);
         return new CertificateStatus(CertificateState.REQUESTED, token, null);
     }

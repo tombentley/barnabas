@@ -37,7 +37,7 @@ import io.strimzi.operator.common.ReconciliationLogger;
  * <p>
  * 1. When the UO issues a certificate it may create a new root cert in the trust secret
  * in the {@link TrustState#UNTRUSTED} state.
- * The CO rolls the brokers and transitions it to the {@link TrustState#TRUSTED_NEW} state
+ * The CO rolls the brokers and transitions it to the {@link TrustState#TRUSTED_UNUSED} state
  * <p>
  * 2. When a pending end entity certificate has a trusted root cert
  * the UO can then add the issued certificate to the user secret.

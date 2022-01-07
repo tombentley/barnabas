@@ -107,7 +107,7 @@ class CertificateControllerTest extends OpensslCaTestHarness {
         when(issuer.pollForRequestedCertificate(eq(token))).thenReturn(Optional.of(issued));
         when(validator.validate(any(IssuedCertificate.class), any(Set.class))).thenReturn(Validator.Result.noTrustAnchor());
         when(trustDependencyManager.stateOfRootCert(issued.rootCaFingerprint())).thenReturn(TrustState.UNTRUSTED);
-        when(trustDependencyManager.rootCertsInStates(eq(Set.of(TrustState.TRUSTED_NEW, TrustState.TRUSTED_USED)))).thenReturn(Set.of());
+        when(trustDependencyManager.rootCertsInStates(eq(Set.of(TrustState.TRUSTED_UNUSED, TrustState.TRUSTED_USED)))).thenReturn(Set.of());
 
         // Do the reconcile again
         CertificateReconcileResult reconcile = controller.reconcile(requiredCertificate, certificateOutputWriter);
@@ -124,8 +124,8 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     public void testPendingToInUse() throws CertificateException, InvalidKeySpecException, KeyStoreException, IOException {
         when(certificateOutputWriter.loadStatus(subjectIdentity)).thenReturn(new CertificateStatus(CertificateState.PENDING, null, issued));
         when(validator.validate(any(IssuedCertificate.class), any(Set.class))).thenReturn(Validator.Result.ok(new TrustAnchor(issued.rootCaCertificate(), null)));
-        when(trustDependencyManager.stateOfRootCert(issued.rootCaFingerprint())).thenReturn(TrustState.TRUSTED_NEW);
-        when(trustDependencyManager.rootCertsInStates(eq(Set.of(TrustState.TRUSTED_NEW, TrustState.TRUSTED_USED)))).thenReturn(Set.of(issued.rootCaCertificate()));
+        when(trustDependencyManager.stateOfRootCert(issued.rootCaFingerprint())).thenReturn(TrustState.TRUSTED_UNUSED);
+        when(trustDependencyManager.rootCertsInStates(eq(Set.of(TrustState.TRUSTED_UNUSED, TrustState.TRUSTED_USED)))).thenReturn(Set.of(issued.rootCaCertificate()));
 
         // Do the reconcile again
         CertificateReconcileResult reconcile = controller.reconcile(requiredCertificate, certificateOutputWriter);
@@ -143,8 +143,8 @@ class CertificateControllerTest extends OpensslCaTestHarness {
     public void testInUseNoop() throws CertificateException, InvalidKeySpecException, KeyStoreException, IOException {
         when(certificateOutputWriter.loadStatus(subjectIdentity)).thenReturn(new CertificateStatus(CertificateState.IN_USE, null, issued));
         when(validator.validate(any(IssuedCertificate.class), any(Set.class))).thenReturn(Validator.Result.ok(new TrustAnchor(issued.rootCaCertificate(), null)));
-        when(trustDependencyManager.stateOfRootCert(issued.rootCaFingerprint())).thenReturn(TrustState.TRUSTED_NEW);
-        when(trustDependencyManager.rootCertsInStates(eq(Set.of(TrustState.TRUSTED_NEW, TrustState.TRUSTED_USED)))).thenReturn(Set.of(issued.rootCaCertificate()));
+        when(trustDependencyManager.stateOfRootCert(issued.rootCaFingerprint())).thenReturn(TrustState.TRUSTED_UNUSED);
+        when(trustDependencyManager.rootCertsInStates(eq(Set.of(TrustState.TRUSTED_UNUSED, TrustState.TRUSTED_USED)))).thenReturn(Set.of(issued.rootCaCertificate()));
 
         // Do the reconcile again
         CertificateReconcileResult reconcile = controller.reconcile(requiredCertificate, certificateOutputWriter);

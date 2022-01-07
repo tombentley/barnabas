@@ -76,12 +76,12 @@ class TrustControllerTest {
         tc.trustRootCerts(Set.of(cert));
         assertEquals(Set.of(), tc.requiringTrust());
         assertEquals(Set.of(), tc.zombies());
-        assertEquals(TrustState.TRUSTED_NEW, tc.stateOfRootCert(fingerprint));
-        assertEquals(Set.of(cert), tc.rootCertsInStates(Set.of(TrustState.TRUSTED_NEW)));
+        assertEquals(TrustState.TRUSTED_UNUSED, tc.stateOfRootCert(fingerprint));
+        assertEquals(Set.of(cert), tc.rootCertsInStates(Set.of(TrustState.TRUSTED_UNUSED)));
         data = client.secrets().inNamespace("foo").withName("bar").get().getData();
         assertEquals(Set.of("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.crt", "9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state"),
                 data.keySet());
-        assertEquals(TrustState.TRUSTED_NEW,
+        assertEquals(TrustState.TRUSTED_UNUSED,
                 TrustController.decodeState(data.get("9B7EBFFEAE1B1F86A9991625E561C52D3779E49C.state")));
 
         tc.depend(cert);

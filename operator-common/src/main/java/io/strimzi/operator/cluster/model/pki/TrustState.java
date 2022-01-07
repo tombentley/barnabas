@@ -26,7 +26,7 @@ public enum TrustState {
     /**
      * <p>The certificate is trusted everywhere it needs to be, but end entity certificates signed with is have not yet been deployed.</p>
      */
-    TRUSTED_NEW("TRUSTED_NEW"),
+    TRUSTED_UNUSED("TRUSTED_UNUSED"),
 
     /**
      * <p>The certificate is trusted everywhere it needs to be, and end entity certificates signed with is have been deployed.</p>
@@ -67,7 +67,7 @@ public enum TrustState {
             case "UNTRUSTED":
                 return UNTRUSTED;
             case "TRUSTED_NEW":
-                return TRUSTED_NEW;
+                return TRUSTED_UNUSED;
             case "TRUSTED_USED":
                 return TRUSTED_USED;
             case "PHASE_OUT":

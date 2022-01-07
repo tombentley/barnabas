@@ -20,7 +20,7 @@ public interface TrustManager {
 
     /**
      * Records that a set of root certs are now trusted.
-     * Updates the states for each cert to {@link TrustState#TRUSTED_NEW}.
+     * Updates the states for each cert to {@link TrustState#TRUSTED_UNUSED}.
      * @param rootCerts The certs
      */
     // TODO Does this need to be batched

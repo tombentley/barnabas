@@ -89,7 +89,7 @@ public class CertificateController {
      *         (e.g. by restarting the pods which use the end-entity certificate).</li>
      *
      *     <li>The root CA certificate needs to be (re-)issued.
-     *         The certificate status starts in {@link CertificateState#NEW} or {@link CertificateState#IN_USE} but the invalidity it detected
+     *         The certificate status starts in {@link CertificateState#REQUIRED} or {@link CertificateState#IN_USE} but the invalidity it detected
      *         so transitions to {@link CertificateState#REQUESTED}
      *         then to {@link CertificateState#PENDING}
      *         Because there is a change in the trusted CA certificates,
@@ -117,7 +117,7 @@ public class CertificateController {
         final CertificateState startState = certStatus.state();
         LOGGER.debugCr(reconciliation, "Required cert {} has state {}", requiredCertificate.subjectIdentity(), startState);
         switch (startState) {
-            case NEW: {
+            case REQUIRED: {
                 certStatus = handleNew(certStatus, writer, requiredCertificate);
                 // fall through
             }
@@ -184,7 +184,7 @@ public class CertificateController {
             switch (trustState) {
                 case UNTRUSTED:
                     return validateRequestedThatsNotYetTrustable(status, writer, requiredCertificate, issued, issued.rootCaCertificate());
-                case TRUSTED_NEW:
+                case TRUSTED_UNUSED:
                     return validateRequestedThatShouldBeTrusted(status, requiredCertificate, issued, issued.rootCaCertificate(), writer);
                 case ZOMBIE: {
                     // This shouldn't happen
@@ -285,7 +285,7 @@ public class CertificateController {
                                                      RequiredCertificate<I> requiredCertificate,
                                                      CertificateOutputWriter<I> writer) {
         IssuedCertificate issued = status.issuedCertificate();
-        Set<TrustAnchor> trustAnchors = trustAnchors(TrustState.TRUSTED_NEW, TrustState.TRUSTED_USED);
+        Set<TrustAnchor> trustAnchors = trustAnchors(TrustState.TRUSTED_UNUSED, TrustState.TRUSTED_USED);
         Validator.Result result = validate(requiredCertificate, issued, trustAnchors);
         switch (result.type()) {
             case OK:
@@ -335,7 +335,7 @@ public class CertificateController {
             CertificateOutputWriter<I> writer) throws CertificateParsingException {
         // Is it still OK? validate it to find out
         IssuedCertificate issued = status.issuedCertificate(); // Alternative load the chain from the p12
-        Set<TrustAnchor> trustAnchors = trustAnchors(TrustState.TRUSTED_NEW, TrustState.TRUSTED_USED);
+        Set<TrustAnchor> trustAnchors = trustAnchors(TrustState.TRUSTED_UNUSED, TrustState.TRUSTED_USED);
         Validator.Result result = validate(requiredCertificate, issued, trustAnchors);
         switch (result.type()) {
             case OK: {

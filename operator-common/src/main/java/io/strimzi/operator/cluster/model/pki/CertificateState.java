@@ -17,7 +17,7 @@ public enum CertificateState {
      * <dt>REQUESTED</dt> <dd>Once it's been requested.</dd>
      * </dl>
      */
-    NEW("NEW"),
+    REQUIRED("REQUIRED"),
 
     /**
      * A certificate for the subject has been requested from the {@link CertificateIssuer}.
@@ -70,7 +70,7 @@ public enum CertificateState {
     public static CertificateState fromId(String id) {
         switch (id) {
             case "NEW":
-                return NEW;
+                return REQUIRED;
             case "REQUESTED":
                 return REQUESTED;
             case "PENDING":

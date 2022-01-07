@@ -69,7 +69,7 @@ public class AbstractCertificateOutputWriterTest {
         TestId subjectIdentity = new TestId("0");
 
         var loaded = writer.loadStatus(subjectIdentity);
-        Assertions.assertEquals(CertificateState.NEW, loaded.state());
+        Assertions.assertEquals(CertificateState.REQUIRED, loaded.state());
 
         byte[] token = {1, 2, 3, 4};
         writer.storeRequested(subjectIdentity, token);

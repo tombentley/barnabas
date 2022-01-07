@@ -120,7 +120,7 @@ class ClusterPkiTest {
                         "my-cluster-cluster-operator-certs", Set.of("cluster-operator.pending"),
                         "my-cluster-cluster-pki-state", Set.of(ca0 + ".state", ca0 + ".crt")),
                 secrets());
-        assertEquals(TrustState.TRUSTED_NEW, caTrustState(ca0));
+        assertEquals(TrustState.TRUSTED_UNUSED, caTrustState(ca0));
         assertEquals(CertificateState.PENDING, clusterCerts.coCertWriter.loadStatus(new ClusterOperatorIdentity()).state());
 
         // (6) Now deploy the EE cert
@@ -241,7 +241,7 @@ class ClusterPkiTest {
                         "my-cluster-cluster-pki-state", Set.of(ca0 + ".state", ca0 + ".crt", ca1 + ".state", ca1 + ".crt")),
                 secrets());
         assertEquals(TrustState.PHASE_OUT, caTrustState(ca0));
-        assertEquals(TrustState.TRUSTED_NEW, caTrustState(ca1));
+        assertEquals(TrustState.TRUSTED_UNUSED, caTrustState(ca1));
         assertEquals(CertificateState.PENDING, clusterCerts.coCertWriter.loadStatus(new ClusterOperatorIdentity()).state());
 
         // (6) Now deploy the EE cert

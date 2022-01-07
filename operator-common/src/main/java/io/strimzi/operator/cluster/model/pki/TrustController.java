@@ -45,7 +45,7 @@ import io.strimzi.operator.common.ReconciliationLogger;
  *     On observing a new root CA cert,  the issuing entity
  *     calls {@link #requireTrust(X509Certificate)} to request that it become trusted.</dd>
  *
- *     <dt>UNTRUSTED -&gt; {@link TrustState#TRUSTED_NEW}</dt>
+ *     <dt>UNTRUSTED -&gt; {@link TrustState#TRUSTED_UNUSED}</dt>
  *     <dd>On observing a certificate in the UNTRUSTED state, the trust managing entity performs the orchestration necessary for the
  *     certificate to become trusted. Once this is complete it transitions the trust root to TRUSTED_NEW by calling
  *     {@link #trustRootCerts(Set)}</dd>
@@ -230,7 +230,7 @@ public class TrustController implements TrustManager, TrustDependencyManager {
             SecretBuilder sb = new SecretBuilder(oldSecret);
             for (X509Certificate cert : rootCerts) {
                 Fingerprint fingerprint = PkiUtils.fingerprint(cert);
-                sb.addToData(stateKey(fingerprint), encode(TrustState.TRUSTED_NEW));
+                sb.addToData(stateKey(fingerprint), encode(TrustState.TRUSTED_UNUSED));
             }
             return sb.build();
         });
