@@ -218,17 +218,64 @@ public class KafkaRoller {
     }
 
     protected static class RestartContext {
+
+        /**
+         * <code><pre>
+         *                 START
+         *                   ↓
+         *                UNKNOWN
+         *                   ↕
+         * any of (UNREADY, READY, CONTROLLER) which can all inter-transition
+         *               ↙       ↘                          ↓
+         * NEEDS_RECONFIG    →    NEEDS_RESTART       UNSCHEDULABLE
+         *               ↘       ↙
+         *            AWAITING_READY
+         *                   ↓
+         *          AWAITING_LEADERSHIP
+         *                   ↓
+         *                 DONE
+         * </pre></code>
+         */
+        static enum State {
+            // NOTE: The order of these declarations matters, because it's used for the ordering of the priority queue
+            // in KafkaRoller to guarantee things like UNREADY pods always being restarted first.
+            /** The start state. */
+            START,
+            /** The pod is unschedulable (a final, but unsuccessful) state*/
+            UNSCHEDULABLE,
+            /** Waiting to observe leadership following an action */
+            AWAITING_LEADERSHIP,
+            /** Waiting to observe readiness following an action */
+            AWAITING_READY,
+            /** A pod needs restart */
+            NEEDS_RESTART,
+            /** A pod needs reconfig (may transition to NEEDS_RESTART if the reconfig fails) */
+            NEEDS_RECONFIG,
+            /** A pod is unready (and should be rolled in the first batch) */
+            UNREADY,
+            /** An unknown state  */
+            NEEDS_CLASSIFY,
+            /** A pod is ready (and should be rolled in the 2nd batch) */
+            READY,
+            /** A pod is the controller (and should be rolled in the final singleton batch) */
+            CONTROLLER,
+            /** The final successful state */
+            DONE;
+        }
+
         final Promise<Void> promise;
         final BackOff backOff;
+        private State state;
         private long connectionErrorStart = 0L;
 
-        boolean needsRestart;
-        boolean needsReconfig;
-        boolean forceRestart;
-        KafkaBrokerConfigurationDiff diff;
-        KafkaBrokerLoggingConfigurationDiff logDiff;
+        private boolean needsRestart;
+        private boolean needsReconfig;
+        private boolean forceRestart;
+        private KafkaBrokerConfigurationDiff diff;
+        private KafkaBrokerLoggingConfigurationDiff logDiff;
 
         RestartContext(Supplier<BackOff> backOffSupplier) {
+            state = State.START;
             promise = Promise.promise();
             backOff = backOffSupplier.get();
             backOff.delayMs();
@@ -240,6 +287,42 @@ public class KafkaRoller {
 
         long connectionError() {
             return connectionErrorStart;
+        }
+
+        public boolean isNeedsRestart() {
+            return needsRestart;
+        }
+
+        public void updatePlan(State state,
+                               boolean needsRestart,
+                               boolean needsReconfig,
+                               boolean forceRestart,
+                               KafkaBrokerConfigurationDiff diff,
+                               KafkaBrokerLoggingConfigurationDiff logDiff) {
+            this.state = state;
+            this.needsRestart = state == State.NEEDS_RESTART;
+            this.needsReconfig = state == State.NEEDS_RECONFIG;
+            this.forceRestart = forceRestart;
+            this.diff = diff;
+            this.logDiff = logDiff;
+        }
+
+        public boolean isNeedsReconfig() {
+            return needsReconfig;
+        }
+
+
+        public boolean isForceRestart() {
+            return forceRestart;
+        }
+
+
+        public KafkaBrokerConfigurationDiff getDiff() {
+            return diff;
+        }
+
+        public KafkaBrokerLoggingConfigurationDiff getLogDiff() {
+            return logDiff;
         }
 
         void noteConnectionError() {
@@ -326,14 +409,14 @@ public class KafkaRoller {
 
         try {
             checkReconfigurability(podRef, pod, restartContext);
-            if (restartContext.forceRestart || restartContext.needsRestart || restartContext.needsReconfig) {
-                if (!restartContext.forceRestart && deferController(podRef, restartContext)) {
+            if (restartContext.isForceRestart() || restartContext.isNeedsRestart() || restartContext.isNeedsReconfig()) {
+                if (!restartContext.isForceRestart() && deferController(podRef, restartContext)) {
                     LOGGER.debugCr(reconciliation, "Pod {} is controller and there are other pods to roll", podRef);
                     throw new ForceableProblem("Pod " + podRef.getPodName() + " is currently the controller and there are other pods still to roll");
                 } else {
-                    if (restartContext.forceRestart || canRoll(podRef, 60_000, TimeUnit.MILLISECONDS, false)) {
+                    if (restartContext.isForceRestart() || canRoll(podRef, 60_000, TimeUnit.MILLISECONDS, false)) {
                         // Check for rollability before trying a dynamic update so that if the dynamic update fails we can go to a full restart
-                        if (restartContext.forceRestart || !maybeDynamicUpdateBrokerConfig(podRef.getPodId(), restartContext)) {
+                        if (restartContext.isForceRestart() || !maybeDynamicUpdateBrokerConfig(podRef.getPodId(), restartContext)) {
                             LOGGER.debugCr(reconciliation, "Pod {} can be rolled now", podRef);
                             restartAndAwaitReadiness(pod, operationTimeoutMs, TimeUnit.MILLISECONDS);
                         } else {
@@ -408,9 +491,9 @@ public class KafkaRoller {
     private boolean maybeDynamicUpdateBrokerConfig(int podId, RestartContext restartContext) throws InterruptedException {
         boolean updatedDynamically;
 
-        if (restartContext.needsReconfig) {
+        if (restartContext.isNeedsReconfig()) {
             try {
-                dynamicUpdateBrokerConfig(podId, allClient, restartContext.diff, restartContext.logDiff);
+                dynamicUpdateBrokerConfig(podId, allClient, restartContext.getDiff(), restartContext.getLogDiff());
                 updatedDynamically = true;
             } catch (ForceableProblem e) {
                 LOGGER.debugCr(reconciliation, "Pod {} could not be updated dynamically ({}), will restart", podId, e);
@@ -429,6 +512,7 @@ public class KafkaRoller {
     private void checkReconfigurability(PodRef podRef, Pod pod, RestartContext restartContext) throws ForceableProblem, InterruptedException, FatalProblem {
 
         List<String> reasonToRestartPod = Objects.requireNonNull(podNeedsRestart.apply(pod));
+        RestartContext.State state = RestartContext.State.START;
         boolean podStuck = pod != null
                 && pod.getStatus() != null
                 && "Pending".equals(pod.getStatus().getPhase())
@@ -442,6 +526,7 @@ public class KafkaRoller {
             // If the pod is unschedulable then deleting it, or trying to open an Admin client to it will make no difference
             // Treat this as fatal because if it's not possible to schedule one pod then it's likely that proceeding
             // and deleting a different pod in the meantime will likely result in another unschedulable pod.
+            state = RestartContext.State.UNSCHEDULABLE;
             throw new FatalProblem("Pod is unschedulable");
         }
         // Unless the annotation is present, check the pod is at least ready.
@@ -452,12 +537,9 @@ public class KafkaRoller {
         // Always get the broker config. This request gets sent to that specific broker, so it's a proof that we can
         // connect to the broker and that it's capable of responding.
         if (!initAdminClient()) {
+            state = RestartContext.State.NEEDS_RESTART;
             LOGGER.infoCr(reconciliation, "Pod {} needs to be restarted, because it does not seem to responding to connection attempts", podRef);
-            restartContext.needsRestart = false;
-            restartContext.needsReconfig = false;
-            restartContext.forceRestart = true;
-            restartContext.diff = null;
-            restartContext.logDiff = null;
+            restartContext.updatePlan(false, false, true, null, null);
             return;
         }
         Config brokerConfig;
@@ -465,6 +547,7 @@ public class KafkaRoller {
             brokerConfig = brokerConfig(podRef);
         } catch (ForceableProblem e) {
             if (restartContext.backOff.done()) {
+                state = RestartContext.State.NEEDS_RESTART;
                 needsRestart = true;
                 brokerConfig = null;
             } else {
@@ -480,9 +563,11 @@ public class KafkaRoller {
             if (diff.getDiffSize() > 0) {
                 if (diff.canBeUpdatedDynamically()) {
                     LOGGER.debugCr(reconciliation, "Pod {} needs to be reconfigured.", podRef);
+                    state = RestartContext.State.NEEDS_RECONFIG;
                     needsReconfig = true;
                 } else {
                     LOGGER.infoCr(reconciliation, "Pod {} needs to be restarted, because reconfiguration cannot be done dynamically", podRef);
+                    state = RestartContext.State.NEEDS_RESTART;
                     needsRestart = true;
                 }
             }
@@ -490,6 +575,7 @@ public class KafkaRoller {
             // needsRestart value might have changed from the check in the parent if. So we need to check it again.
             if (!needsRestart && loggingDiff.getDiffSize() > 0) {
                 LOGGER.debugCr(reconciliation, "Pod {} logging needs to be reconfigured.", podRef);
+                state = RestartContext.State.NEEDS_RECONFIG;
                 needsReconfig = true;
             }
         } else if (needsRestart) {
@@ -499,11 +585,7 @@ public class KafkaRoller {
         if (podStuck)   {
             LOGGER.infoCr(reconciliation, "Pod {} needs to be restarted, because it seems to be stuck and restart might help", podRef);
         }
-        restartContext.needsRestart = needsRestart;
-        restartContext.needsReconfig = needsReconfig;
-        restartContext.forceRestart = podStuck;
-        restartContext.diff = diff;
-        restartContext.logDiff = loggingDiff;
+        restartContext.updatePlan(needsRestart, needsReconfig, podStuck, diff, loggingDiff);
     }
 
     /**
