@@ -5,5 +5,10 @@
 package io.strimzi.operator.cluster.operator.resource.roller;
 
 interface Processor {
-    public void process(Context context);
+
+    void deletePod(int broker);
+
+    void awaitStable(int broker);
+
+    void reconfigure(int broker);
 }

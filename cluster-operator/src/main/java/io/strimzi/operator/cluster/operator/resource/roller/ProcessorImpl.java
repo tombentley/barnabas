@@ -5,33 +5,16 @@
 package io.strimzi.operator.cluster.operator.resource.roller;
 
 class ProcessorImpl implements Processor {
-    @Override
-    public void process(Context context) {
-        switch (context.state()) {
 
-            case STALE_RESTARTABLE:
-            case UNHEALTHY:
-                deletePod();
-                awaitStable();
-                break;
-            case STALE_RECONFIGGABLE:
-                reconfigure();
-                awaitStable();
-                break;
-            default:
-                throw new IllegalStateException("Unexpected state " + context);
-        }
-    }
-
-    private void reconfigure() {
+    public void reconfigure(int broker) {
         throw new RuntimeException("Not yet implemented");
     }
 
-    private void awaitStable() {
+    public void awaitStable(int broker) {
         throw new RuntimeException("Not yet implemented");
     }
 
-    private void deletePod() {
+    public void deletePod(int broker) {
         throw new RuntimeException("Not yet implemented");
     }
 }

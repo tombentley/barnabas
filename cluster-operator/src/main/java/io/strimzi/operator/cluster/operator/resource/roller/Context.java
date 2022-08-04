@@ -11,6 +11,7 @@ class Context {
     private final int brokerId;
 
     private State state = State.UNKNOWN;
+    private boolean processed;
 
     public Context(int brokerId) {
         this.brokerId = brokerId;
@@ -33,28 +34,31 @@ class Context {
      * Map an {@link Observation} of this broker to it's {@link #state()}
      */
     void classify(Observation observation) {
+        validateTransition(classify2(observation));
+    }
+    static State classify2(Observation observation) {
         if (observation.podIsReady()
                 && observation.brokerStateRunning()
                 && observation.isUpToDateWrtSpec()
                 && observation.isMemberOfCluster()) {
-            validateTransition(observation.isPreferredLeader() ? State.STABLE : State.SYNCING);
+            return observation.isPreferredLeader() ? State.STABLE : State.SYNCING;
         } else if (observation.podIsReady()
                 && observation.brokerStateRunning()
                 && !observation.isUpToDateWrtSpec()) {
             if (observation.specIsReconfigurable()) {
-                validateTransition(State.STALE_RECONFIGGABLE);
+                return State.STALE_RECONFIGGABLE;
             } else if (observation.isRestartable()) {
-                validateTransition(State.STALE_RESTARTABLE);
+                return State.STALE_RESTARTABLE;
             } else {
-                validateTransition(State.STALE_BLOCKED);
+                return State.STALE_BLOCKED;
             }
         } else if (observation.podIsReady()
                 && observation.brokerStateRecovery()) {
-            validateTransition(State.RECOVERY);
+            return State.RECOVERY;
         } else if (!observation.podIsReady()) {
-            validateTransition(State.RESTARTED);
+            return State.RESTARTED;
         } else {
-            validateTransition(State.UNHEALTHY);
+            return State.UNHEALTHY;
         }
     }
 
@@ -64,5 +68,12 @@ class Context {
                 "brokerId=" + brokerId +
                 ", state=" + state +
                 ')';
+    }
+
+    public void touched() {
+        if (processed) {
+            throw new TouchedTwiceException("Already touched " + this);
+        }
+        this.processed = true;
     }
 }
