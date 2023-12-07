@@ -68,7 +68,8 @@ public class ZookeeperSetOperator extends StatefulSetOperator {
     }
 
     @Override
-    public Future<Void> maybeRollingUpdate(Reconciliation reconciliation, StatefulSet sts, Function<Pod, List<String>> podRestart, Secret clusterCaSecret, Secret coKeySecret) {
+    public Future<Void> maybeRollingUpdate(Reconciliation reconciliation, StatefulSet sts, Function<Pod, List<String>> podRestart,
+                                           Secret clusterCaSecret, Secret coKeySecret) {
         String namespace = sts.getMetadata().getNamespace();
         String name = sts.getMetadata().getName();
         final int replicas = sts.getSpec().getReplicas();

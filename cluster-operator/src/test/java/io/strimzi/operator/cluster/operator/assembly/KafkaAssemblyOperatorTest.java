@@ -4,6 +4,27 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import java.io.File;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
@@ -45,6 +66,7 @@ import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.storage.Storage;
 import io.strimzi.api.kafka.model.template.JmxTransOutputDefinitionTemplateBuilder;
 import io.strimzi.api.kafka.model.template.JmxTransQueryTemplateBuilder;
+import io.strimzi.certs.CertManager;
 import io.strimzi.operator.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ClusterOperator;
@@ -63,6 +85,8 @@ import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.ListenersUtils;
 import io.strimzi.operator.cluster.model.VolumeUtils;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
+import io.strimzi.operator.cluster.model.pki.TestClock;
+import io.strimzi.operator.cluster.model.pki.cluster.TestOpenSslCertManager;
 import io.strimzi.operator.cluster.operator.resource.KafkaSetOperator;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.cluster.operator.resource.StatefulSetDiff;
@@ -71,7 +95,6 @@ import io.strimzi.operator.common.MetricsAndLogging;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
@@ -86,6 +109,7 @@ import io.strimzi.operator.common.operator.resource.RouteOperator;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.ServiceOperator;
 import io.strimzi.test.TestUtils;
+import io.strimzi.test.mockkube.MockKube;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.junit5.Checkpoint;
@@ -94,26 +118,12 @@ import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
-
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static io.strimzi.test.TestUtils.set;
 import static java.util.Arrays.asList;
@@ -167,7 +177,8 @@ public class KafkaAssemblyOperatorTest {
     private static Storage kafkaStorage;
     private static SingleVolumeStorage zkStorage;
     private static EntityOperatorSpec eoConfig;
-    private static MockCertManager certManager = new MockCertManager();
+    private static CertManager certManager;
+    private static Clock clock;
     private static PasswordGenerator passwordGenerator = new PasswordGenerator(10, "a", "a");
 
     public static class Params {
@@ -324,6 +335,15 @@ public class KafkaAssemblyOperatorTest {
     @BeforeAll
     public static void before() {
         vertx = Vertx.vertx();
+
+    }
+
+    @BeforeEach
+    public void foo() {
+        clock = new TestClock(Clock.fixed(Instant.ofEpochMilli(0), ZoneId.of("UTC")));
+        certManager = TestOpenSslCertManager.record("foo", clock, new File("."));
+//        certManager = TestOpenSslCertManager.replay("foo", new File("."));
+//        certManager = new MockCertManager();
     }
 
     @AfterAll
@@ -676,7 +696,7 @@ public class KafkaAssemblyOperatorTest {
                 certManager,
                 passwordGenerator,
                 supplier,
-                config) {
+                config, clock) {
             @Override
             public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
                 return new ReconciliationState(r, ka) {
@@ -930,7 +950,9 @@ public class KafkaAssemblyOperatorTest {
         PvcOperator mockPvcOps = supplier.pvcOperations;
         PodOperator mockPodOps = supplier.podOperations;
         DeploymentOperator mockDepOps = supplier.deploymentOperations;
-        SecretOperator mockSecretOps = supplier.secretOperations;
+
+        SecretOperator mockSecretOps = new SecretOperator(vertx, new MockKube().build());
+        supplier.secretOperations = mockSecretOps;
         NetworkPolicyOperator mockPolicyOps = supplier.networkPolicyOperator;
         PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         NodeOperator mockNodeOps = supplier.nodeOperator;
@@ -1116,35 +1138,6 @@ public class KafkaAssemblyOperatorTest {
             );
         }
 
-        // Mock Secret gets
-        when(mockSecretOps.list(anyString(), any())).thenReturn(
-                emptyList()
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, KafkaCluster.jmxSecretName(clusterName))).thenReturn(
-                Future.succeededFuture(originalKafkaCluster.generateJmxSecret())
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, ZookeeperCluster.nodesSecretName(clusterName))).thenReturn(
-                Future.succeededFuture()
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, KafkaCluster.brokersSecretName(clusterName))).thenReturn(
-                Future.succeededFuture()
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, EntityOperator.secretName(clusterName))).thenReturn(
-                Future.succeededFuture()
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, KafkaExporter.secretName(clusterName))).thenReturn(
-                Future.succeededFuture()
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, KafkaResources.clusterCaCertificateSecretName(clusterName))).thenReturn(
-                Future.succeededFuture(new Secret())
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, ClusterOperator.secretName(clusterName))).thenReturn(
-                Future.succeededFuture(new Secret())
-        );
-        when(mockSecretOps.getAsync(clusterNamespace, CruiseControl.secretName(clusterName))).thenReturn(
-                Future.succeededFuture()
-        );
-
         // Mock NetworkPolicy get
         when(mockPolicyOps.get(clusterNamespace, KafkaCluster.networkPolicyName(clusterName))).thenReturn(originalKafkaCluster.generateNetworkPolicy(null, null));
         when(mockPolicyOps.get(clusterNamespace, ZookeeperCluster.policyName(clusterName))).thenReturn(originalZookeeperCluster.generateNetworkPolicy(null, null));
@@ -1161,50 +1154,73 @@ public class KafkaAssemblyOperatorTest {
                 originalZookeeperCluster.generateStatefulSet(openShift, null, null)
         );
         // Mock Deployment get
-        if (originalEntityOperator != null) {
-            when(mockDepOps.get(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenReturn(
-                    originalEntityOperator.generateDeployment(true, Collections.EMPTY_MAP, null, null)
-            );
-            when(mockDepOps.getAsync(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenReturn(
-                    Future.succeededFuture(originalEntityOperator.generateDeployment(true, Collections.EMPTY_MAP, null, null))
-            );
-            when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-            when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-        }
+        when(mockDepOps.rollingUpdate(any(), any(), any(), anyLong())).thenAnswer(i -> {
+            return Future.succeededFuture();
+        });
 
-        if (originalCruiseControl != null) {
-            when(mockDepOps.get(clusterNamespace, CruiseControl.cruiseControlName(clusterName))).thenReturn(
-                    originalCruiseControl.generateDeployment(true, Collections.EMPTY_MAP, null, null)
-            );
-            when(mockDepOps.getAsync(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenReturn(
-                    Future.succeededFuture(originalCruiseControl.generateDeployment(true, Collections.EMPTY_MAP, null, null))
-            );
-            when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-            when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-        }
+        when(mockDepOps.get(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenAnswer(i -> {
+            if (originalEntityOperator != null) {
+                return originalEntityOperator.generateDeployment(true, Collections.EMPTY_MAP, null, null);
+            } else {
+                return null;
+            }
+        });
+        when(mockDepOps.getAsync(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenAnswer(i -> {
+            if (originalEntityOperator != null) {
+                return Future.succeededFuture(originalEntityOperator.generateDeployment(true, Collections.EMPTY_MAP, null, null));
+            } else {
+                return Future.succeededFuture();
+            }
+        });
+        when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
+        when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
 
-        if (metrics) {
-            when(mockDepOps.get(clusterNamespace, KafkaExporter.kafkaExporterName(clusterName))).thenReturn(
-                    originalKafkaExporter.generateDeployment(true, null, null)
-            );
-            when(mockDepOps.getAsync(clusterNamespace, KafkaExporter.kafkaExporterName(clusterName))).thenReturn(
-                    Future.succeededFuture(originalKafkaExporter.generateDeployment(true, null, null))
-            );
-            when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-            when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
-                    Future.succeededFuture()
-            );
-        }
+
+        when(mockDepOps.get(clusterNamespace, CruiseControl.cruiseControlName(clusterName))).thenAnswer(i -> {
+            if (originalCruiseControl != null) {
+                return originalCruiseControl.generateDeployment(true, Collections.EMPTY_MAP, null, null);
+            } else {
+                return null;
+            }
+        });
+        when(mockDepOps.getAsync(clusterNamespace, CruiseControl.cruiseControlName(clusterName))).thenAnswer(i -> {
+            if (originalCruiseControl != null) {
+                return Future.succeededFuture(originalCruiseControl.generateDeployment(true, Collections.EMPTY_MAP, null, null));
+            } else {
+                return Future.succeededFuture();
+            }
+        });
+        when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
+        when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
+        when(mockDepOps.get(clusterNamespace, KafkaExporter.kafkaExporterName(clusterName))).thenAnswer(i -> {
+            if (metrics) {
+                return originalKafkaExporter.generateDeployment(true, null, null);
+            } else {
+                return null;
+            }
+        });
+        when(mockDepOps.getAsync(clusterNamespace, KafkaExporter.kafkaExporterName(clusterName))).thenAnswer(i -> {
+            if (metrics) {
+                return Future.succeededFuture(originalKafkaExporter.generateDeployment(true, null, null));
+            } else {
+                return Future.succeededFuture();
+            }
+        });
+        when(mockDepOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
+        when(mockDepOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(
+                Future.succeededFuture()
+        );
+
 
         // Mock CM patch
         Set<String> metricsCms = set();
@@ -1222,8 +1238,6 @@ public class KafkaAssemblyOperatorTest {
         // Mock Service patch (both service and headless service
         ArgumentCaptor<String> patchedServicesCaptor = ArgumentCaptor.forClass(String.class);
         when(mockServiceOps.reconcile(any(), eq(clusterNamespace), patchedServicesCaptor.capture(), any())).thenReturn(Future.succeededFuture());
-        // Mock Secrets patch
-        when(mockSecretOps.reconcile(any(), eq(clusterNamespace), any(), any())).thenReturn(Future.succeededFuture());
 
         // Mock NetworkPolicy patch
         when(mockPolicyOps.reconcile(any(), eq(clusterNamespace), any(), any())).thenReturn(Future.succeededFuture());
@@ -1276,7 +1290,7 @@ public class KafkaAssemblyOperatorTest {
                 certManager,
                 passwordGenerator,
                 supplier,
-                config) {
+                config, clock) {
             @Override
             public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
                 return new ReconciliationState(r, ka) {
@@ -1403,6 +1417,15 @@ public class KafkaAssemblyOperatorTest {
                 }
                 return Future.succeededFuture();
             }
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+                    @Override
+                    Future<ReconciliationState> clusterPkiBootstrap(Supplier<Date> dateSupplier) {
+                        return Future.succeededFuture(this);
+                    }
+                };
+            }
         };
 
         Checkpoint async = context.checkpoint();
@@ -1487,6 +1510,12 @@ public class KafkaAssemblyOperatorTest {
                     context.failNow(new AssertionError("Unexpected name " + name));
                 }
                 return Future.succeededFuture();
+            }
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+
+                };
             }
         };
 

@@ -32,10 +32,10 @@ class ServiceMockBuilder extends MockBuilder<Service, ServiceList, ServiceResour
     protected void mockCreate(String resourceName, ServiceResource<Service> resource) {
         when(resource.create(any(Service.class))).thenAnswer(i -> {
             Service argument = i.getArgument(0);
-            db.put(resourceName, copyResource(argument));
+            db.put(resourceName, copyResource(resourceName, argument));
             LOGGER.debug("create {} (and endpoint) {} ", resourceType, resourceName);
             endpointsDb.put(resourceName, new Endpoints());
-            return argument;
+            return copyResource(resourceName, argument);
         });
     }
 }

@@ -13,6 +13,7 @@ import io.strimzi.api.kafka.model.JmxPrometheusExporterMetrics;
 import io.strimzi.api.kafka.model.Logging;
 import io.strimzi.api.kafka.model.MetricsConfig;
 import io.strimzi.operator.cluster.model.InvalidResourceException;
+import io.strimzi.operator.cluster.model.pki.PkiUtils;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.OrderedProperties;
 import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
@@ -32,6 +33,8 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.MessageDigest;
@@ -246,6 +249,7 @@ public class Util {
             KeyStore trustStore = null;
             trustStore = KeyStore.getInstance("PKCS12");
             trustStore.load(null, password);
+            LOGGER.infoOp("Creating trust store containing {}", PkiUtils.fingerprint(certificate));
             trustStore.setEntry(certificate.getSubjectDN().getName(), new KeyStore.TrustedCertificateEntry(certificate), null);
             return store(prefix, suffix, trustStore, password);
         } catch (Exception e) {
@@ -541,5 +545,15 @@ public class Util {
         }
 
         return true;
+    }
+
+    public static void delete(Path key) {
+        if (key != null) {
+            try {
+                Files.deleteIfExists(key);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
     }
 }

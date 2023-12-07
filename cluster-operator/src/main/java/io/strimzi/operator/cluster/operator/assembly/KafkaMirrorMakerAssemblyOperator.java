@@ -4,6 +4,9 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ServiceAccount;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -13,17 +16,15 @@ import io.strimzi.api.kafka.model.KafkaMirrorMaker;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerResources;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerSpec;
 import io.strimzi.api.kafka.model.status.KafkaMirrorMakerStatus;
-import io.strimzi.certs.CertManager;
-import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.PlatformFeaturesAvailability;
+import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.model.KafkaMirrorMakerCluster;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.common.Annotations;
-import io.strimzi.operator.common.ReconciliationLogger;
-import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationException;
+import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
@@ -31,9 +32,6 @@ import io.strimzi.operator.common.operator.resource.StatusUtils;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * <p>Assembly operator for a "Kafka Mirror Maker" assembly, which manages:</p>
@@ -51,16 +49,13 @@ public class KafkaMirrorMakerAssemblyOperator extends AbstractAssemblyOperator<K
     /**
      * @param vertx The Vertx instance
      * @param pfa Platform features availability properties
-     * @param certManager Certificate manager
-     * @param passwordGenerator Password generator
      * @param supplier Supplies the operators for different resources
      * @param config ClusterOperator configuration. Used to get the user-configured image pull policy and the secrets.
      */
     public KafkaMirrorMakerAssemblyOperator(Vertx vertx, PlatformFeaturesAvailability pfa,
-                                            CertManager certManager, PasswordGenerator passwordGenerator,
                                             ResourceOperatorSupplier supplier,
                                             ClusterOperatorConfig config) {
-        super(vertx, pfa, KafkaMirrorMaker.RESOURCE_KIND, certManager, passwordGenerator, supplier.mirrorMakerOperator, supplier, config);
+        super(vertx, pfa, KafkaMirrorMaker.RESOURCE_KIND, supplier.mirrorMakerOperator, supplier, config);
         this.deploymentOperations = supplier.deploymentOperations;
         this.versions = config.versions();
     }

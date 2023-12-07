@@ -297,7 +297,7 @@ public class KafkaRoller {
                 } else {
                     long delay1 = ctx.backOff.delayMs();
                     LOGGER.infoCr(reconciliation, "Could not roll pod {} due to {}, retrying after at least {}ms",
-                            podId, e, delay1);
+                            podId, e, delay1, e);
                     schedule(podId, delay1, TimeUnit.MILLISECONDS);
                 }
             }
@@ -518,7 +518,10 @@ public class KafkaRoller {
         ConfigResource resource = new ConfigResource(ConfigResource.Type.BROKER, String.valueOf(brokerId));
         return await(Util.kafkaFutureToVertxFuture(reconciliation, vertx, allClient.describeConfigs(singletonList(resource)).values().get(resource)),
             30, TimeUnit.SECONDS,
-            error -> new ForceableProblem("Error getting broker config", error)
+            error -> {
+                error.printStackTrace();
+                return new ForceableProblem("Error getting broker config", error);
+            }
         );
     }
 

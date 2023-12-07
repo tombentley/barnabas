@@ -50,7 +50,10 @@ public class DefaultAdminClientProvider implements AdminClientProvider {
         if (clusterCaCertSecret != null) {
             PasswordGenerator pg = new PasswordGenerator(12);
             trustStorePassword = pg.generate();
+            LOGGER.debug("Using Secret {} and item {} for admin client trust store", clusterCaCertSecret.getMetadata().getName(), Ca.CA_CRT);
             truststoreFile = Util.createFileTrustStore(getClass().getName(), "ts", Ca.cert(clusterCaCertSecret, Ca.CA_CRT), trustStorePassword.toCharArray());
+        } else {
+            LOGGER.debug("No trust store for admin client");
         }
 
         try {
@@ -58,8 +61,11 @@ public class DefaultAdminClientProvider implements AdminClientProvider {
             File keystoreFile = null;
             // provided Secret and related key for getting the private key for TLS client authentication
             if (keyCertSecret != null && keyCertName != null && !keyCertName.isEmpty()) {
+                LOGGER.debug("Using Secret {} and item {} for admin client key store", keyCertSecret.getMetadata().getName(), keyCertName);
                 keyStorePassword = new String(Util.decodeFromSecret(keyCertSecret, keyCertName + ".password"), StandardCharsets.US_ASCII);
                 keystoreFile = Util.createFileStore(getClass().getName(), "ts", Util.decodeFromSecret(keyCertSecret, keyCertName + ".p12"));
+            } else {
+                LOGGER.debug("No key store for admin client");
             }
 
             try {

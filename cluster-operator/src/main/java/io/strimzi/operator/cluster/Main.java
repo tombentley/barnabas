@@ -127,10 +127,10 @@ public class Main {
                 new KafkaMirrorMaker2AssemblyOperator(vertx, pfa, resourceOperatorSupplier, config);
 
         KafkaMirrorMakerAssemblyOperator kafkaMirrorMakerAssemblyOperator =
-                new KafkaMirrorMakerAssemblyOperator(vertx, pfa, certManager, passwordGenerator, resourceOperatorSupplier, config);
+                new KafkaMirrorMakerAssemblyOperator(vertx, pfa, resourceOperatorSupplier, config);
 
         KafkaBridgeAssemblyOperator kafkaBridgeAssemblyOperator =
-                new KafkaBridgeAssemblyOperator(vertx, pfa, certManager, passwordGenerator, resourceOperatorSupplier, config);
+                new KafkaBridgeAssemblyOperator(vertx, pfa, resourceOperatorSupplier, config);
 
         KafkaRebalanceAssemblyOperator kafkaRebalanceAssemblyOperator =
                 new KafkaRebalanceAssemblyOperator(vertx, pfa, resourceOperatorSupplier, config);

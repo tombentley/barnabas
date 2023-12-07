@@ -12,9 +12,13 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.ResourceRequirements;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
+import io.fabric8.kubernetes.api.model.SecretList;
 import io.fabric8.kubernetes.api.model.ServiceBuilder;
 import io.fabric8.kubernetes.api.model.ServicePortBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.dsl.MixedOperation;
+import io.fabric8.kubernetes.client.dsl.NonNamespaceOperation;
+import io.fabric8.kubernetes.client.dsl.Resource;
 import io.fabric8.openshift.api.model.RouteBuilder;
 import io.micrometer.core.instrument.Clock;
 import io.micrometer.core.instrument.Counter;
@@ -735,6 +739,7 @@ public class ResourceUtils {
         RouteOperator routeOps = openShift ? mock(RouteOperator.class) : null;
 
         ResourceOperatorSupplier supplier = new ResourceOperatorSupplier(
+                mock(KubernetesClient.class),
                 mock(ServiceOperator.class),
                 routeOps,
                 mock(ZookeeperSetOperator.class),
@@ -802,6 +807,13 @@ public class ResourceUtils {
                         .withPorts(new ServicePortBuilder().withNodePort(31245).build())
                     .endSpec()
                     .build());
+
+        MixedOperation<Secret, SecretList, Resource<Secret>> mixedSecrets = mock(MixedOperation.class);
+        NonNamespaceOperation<Secret, SecretList, Resource<Secret>> nnSecrets = mock(NonNamespaceOperation.class);
+        Resource<Secret> secretResource = mock(Resource.class);
+        when(nnSecrets.withName(any())).thenReturn(secretResource);
+        when(mixedSecrets.inNamespace(any())).thenReturn(nnSecrets);
+        when(supplier.client.secrets()).thenReturn(mixedSecrets);
 
         return supplier;
     }

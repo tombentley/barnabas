@@ -4,6 +4,26 @@
  */
 package io.strimzi.systemtest.security;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.X509Certificate;
+import java.security.spec.InvalidKeySpecException;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
 import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Quantity;
@@ -22,7 +42,7 @@ import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.api.kafka.model.KafkaUser;
 import io.strimzi.api.kafka.model.listener.KafkaListenerAuthenticationTls;
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
-import io.strimzi.operator.cluster.model.Ca;
+import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.systemtest.AbstractST;
 import io.strimzi.systemtest.Constants;
@@ -58,26 +78,6 @@ import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.extension.ExtensionContext;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.security.NoSuchAlgorithmException;
-import java.security.cert.X509Certificate;
-import java.security.spec.InvalidKeySpecException;
-import java.time.Duration;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Base64;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static io.strimzi.api.kafka.model.KafkaResources.clientsCaCertificateSecretName;
 import static io.strimzi.api.kafka.model.KafkaResources.clientsCaKeySecretName;
@@ -281,10 +281,10 @@ class SecurityST extends AbstractST {
             initialCaCerts.put(secretName, value);
             Secret annotated = new SecretBuilder(secret)
                 .editMetadata()
-                .addToAnnotations(Ca.ANNO_STRIMZI_IO_FORCE_RENEW, "true")
+                .addToAnnotations(Annotations.ANNO_STRIMZI_IO_FORCE_RENEW, "true")
                 .endMetadata()
                 .build();
-            LOGGER.info("Patching secret {} with {}", secretName, Ca.ANNO_STRIMZI_IO_FORCE_RENEW);
+            LOGGER.info("Patching secret {} with {}", secretName, Annotations.ANNO_STRIMZI_IO_FORCE_RENEW);
             kubeClient(namespaceName).patchSecret(namespaceName, secretName, annotated);
         }
 
@@ -457,10 +457,10 @@ class SecurityST extends AbstractST {
             initialCaKeys.put(secretName, value);
             Secret annotated = new SecretBuilder(secret)
                     .editMetadata()
-                    .addToAnnotations(Ca.ANNO_STRIMZI_IO_FORCE_REPLACE, "true")
+                    .addToAnnotations(Annotations.ANNO_STRIMZI_IO_FORCE_REPLACE, "true")
                     .endMetadata()
                     .build();
-            LOGGER.info("Patching secret {} with {}", secretName, Ca.ANNO_STRIMZI_IO_FORCE_REPLACE);
+            LOGGER.info("Patching secret {} with {}", secretName, Annotations.ANNO_STRIMZI_IO_FORCE_REPLACE);
             kubeClient(namespaceName).patchSecret(namespaceName, secretName, annotated);
         }
 
@@ -690,7 +690,7 @@ class SecurityST extends AbstractST {
         LOGGER.info("Annotate secret {} with secret force-renew annotation", secretName);
         Secret secret = new SecretBuilder(kubeClient(namespaceName).getSecret(namespaceName, secretName))
             .editMetadata()
-                .addToAnnotations(Ca.ANNO_STRIMZI_IO_FORCE_RENEW, "true")
+                .addToAnnotations(Annotations.ANNO_STRIMZI_IO_FORCE_RENEW, "true")
             .endMetadata().build();
         kubeClient(namespaceName).patchSecret(namespaceName, secretName, secret);
 

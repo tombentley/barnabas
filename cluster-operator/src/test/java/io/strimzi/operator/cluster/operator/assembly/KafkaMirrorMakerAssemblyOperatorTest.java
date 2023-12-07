@@ -4,6 +4,15 @@
  */
 package io.strimzi.operator.cluster.operator.assembly;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
+
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
@@ -24,10 +33,8 @@ import io.strimzi.operator.cluster.model.KafkaMirrorMakerCluster;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.common.Annotations;
-import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
@@ -45,15 +52,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.CopyOnWriteArraySet;
 
 import static java.util.Arrays.asList;
 import static org.hamcrest.CoreMatchers.is;
@@ -138,7 +136,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         when(mockCmOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new ConfigMap())));
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx,
                 new PlatformFeaturesAvailability(true, kubernetesVersion),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"),
                 supplier,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS));
 
@@ -233,7 +230,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         when(mockCmOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new ConfigMap())));
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx,
                 new PlatformFeaturesAvailability(true, kubernetesVersion),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"),
                 supplier,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS));
 
@@ -337,7 +333,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
 
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx,
                 new PlatformFeaturesAvailability(true, kubernetesVersion),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"),
                 supplier,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS));
 
@@ -428,7 +423,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
 
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx,
                 new PlatformFeaturesAvailability(true, kubernetesVersion),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"),
                 supplier,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS));
 
@@ -486,7 +480,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
 
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx,
                 new PlatformFeaturesAvailability(true, kubernetesVersion),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"),
                 supplier,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS));
 
@@ -547,7 +540,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
 
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx,
                 new PlatformFeaturesAvailability(true, kubernetesVersion),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"),
                 supplier,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS));
 
@@ -610,7 +602,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
 
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx,
                 new PlatformFeaturesAvailability(true, kubernetesVersion),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"),
                 supplier,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS)) {
 
@@ -670,7 +661,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         when(mockCmOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new ConfigMap())));
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx,
                 new PlatformFeaturesAvailability(true, kubernetesVersion),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"),
                 supplier,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS));
 
@@ -725,7 +715,6 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
 
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx,
                 new PlatformFeaturesAvailability(true, kubernetesVersion),
-                new MockCertManager(), new PasswordGenerator(10, "a", "a"),
                 supplier,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS));
 

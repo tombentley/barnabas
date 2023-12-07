@@ -107,7 +107,7 @@ class StatefulSetMockBuilder extends MockBuilder<StatefulSet, StatefulSetList, R
     private void mockScale(String resourceName, RollableScalableResource<StatefulSet> resource) {
         when(resource.scale(anyInt(), anyBoolean())).thenAnswer(invocation -> {
             checkDoesExist(resourceName);
-            StatefulSet sts = copyResource(db.get(resourceName));
+            StatefulSet sts = copyResource(resourceName, db.get(resourceName));
             int newScale = invocation.getArgument(0);
             int oldScale = sts.getSpec().getReplicas();
             sts.getSpec().setReplicas(newScale);
@@ -115,7 +115,7 @@ class StatefulSetMockBuilder extends MockBuilder<StatefulSet, StatefulSetList, R
         });
         when(resource.scale(anyInt())).thenAnswer(invocation -> {
             checkDoesExist(resourceName);
-            StatefulSet sts = copyResource(db.get(resourceName));
+            StatefulSet sts = copyResource(resourceName, db.get(resourceName));
             int newScale = invocation.getArgument(0);
             int oldScale = sts.getSpec().getReplicas();
             sts.getSpec().setReplicas(newScale);
@@ -129,7 +129,7 @@ class StatefulSetMockBuilder extends MockBuilder<StatefulSet, StatefulSetList, R
             checkNotExists(resourceName);
             StatefulSet argument = cinvocation.getArgument(0);
             LOGGER.debug("create {} {} -> {}", resourceType, resourceName, argument);
-            StatefulSet value = copyResource(argument);
+            StatefulSet value = copyResource(resourceName, argument);
             value.setStatus(new StatefulSetStatus());
             db.put(resourceName, value);
             for (int i = 0; i < argument.getSpec().getReplicas(); i++) {
@@ -218,16 +218,16 @@ class StatefulSetMockBuilder extends MockBuilder<StatefulSet, StatefulSetList, R
                 mockPods.inNamespace(argument.getMetadata().getNamespace()).withName(newPodName).create(
                         new PodBuilder(examplePod).editMetadata().withName(newPodName).endMetadata().build());
             }
-            db.put(resourceName, copyResource(argument));
+            db.put(resourceName, copyResource(resourceName, argument));
         } else if (newScale < oldScale) {
-            db.put(resourceName, copyResource(argument));
+            db.put(resourceName, copyResource(resourceName, argument));
             LOGGER.debug("scaling down {} {} from {} to {}", resourceType, resourceName, oldScale, newScale);
             for (int i = oldScale - 1; i >= newScale; i--) {
                 String newPodName = argument.getMetadata().getName() + "-" + i;
                 mockPods.inNamespace(argument.getMetadata().getNamespace()).withName(newPodName).withPropagationPolicy(DeletionPropagation.FOREGROUND).delete();
             }
         } else {
-            db.put(resourceName, copyResource(argument));
+            db.put(resourceName, copyResource(resourceName, argument));
         }
         return argument;
     }

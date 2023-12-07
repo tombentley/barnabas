@@ -121,7 +121,8 @@ public abstract class StatefulSetOperator extends AbstractScalableResourceOperat
         return CompositeFuture.join(clusterCaCertSecretFuture, coKeySecretFuture);
     }
 
-    public abstract Future<Void> maybeRollingUpdate(Reconciliation reconciliation, StatefulSet sts, Function<Pod, List<String>> podNeedsRestart, Secret clusterCaSecret, Secret coKeySecret);
+    public abstract Future<Void> maybeRollingUpdate(Reconciliation reconciliation, StatefulSet sts, Function<Pod, List<String>> podNeedsRestart,
+                                                    Secret clusterCaSecret, Secret coKeySecret);
 
     public Future<Void> deletePvc(Reconciliation reconciliation, StatefulSet sts, String pvcName) {
         String namespace = sts.getMetadata().getNamespace();

@@ -102,6 +102,11 @@ public class CrdOperator<C extends KubernetesClient,
     }
 
     public Future<T> updateStatusAsync(Reconciliation reconciliation, T resource) {
+        return updateStatusAsync(reconciliation, resource, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    public Future<T> updateStatusAsync(Reconciliation reconciliation, T resource, String withResourceVersion) {
         Promise<T> blockingPromise = Promise.promise();
 
         vertx.createSharedWorkerExecutor("kubernetes-ops-pool").executeBlocking(future -> {
@@ -109,11 +114,23 @@ public class CrdOperator<C extends KubernetesClient,
             String name = resource.getMetadata().getName();
 
             try {
-                T result = operation().inNamespace(namespace).withName(name).updateStatus(resource);
-                LOGGER.infoCr(reconciliation, "Status of {} {} in namespace {} has been updated", resourceKind, name, namespace);
+                Resource<T> tResource = operation().inNamespace(namespace).withName(name);
+                T result;
+                if (withResourceVersion != null) {
+                    result = ((Resource<T>) tResource.withResourceVersion(withResourceVersion)).updateStatus(resource);
+                } else {
+                    T t = tResource.get();
+                    if (t != null) {
+                        t.setStatus(resource.getStatus());
+                    } else {
+                        t = resource;
+                    }
+                    result = tResource.updateStatus(t);
+                }
+                LOGGER.debugCr(reconciliation, "Status of {} {} in namespace {} has been updated", resourceKind, name, namespace);
                 future.complete(result);
             } catch (Exception e) {
-                LOGGER.debugCr(reconciliation, "Caught exception while updating status of {} {} in namespace {}", resourceKind, name, namespace, e);
+                LOGGER.errorCr(reconciliation, "Caught exception while updating status of {} {} in namespace {}", resourceKind, name, namespace, e);
                 future.fail(e);
             }
         }, true, blockingPromise);
