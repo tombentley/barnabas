@@ -18,31 +18,41 @@ import java.util.function.Function;
 final class Context {
     /** The node this context refers to */
     private final NodeRef nodeRef;
+    /** The process roles currently assigned to the node */
+    private final NodeRoles currentRoles;
     /** The state of the node the last time it was observed */
     private State state;
     /** The time of the last state transition */
     private long lastTransition;
     /** The reasons this node needs to be restarted or reconfigured */
     private RestartReasons reason;
-    /** The number of restarts attempted so far. */
+    /** The number of restarts done so far. */
     private int numRestarts;
-    /** The number of reconfigurations attempted so far. */
+    /** The number of reconfigurations done so far. */
     private int numReconfigs;
+    /** The number of operational attempts so far. */
+    private int numAttempts;
     /** The difference between the current logging config and the desired logging config */
     private KafkaBrokerLoggingConfigurationDiff loggingDiff;
     /** The difference between the current node config and the desired node config */
     private KafkaBrokerConfigurationDiff brokerConfigDiff;
 
-    private Context(NodeRef nodeRef, State state, long lastTransition, RestartReasons reason, int numRestarts) {
+    private Context(NodeRef nodeRef, NodeRoles currentRoles, State state, long lastTransition, RestartReasons reason, int numRestarts, int numReconfigs, int numAttempts) {
         this.nodeRef = nodeRef;
+        this.currentRoles = currentRoles;
         this.state = state;
         this.lastTransition = lastTransition;
         this.reason = reason;
         this.numRestarts = numRestarts;
+        this.numReconfigs = numReconfigs;
+        this.numAttempts = numAttempts;
     }
 
-    static Context start(NodeRef nodeRef, Function<Integer, RestartReasons> predicate, Time time) {
-        return new Context(nodeRef, State.UNKNOWN, time.systemTimeMillis(), predicate.apply(nodeRef.nodeId()), 0);
+    static Context start(NodeRef nodeRef,
+                         NodeRoles nodeRoles,
+                         Function<Integer, RestartReasons> predicate,
+                         Time time) {
+        return new Context(nodeRef, nodeRoles, State.UNKNOWN, time.systemTimeMillis(), predicate.apply(nodeRef.nodeId()), 0, 0, 1);
     }
 
     State transitionTo(State state, Time time) {
@@ -68,6 +78,10 @@ final class Context {
         return nodeRef;
     }
 
+    public NodeRoles currentRoles() {
+        return currentRoles;
+    }
+
     public State state() {
         return state;
     }
@@ -88,15 +102,26 @@ final class Context {
         return numReconfigs;
     }
 
+    public int numAttempts() {
+        return numAttempts;
+    }
+
+    public void incrementNumAttempts() {
+        this.numAttempts++;
+    }
+
     @Override
     public String toString() {
 
         return "Context[" +
                 "nodeRef=" + nodeRef + ", " +
+                "currentRoles=" + currentRoles + ", " +
                 "state=" + state + ", " +
                 "lastTransition=" + Instant.ofEpochMilli(lastTransition) + ", " +
                 "reason=" + reason + ", " +
-                "numRestarts=" + numRestarts + ']';
+                "numRestarts=" + numRestarts + ", " +
+                "numReconfigs=" + numReconfigs + ", " +
+                "numAttempts=" + numAttempts + ']';
     }
 
     public void brokerConfigDiff(KafkaBrokerConfigurationDiff diff) {
