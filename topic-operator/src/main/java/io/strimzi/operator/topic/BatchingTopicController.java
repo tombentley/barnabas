@@ -475,15 +475,22 @@ public class BatchingTopicController {
         var addedFinalizer = addOrRemoveFinalizer(useFinalizer, topicsToUpdate);
         var currentStatesOrError = describeTopic(addedFinalizer);
 
+        for (var reconcilableTopic : topicsToUpdate) {
+            removeWarningConditions(reconcilableTopic, Reason.INVALID_CONFIG, null);
+            warnAboutThrottlingConfig(reconcilableTopic);
+            warnAboutNonAlterableConfig(reconcilableTopic);
+        }
+
         Results results = new Results();
 
         results.addAll(createMissingTopics(currentStatesOrError));
 
-        var partitionedByHavingAlterableConfigs = partitionByHavingAlterableConfigs(currentStatesOrError.ok());
+        var partitionedByHavingDifferentConfigs = partitionByHavingDifferentConfigs(currentStatesOrError.ok());
 
         // record topics which don't require configs changes (may be overwritten later)
-        results.recordRightResults(partitionedByHavingAlterableConfigs.get(false).stream());
-        var filteredAlterConfigs = filterConfigChanges(topicsToUpdate, partitionedByHavingAlterableConfigs.get(true));
+        results.recordRightResults(partitionedByHavingDifferentConfigs.get(false).stream());
+        // filter out topics whose configs can't be changed (e.g. throttling managed by CC, or ones prohibited by this operator's config)
+        var actionableConfigChanges = retainActionableConfigChanges(partitionedByHavingDifferentConfigs.get(true));
 
         var partitionedByRequiredNewPartitions = partitionByRequiresNewPartitions(results, currentStatesOrError.ok());
         // add topics which don't require partitions changes to the results (may be overwritten later)
@@ -491,7 +498,7 @@ public class BatchingTopicController {
         var someCreatePartitions = partitionedByRequiredNewPartitions.get(false);
 
         // execute those updates
-        var alterConfigsResults = alterConfigs(filteredAlterConfigs);
+        var alterConfigsResults = alterConfigs(actionableConfigChanges);
         var createPartitionsResults = createPartitions(someCreatePartitions);
         var checkReplicasChangesResults = handleReplicasChanges(batch, currentStatesOrError.ok());
 
@@ -714,7 +721,7 @@ public class BatchingTopicController {
         LOGGER.traceOp("Updated status of {} KafkaTopics", results.size());
     }
 
-    private Map<Boolean, List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>>> partitionByHavingAlterableConfigs(
+    private Map<Boolean, List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>>> partitionByHavingDifferentConfigs(
             Stream<Pair<ReconcilableTopic, TopicState>> currentStates
     ) {
         // Determine config changes
@@ -1118,34 +1125,16 @@ public class BatchingTopicController {
     /**
      * Filters out config changes that should be ignored.
      *
-     * @param reconcilableTopics Topics tha may need update.
      * @param alterConfigPairs Determined alter config operations.
      * @return Filtered alter config pairs.
      */
-    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filterConfigChanges(
-            List<ReconcilableTopic> reconcilableTopics,
+    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> retainActionableConfigChanges(
             List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> alterConfigPairs
     ) {
-        List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filteredAlterConfigPairs = new ArrayList<>();
-        for (var reconcilableTopic : reconcilableTopics) {
-            removeWarningConditions(reconcilableTopic, Reason.INVALID_CONFIG, null);
-            warnAboutNonAlterableConfig(reconcilableTopic);
-        }
-        for (var reconcilableTopic : reconcilableTopics) {
-            var nonThrottlingConfigPairs = filterOutThrottlingConfig(alterConfigPairs);
-            var alterableConfigPairs = filterOutNonAlterableConfig(reconcilableTopic, nonThrottlingConfigPairs);
-            filteredAlterConfigPairs.addAll(alterableConfigPairs);
-            var alterConfigOps = alterableConfigPairs.stream()
-                .map(Pair::getValue)
-                .flatMap(Collection::stream)
-                .toList();
-            if (alterConfigOps.isEmpty()) {
-                LOGGER.debugCr(reconcilableTopic.reconciliation(), "No config change");
-            } else {
-                LOGGER.debugCr(reconcilableTopic.reconciliation(), "Config changes {}", alterConfigOps);
-            }
-        }
-        return filteredAlterConfigPairs.stream()
+        var nonThrottlingConfigPairs = filterOutThrottlingConfig(alterConfigPairs);
+        var alterableConfigPairs = filterOutNonAlterableConfig(nonThrottlingConfigPairs);
+
+        return alterableConfigPairs.stream()
             .filter(pair -> !pair.getValue().isEmpty())
             .toList();
     }
@@ -1167,15 +1156,20 @@ public class BatchingTopicController {
                     var reconcilableTopic = pair.getKey();
                     Collection<AlterConfigOp> filteredOps = pair.getValue().stream()
                         .filter(op -> !(THROTTLING_CONFIG.contains(op.configEntry().name()) && !hasConfigProperty(reconcilableTopic.kt(), op.configEntry().name())))
-                        .collect(Collectors.toList());
-                    if (THROTTLING_CONFIG.stream().anyMatch(prop -> hasConfigProperty(reconcilableTopic.kt(), prop))) {
-                        THROTTLING_CONFIG.forEach(prop -> addWarningCondition(reconcilableTopic, Reason.INVALID_CONFIG, format("Property %s may conflict with throttled rebalances", prop)));
-                    }
+                        .toList();
                     return new Pair<>(pair.getKey(), filteredOps);
                 })
-                .collect(Collectors.toList());
+                .toList();
         } else {
             return alterConfigPairs;
+        }
+    }
+
+    private void warnAboutThrottlingConfig(ReconcilableTopic reconcilableTopic) {
+        if (config.cruiseControlEnabled()) {
+            if (THROTTLING_CONFIG.stream().anyMatch(prop -> hasConfigProperty(reconcilableTopic.kt(), prop))) {
+                THROTTLING_CONFIG.forEach(prop -> addWarningCondition(reconcilableTopic, Reason.INVALID_CONFIG, format("Property %s may conflict with throttled rebalances", prop)));
+            }
         }
     }
 
@@ -1195,19 +1189,16 @@ public class BatchingTopicController {
      * @return Filtered alter config operations for this topic.
      */
     private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filterOutNonAlterableConfig(
-            ReconcilableTopic reconcilableTopic,
             List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> alterConfigPairs
     ) {
-        boolean hasNullConfigs = !hasConfig(reconcilableTopic.kt());
-        if (alterableConfigs == null
-                || hasNullConfigs) {
+
+        if (alterableConfigs == null) {
             return alterConfigPairs; // TODO this cannot be correct: returning the list for _all_ RT's if reconcilableTopic has null configs
         } else if (alterableConfigs.isEmpty()) {
             return List.of();
         } else {
             // check determined alter operations on update
             return alterConfigPairs.stream()
-                .filter(pair -> Objects.equals(pair.getKey(), reconcilableTopic))
                 .map(pair -> {
                     Collection<AlterConfigOp> filteredOps = pair.getValue().stream()
                         .filter(op -> {
