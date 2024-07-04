@@ -338,7 +338,7 @@ class BatchingTopicControllerTest {
 
         // test
         var results = new BatchingTopicController(config, Map.of("key", "VALUE"), admin, client, metrics, replicasChangeHandler)
-            .handleReplicasChanges(reconcilableTopics, currentStatesOrError);
+            .handleReplicasChanges(reconcilableTopics, currentStatesOrError.ok());
 
         if (cruiseControlEnabled) {
             assertThat(results.ok().count(), is(1L));
@@ -412,7 +412,7 @@ class BatchingTopicControllerTest {
         
         // run test
         var results = new BatchingTopicController(config, Map.of("key", "VALUE"), admin, client, metrics, replicasChangeHandler)
-            .handleReplicasChanges(reconcilableTopics, currentStatesOrError);
+            .handleReplicasChanges(reconcilableTopics, currentStatesOrError.ok());
 
         assertThat(results.ok().count(), is(1L));
         assertThat(results.ok().findFirst().get().getKey().kt().getStatus().getReplicasChange(), is(nullValue()));
@@ -479,7 +479,7 @@ class BatchingTopicControllerTest {
 
         // run test
         var results = new BatchingTopicController(config, Map.of("key", "VALUE"), admin, client, metrics, replicasChangeHandler)
-            .handleReplicasChanges(reconcilableTopics, currentStatesOrError);
+            .handleReplicasChanges(reconcilableTopics, currentStatesOrError.ok());
         
         assertThat(results.ok().count(), is(1L));
         assertThat(results.ok().findFirst().get().getKey().kt().getStatus().getReplicasChange(), is(nullValue()));

@@ -55,7 +55,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -459,36 +458,35 @@ public class BatchingTopicController {
 
     private Results updateNonPausedTopics(
             List<ReconcilableTopic> batch,
-            List<ReconcilableTopic> mayNeedUpdate
+            List<ReconcilableTopic> topicsToUpdate
     ) {
-        metrics.reconciliationsCounter(namespace).increment(mayNeedUpdate.size());
-        var addedFinalizer = addOrRemoveFinalizer(useFinalizer, mayNeedUpdate);
+        metrics.reconciliationsCounter(namespace).increment(topicsToUpdate.size());
+        var addedFinalizer = addOrRemoveFinalizer(useFinalizer, topicsToUpdate);
         var currentStatesOrError = describeTopic(addedFinalizer);
 
         Results results = new Results();
 
-        // figure out necessary updates
         results.addAll(createMissingTopics(currentStatesOrError));
-        var alterConfigs = findConfigChanges(results, currentStatesOrError);
-        var filteredAlterConfigs = filterConfigChanges(mayNeedUpdate, alterConfigs);
-        var someCreatePartitions = findPartitionChanges(results, currentStatesOrError);
+
+        var partitionedByHavingAlterableConfigs = partitionByHavingAlterableConfigs(currentStatesOrError.ok());
+
+        // record topics which don't require configs changes (may be overwritten later)
+        results.recordRightResults(partitionedByHavingAlterableConfigs.get(false).stream());
+        var filteredAlterConfigs = filterConfigChanges(topicsToUpdate, partitionedByHavingAlterableConfigs.get(true));
+
+        var partitionedByRequiredNewPartitions = partitionByRequiresNewPartitions(results, currentStatesOrError.ok());
+        // add topics which don't require partitions changes to the results (may be overwritten later)
+        results.recordRightResults(partitionedByRequiredNewPartitions.get(true).stream());
+        var someCreatePartitions = partitionedByRequiredNewPartitions.get(false);
 
         // execute those updates
         var alterConfigsResults = alterConfigs(filteredAlterConfigs);
         var createPartitionsResults = createPartitions(someCreatePartitions);
-        var checkReplicasChangesResults = handleReplicasChanges(batch, currentStatesOrError);
+        var checkReplicasChangesResults = handleReplicasChanges(batch, currentStatesOrError.ok());
 
-        // update statuses
-        // add the successes to the results
-        results.recordRightResults(alterConfigsResults.ok());
-        results.recordRightResults(createPartitionsResults.ok());
-        results.recordRightResults(checkReplicasChangesResults.ok());
-
-        // add to errors (potentially overwriting some successes, e.g. if configs succeeded but partitions failed)
-        results.recordLeftResults(alterConfigsResults.errors());
-        results.recordLeftResults(createPartitionsResults.errors());
-        results.recordLeftResults(checkReplicasChangesResults.errors());
-
+        results.recordResults(alterConfigsResults);
+        results.recordResults(createPartitionsResults);
+        results.recordResults(checkReplicasChangesResults);
         return results;
     }
 
@@ -519,23 +517,24 @@ public class BatchingTopicController {
      * <p>
      *
      * @param reconcilableTopics Reconcilable topics from Kube.
-     * @param currentStatesOrError Current topic state or error from Kafka.
+     * @param currentStates Current topic state
      * @return Reconcilable topics partitioned by error.
      */
     /* test */ PartitionedByError<ReconcilableTopic, Void> handleReplicasChanges(List<ReconcilableTopic> reconcilableTopics,
-                                                                                 PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError) {
-        var differentRfResults = findDifferentRf(currentStatesOrError);
+                                                                                 Stream<Pair<ReconcilableTopic, TopicState>> currentStates) {
+        var differentRfResults = findDifferentRf(currentStates);
         Stream<Pair<ReconcilableTopic, Either<TopicOperatorException, Void>>> successStream;
             
         if (config.cruiseControlEnabled()) {
             var results = new HashSet<ReconcilableTopic>();
-            var differentRfMap = differentRfResults.ok().map(Pair::getKey).collect(Collectors.toList())
-                .stream().collect(Collectors.toMap(ReconcilableTopic::topicName, Function.identity()));
+            var differentRfMap = differentRfResults.ok()
+                    .map(Pair::getKey)
+                    .collect(Collectors.toMap(ReconcilableTopic::topicName, Function.identity()));
             
             var pending = topicsMatching(reconcilableTopics, this::isPendingReplicasChange);
             var brandNew = differentRfMap.values().stream()
                 .filter(rt -> !isPendingReplicasChange(rt.kt()) && !isOngoingReplicasChange(rt.kt()))
-                .collect(Collectors.toList());
+                .toList();
             pending.addAll(brandNew);
             warnTooLargeMinIsr(pending);
             results.addAll(replicasChangeHandler.requestPendingChanges(pending));
@@ -548,7 +547,7 @@ public class BatchingTopicController {
                 .collect(Collectors.toList());
             var reverted = pending.stream()
                 .filter(rt -> !differentRfMap.containsKey(rt.topicName()) && isFailedReplicasChange(rt.kt()))
-                .collect(Collectors.toList());
+                .toList();
             completed.addAll(reverted);
             if (!completed.isEmpty()) {
                 LOGGER.debugOp("Pending but completed replicas changes, Topics: {}", topicNames(completed));
@@ -576,8 +575,8 @@ public class BatchingTopicController {
         return partitionedByError(Stream.concat(successStream, errorStream));
     }
 
-    private PartitionedByError<ReconcilableTopic, TopicState> findDifferentRf(PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError) {
-        var apparentlyDifferentRf = currentStatesOrError.ok().filter(pair -> {
+    private PartitionedByError<ReconcilableTopic, TopicState> findDifferentRf(Stream<Pair<ReconcilableTopic, TopicState>> currentStates) {
+        var apparentlyDifferentRf = currentStates.filter(pair -> {
             var reconcilableTopic = pair.getKey();
             var currentState = pair.getValue();
             return reconcilableTopic.kt().getSpec().getReplicas() != null
@@ -676,69 +675,62 @@ public class BatchingTopicController {
     private Results createMissingTopics(
             PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError
     ) {
+        Results results = new Results();
+
+        // Partition the topics with errors by whether they're due to UnknownTopicOrPartitionException
         var partitionedByUnknownTopic = currentStatesOrError.errors().collect(Collectors.partitioningBy(pair -> {
             var ex = pair.getValue();
             return ex instanceof TopicOperatorException.KafkaError
                     && ex.getCause() instanceof UnknownTopicOrPartitionException;
         }));
-        Results results = new Results();
 
+        // Record the errors for those which are NOT due to UnknownTopicOrPartitionException
         results.recordLeftResults(partitionedByUnknownTopic.get(false).stream());
 
-        if (!partitionedByUnknownTopic.get(true).isEmpty()) {
-            var createResults = createTopics(partitionedByUnknownTopic.get(true).stream().map(Pair::getKey).toList());
-            results.recordRightResults(createResults.ok());
-            results.recordLeftResults(createResults.errors());
-        }
-
+        // Create topics in Kafka for those which ARE due to UnknownTopicOrPartitionException...
+        var unknownTopics = partitionedByUnknownTopic.get(true).stream().map(Pair::getKey).toList();
+        // ... and record those results.
+        results.recordResults(createTopics(unknownTopics));
         return results;
     }
 
     private void updateStatuses(Results results) {
         // Update statues with the overall results.
-        results.forEachRightResult((reconcilableTopic, ignored) -> {
-            updateStatusForSuccess(reconcilableTopic);
-        });
+        results.forEachRightResult((reconcilableTopic, ignored) ->
+                updateStatusForSuccess(reconcilableTopic)
+        );
         results.forEachLeftResult(this::updateStatusForException);
         LOGGER.traceOp("Updated status of {} KafkaTopics", results.size());
     }
 
-    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> findConfigChanges(
-            Results results,
-            PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError
+    private Map<Boolean, List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>>> partitionByHavingAlterableConfigs(
+            Stream<Pair<ReconcilableTopic, TopicState>> currentStates
     ) {
         // Determine config changes
-        Map<Boolean, List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>>> alterConfigs = currentStatesOrError.ok().map(pair -> {
+        return currentStates.map(pair -> {
             var reconcilableTopic = pair.getKey();
             var currentState = pair.getValue();
             // determine config changes
             return new Pair<>(reconcilableTopic, buildAlterConfigOps(reconcilableTopic, currentState.configs()));
-        }).collect(Collectors.partitioningBy(pair -> pair.getValue().isEmpty()));
-
-        // add topics which don't require configs changes to the results (may be overwritten later)
-        results.recordRightResults(alterConfigs.get(true).stream());
-        return alterConfigs.get(false);
+        }).collect(Collectors.partitioningBy(pair -> !pair.getValue().isEmpty()));
     }
 
-    private List<Pair<ReconcilableTopic, NewPartitions>> findPartitionChanges(
+    private Map<Boolean, List<Pair<ReconcilableTopic, NewPartitions>>> partitionByRequiresNewPartitions(
             Results results,
-            PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError
+            Stream<Pair<ReconcilableTopic, TopicState>> currentStates
     ) {
         // Determine partition changes
-        PartitionedByError<ReconcilableTopic, NewPartitions> newPartitionsOrError = partitionedByError(currentStatesOrError.ok().map(pair -> {
+        Stream<Pair<ReconcilableTopic, Either<TopicOperatorException, NewPartitions>>> partitionChanges = currentStates.map(pair -> {
             var reconcilableTopic = pair.getKey();
             var currentState = pair.getValue();
             // determine config changes
-            return new Pair<>(reconcilableTopic, buildNewPartitions(reconcilableTopic.reconciliation(), reconcilableTopic.kt(), currentState.numPartitions()));
-        }));
+            return new Pair<>(reconcilableTopic, partitionChanges(reconcilableTopic.reconciliation(), reconcilableTopic.kt(), currentState.numPartitions()));
+        });
+        PartitionedByError<ReconcilableTopic, NewPartitions> newPartitionsOrError = partitionedByError(partitionChanges);
         results.recordLeftResults(newPartitionsOrError.errors());
 
-        var createPartitions = newPartitionsOrError.ok().collect(
+        return newPartitionsOrError.ok().collect(
                 Collectors.partitioningBy(pair -> pair.getValue() == null));
-        // add topics which don't require partitions changes to the results (may be overwritten later)
-        results.recordRightResults(createPartitions.get(true).stream());
-        var someCreatePartitions = createPartitions.get(false);
-        return someCreatePartitions;
     }
 
     private List<Pair<ReconcilableTopic, Either<TopicOperatorException, TopicState>>> filterByReassignmentTargetReplicas(
@@ -1068,7 +1060,7 @@ public class BatchingTopicController {
         });
     }
 
-    private static Either<TopicOperatorException, NewPartitions> buildNewPartitions(Reconciliation reconciliation, KafkaTopic kt, int currentNumPartitions) {
+    private static Either<TopicOperatorException, NewPartitions> partitionChanges(Reconciliation reconciliation, KafkaTopic kt, int currentNumPartitions) {
         int requested = kt.getSpec() == null || kt.getSpec().getPartitions() == null ? BROKER_DEFAULT : kt.getSpec().getPartitions();
         if (requested > currentNumPartitions) {
             LOGGER.debugCr(reconciliation, "Partition increase from {} to {}", currentNumPartitions, requested);
@@ -1119,20 +1111,20 @@ public class BatchingTopicController {
      * @param alterConfigPairs Determined alter config operations.
      * @return Filtered alter config pairs.
      */
-    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filterConfigChanges(List<ReconcilableTopic> reconcilableTopics,
-                                                                                         List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> alterConfigPairs) {
+    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filterConfigChanges(
+            List<ReconcilableTopic> reconcilableTopics,
+            List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> alterConfigPairs
+    ) {
         List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filteredAlterConfigPairs = new ArrayList<>();
         for (var reconcilableTopic : reconcilableTopics) {
             removeWarningConditions(reconcilableTopic, Reason.INVALID_CONFIG, null);
-            var nonThrottlingConfigPairs = filterOutThrottlingConfig(reconcilableTopic, alterConfigPairs);
+            var nonThrottlingConfigPairs = filterOutThrottlingConfig(alterConfigPairs);
             var alterableConfigPairs = filterOutNonAlterableConfig(reconcilableTopic, nonThrottlingConfigPairs);
-            if (!alterableConfigPairs.isEmpty()) {
-                filteredAlterConfigPairs.addAll(alterableConfigPairs);
-            }
+            filteredAlterConfigPairs.addAll(alterableConfigPairs);
             var alterConfigOps = alterableConfigPairs.stream()
                 .map(Pair::getValue)
-                .flatMap(ops -> ops.stream())
-                .collect(Collectors.toList());
+                .flatMap(Collection::stream)
+                .toList();
             if (alterConfigOps.isEmpty()) {
                 LOGGER.debugCr(reconcilableTopic.reconciliation(), "No config change");
             } else {
@@ -1141,7 +1133,7 @@ public class BatchingTopicController {
         }
         return filteredAlterConfigPairs.stream()
             .filter(pair -> !pair.getValue().isEmpty())
-            .collect(Collectors.toList());
+            .toList();
     }
 
     /**
@@ -1151,16 +1143,14 @@ public class BatchingTopicController {
      * <p>This avoids the issue caused by the race condition between Cruise Control that dynamically sets 
      * them during throttled rebalances, and the operator that reverts them on periodic reconciliations.</p>
      *
-     * @param reconcilableTopic Reconcilable topic.
      * @param alterConfigPairs Determined alter config operations.
      * @return Filtered alter config operations for this topic.
      */
-    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filterOutThrottlingConfig(ReconcilableTopic reconcilableTopic,
-                                                                                               List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> alterConfigPairs) {
+    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filterOutThrottlingConfig(List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> alterConfigPairs) {
         if (config.cruiseControlEnabled()) {
             return alterConfigPairs.stream()
-                .filter(pair -> Objects.equals(pair.getKey(), reconcilableTopic))
                 .map(pair -> {
+                    var reconcilableTopic = pair.getKey();
                     Collection<AlterConfigOp> filteredOps = pair.getValue().stream()
                         .filter(op -> !(THROTTLING_CONFIG.contains(op.configEntry().name()) && !hasConfigProperty(reconcilableTopic.kt(), op.configEntry().name())))
                         .collect(Collectors.toList());
@@ -1190,42 +1180,44 @@ public class BatchingTopicController {
      * @param alterConfigPairs All alter config operations.
      * @return Filtered alter config operations for this topic.
      */
-    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filterOutNonAlterableConfig(ReconcilableTopic reconcilableTopic,
-                                                                                                 List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> alterConfigPairs) {
-        var alterableConfigValue = config.alterableTopicConfig();
-        var specConfig = hasConfig(reconcilableTopic.kt())
-            ? reconcilableTopic.kt().getSpec().getConfig().keySet().stream().sorted().collect(Collectors.toList())
-            : Collections.emptyList();
-        var alterableConfig = alterableConfigValue != null
-            ? Arrays.stream(alterableConfigValue.replaceAll("\\s", "").split(",")).sorted().collect(Collectors.toList())
-            : Collections.emptyList();
-        if (alterableConfigValue != null && !alterableConfigValue.equalsIgnoreCase("ALL") && !alterableConfigValue.isEmpty() && hasConfig(reconcilableTopic.kt())) {
-            if (alterableConfigValue.equalsIgnoreCase("NONE") && hasConfig(reconcilableTopic.kt())) {
-                addWarningCondition(reconcilableTopic, Reason.INVALID_CONFIG, format("All properties are ignored according to alterable config"));
-                return List.of();
-            } else {
-                // check spec config on topic creation
-                specConfig.forEach(prop -> {
-                    if (!alterableConfig.contains(prop) && !THROTTLING_CONFIG.contains(prop)) {
-                        addWarningCondition(reconcilableTopic, Reason.INVALID_CONFIG, format("Property %s is ignored according to alterable config", prop));
-                    }
-                });
-                // check determined alter operations on update
-                return alterConfigPairs.stream()
-                    .filter(pair -> Objects.equals(pair.getKey(), reconcilableTopic))
-                    .map(pair -> {
-                        Collection<AlterConfigOp> filteredOps = pair.getValue().stream()
-                            .filter(op -> {
-                                String propName = op.configEntry().name();
-                                return alterableConfig.contains(propName) || THROTTLING_CONFIG.contains(propName);
-                            })
-                            .collect(Collectors.toList());
-                        return new Pair<>(pair.getKey(), filteredOps);
-                    })
-                    .collect(Collectors.toList());
-            }
-        } else {
+    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filterOutNonAlterableConfig(
+            ReconcilableTopic reconcilableTopic,
+            List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> alterConfigPairs
+    ) {
+        var alterableConfigString = config.alterableTopicConfig();
+        boolean hasNonNullConfigs = hasConfig(reconcilableTopic.kt());
+        if (alterableConfigString == null
+                || alterableConfigString.equalsIgnoreCase("ALL")
+                || alterableConfigString.isEmpty()
+                || !hasNonNullConfigs) {
             return alterConfigPairs;
+        } else if (alterableConfigString.equalsIgnoreCase("NONE")) {
+            addWarningCondition(reconcilableTopic,
+                    Reason.INVALID_CONFIG,
+                    "All properties are ignored according to alterable config");
+            return List.of();
+        } else {
+            var alterableConfigs = Arrays.stream(alterableConfigString.replaceAll("\\s", "").split(",")).collect(Collectors.toSet());
+            reconcilableTopic.kt().getSpec().getConfig().keySet().stream()
+                    .filter(prop -> !alterableConfigs.contains(prop) && !THROTTLING_CONFIG.contains(prop))
+                    .sorted() // sorted to have a deterministic order for tests
+                    // check spec config on topic creation
+                    .forEach(prop -> {
+                addWarningCondition(reconcilableTopic, Reason.INVALID_CONFIG, format("Property %s is ignored according to alterable config", prop));
+            });
+            // check determined alter operations on update
+            return alterConfigPairs.stream()
+                .filter(pair -> Objects.equals(pair.getKey(), reconcilableTopic))
+                .map(pair -> {
+                    Collection<AlterConfigOp> filteredOps = pair.getValue().stream()
+                        .filter(op -> {
+                            String propName = op.configEntry().name();
+                            return alterableConfigs.contains(propName) || THROTTLING_CONFIG.contains(propName);
+                        })
+                        .toList();
+                    return new Pair<>(pair.getKey(), filteredOps);
+                })
+                .toList();
         }
     }
 

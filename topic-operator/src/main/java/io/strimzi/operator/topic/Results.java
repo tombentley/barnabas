@@ -6,6 +6,7 @@ package io.strimzi.operator.topic;
 
 import io.strimzi.operator.topic.model.Either;
 import io.strimzi.operator.topic.model.Pair;
+import io.strimzi.operator.topic.model.PartitionedByError;
 import io.strimzi.operator.topic.model.ReconcilableTopic;
 import io.strimzi.operator.topic.model.TopicOperatorException;
 
@@ -26,6 +27,11 @@ public class Results {
         errors.forEach(pair -> recordResult(pair.getKey(), Either.ofLeft(pair.getValue())));
     }
 
+    public void recordResults(PartitionedByError<ReconcilableTopic, ? extends Object> partitionedByError) {
+        recordRightResults(partitionedByError.ok());
+        recordLeftResults(partitionedByError.errors());
+    }
+
     public void recordRightResults(Stream<? extends Pair<ReconcilableTopic, ? extends Object>> ok) {
         ok.forEach(pair -> recordResult(pair.getKey(), Either.ofRight(null)));
     }
@@ -39,9 +45,9 @@ public class Results {
         results.compute(key, (k, v) -> {
             if (v == null) { // use given result if there is no existing result
                 return result;
-            } else if (v.isRight()) { // if the existing result was success use the given result
+            } else if (v.isRight()) { // if the existing result was success use the given result (errors beat successes)
                 return result;
-            } else { // otherwise the existing result must be an error, and "first error wins"
+            } else { // otherwise the existing result must be an error, the given result might also be an error, but "first error wins"
                 return v;
             }
         });
