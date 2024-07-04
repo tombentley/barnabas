@@ -110,6 +110,7 @@ public class BatchingTopicController {
     private final TopicOperatorMetricsHolder metrics;
     private final String namespace;
     private final ReplicasChangeHandler replicasChangeHandler;
+    private final Set<String> alterableConfigs;
 
     BatchingTopicController(TopicOperatorConfig config,
                             Map<String, String> selector,
@@ -138,6 +139,16 @@ public class BatchingTopicController {
         this.namespace = config.namespace();
         this.enableAdditionalMetrics = config.enableAdditionalMetrics();
         this.replicasChangeHandler = replicasChangeHandler;
+        var alterableConfigString = config.alterableTopicConfig();
+        if (alterableConfigString == null
+            || alterableConfigString.equalsIgnoreCase("ALL")
+            || alterableConfigString.isEmpty()) {
+            this.alterableConfigs = null;
+        } else if (alterableConfigString.equalsIgnoreCase("NONE")) {
+            this.alterableConfigs = Set.of();
+        } else {
+            this.alterableConfigs = Arrays.stream(alterableConfigString.replaceAll("\\s", "").split(",")).collect(Collectors.toSet());
+        }
     }
 
     /**
@@ -1118,6 +1129,9 @@ public class BatchingTopicController {
         List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> filteredAlterConfigPairs = new ArrayList<>();
         for (var reconcilableTopic : reconcilableTopics) {
             removeWarningConditions(reconcilableTopic, Reason.INVALID_CONFIG, null);
+            warnAboutNonAlterableConfig(reconcilableTopic);
+        }
+        for (var reconcilableTopic : reconcilableTopics) {
             var nonThrottlingConfigPairs = filterOutThrottlingConfig(alterConfigPairs);
             var alterableConfigPairs = filterOutNonAlterableConfig(reconcilableTopic, nonThrottlingConfigPairs);
             filteredAlterConfigPairs.addAll(alterableConfigPairs);
@@ -1184,27 +1198,13 @@ public class BatchingTopicController {
             ReconcilableTopic reconcilableTopic,
             List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> alterConfigPairs
     ) {
-        var alterableConfigString = config.alterableTopicConfig();
-        boolean hasNonNullConfigs = hasConfig(reconcilableTopic.kt());
-        if (alterableConfigString == null
-                || alterableConfigString.equalsIgnoreCase("ALL")
-                || alterableConfigString.isEmpty()
-                || !hasNonNullConfigs) {
-            return alterConfigPairs;
-        } else if (alterableConfigString.equalsIgnoreCase("NONE")) {
-            addWarningCondition(reconcilableTopic,
-                    Reason.INVALID_CONFIG,
-                    "All properties are ignored according to alterable config");
+        boolean hasNullConfigs = !hasConfig(reconcilableTopic.kt());
+        if (alterableConfigs == null
+                || hasNullConfigs) {
+            return alterConfigPairs; // TODO this cannot be correct: returning the list for _all_ RT's if reconcilableTopic has null configs
+        } else if (alterableConfigs.isEmpty()) {
             return List.of();
         } else {
-            var alterableConfigs = Arrays.stream(alterableConfigString.replaceAll("\\s", "").split(",")).collect(Collectors.toSet());
-            reconcilableTopic.kt().getSpec().getConfig().keySet().stream()
-                    .filter(prop -> !alterableConfigs.contains(prop) && !THROTTLING_CONFIG.contains(prop))
-                    .sorted() // sorted to have a deterministic order for tests
-                    // check spec config on topic creation
-                    .forEach(prop -> {
-                addWarningCondition(reconcilableTopic, Reason.INVALID_CONFIG, format("Property %s is ignored according to alterable config", prop));
-            });
             // check determined alter operations on update
             return alterConfigPairs.stream()
                 .filter(pair -> Objects.equals(pair.getKey(), reconcilableTopic))
@@ -1218,6 +1218,29 @@ public class BatchingTopicController {
                     return new Pair<>(pair.getKey(), filteredOps);
                 })
                 .toList();
+        }
+    }
+
+    private void warnAboutNonAlterableConfig(
+            ReconcilableTopic reconcilableTopic
+    ) {
+        boolean hasNullConfigs = !hasConfig(reconcilableTopic.kt());
+        if (alterableConfigs == null
+            || hasNullConfigs) {
+            return;
+        }
+        if (alterableConfigs.isEmpty()) {
+            addWarningCondition(reconcilableTopic,
+                    Reason.INVALID_CONFIG,
+                    "All properties are ignored according to alterable config");
+        } else {
+            reconcilableTopic.kt().getSpec().getConfig().keySet().stream()
+                    .filter(prop -> !alterableConfigs.contains(prop) && !THROTTLING_CONFIG.contains(prop))
+                    .sorted() // sorted to have a deterministic order for tests
+                    // check spec config on topic creation
+                    .forEach(prop -> {
+                        addWarningCondition(reconcilableTopic, Reason.INVALID_CONFIG, format("Property %s is ignored according to alterable config", prop));
+                    });
         }
     }
 
