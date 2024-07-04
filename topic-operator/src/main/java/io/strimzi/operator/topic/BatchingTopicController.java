@@ -6,7 +6,6 @@ package io.strimzi.operator.topic;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
-import io.micrometer.core.instrument.Timer;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.model.common.Condition;
 import io.strimzi.api.kafka.model.common.ConditionBuilder;
@@ -429,45 +428,47 @@ public class BatchingTopicController {
 
         // process remaining unmanaged
         List<ReconcilableTopic> unmanaged = partitionedByManaged.get(false);
-        updatedUnmanagedTopics(unmanaged, results);
+        results.addAll(updatedUnmanagedTopics(unmanaged));
 
         // process remaining managed, skipping paused KTs
         List<ReconcilableTopic> managed = partitionedByManaged.get(true);
-        updateManagedTopics(batch, managed, results, timerSamples);
+        results.addAll(updateManagedTopics(batch, managed));
 
         updateStatuses(results);
         timerSamples.keySet().forEach(rt -> stopReconciliationTimer(metrics, timerSamples.get(rt), namespace));
         LOGGER.traceOp("Reconciled batch of {} KafkaTopics", results.size());
     }
 
-    private void updateManagedTopics(
+    private Results updateManagedTopics(
             List<ReconcilableTopic> batch,
-            List<ReconcilableTopic> managedTopics,
-            Results results,
-            Map<ReconcilableTopic, Timer.Sample> timerSamples
+            List<ReconcilableTopic> managedTopics
     ) {
         var partitionedByPaused = validateManagedTopics(managedTopics).stream().filter(hasTopicSpec)
                 .collect(Collectors.partitioningBy(reconcilableTopic -> isPaused(reconcilableTopic.kt())));
+
+        Results results = new Results();
 
         List<ReconcilableTopic> paused = partitionedByPaused.get(true);
         results.recordRightResults(paused);
 
         List<ReconcilableTopic> mayNeedUpdate = partitionedByPaused.get(false);
-        updateNonPausedTopics(batch, results, timerSamples, mayNeedUpdate);
+        results.addAll(updateNonPausedTopics(batch, mayNeedUpdate));
+
+        return results;
     }
 
-    private void updateNonPausedTopics(
+    private Results updateNonPausedTopics(
             List<ReconcilableTopic> batch,
-            Results results,
-            Map<ReconcilableTopic, Timer.Sample> timerSamples,
             List<ReconcilableTopic> mayNeedUpdate
     ) {
         metrics.reconciliationsCounter(namespace).increment(mayNeedUpdate.size());
         var addedFinalizer = addOrRemoveFinalizer(useFinalizer, mayNeedUpdate);
         var currentStatesOrError = describeTopic(addedFinalizer);
 
+        Results results = new Results();
+
         // figure out necessary updates
-        createMissingTopics(results, currentStatesOrError);
+        results.addAll(createMissingTopics(currentStatesOrError));
         var alterConfigs = findConfigChanges(results, currentStatesOrError);
         var filteredAlterConfigs = filterConfigChanges(mayNeedUpdate, alterConfigs);
         var someCreatePartitions = findPartitionChanges(results, currentStatesOrError);
@@ -478,15 +479,26 @@ public class BatchingTopicController {
         var checkReplicasChangesResults = handleReplicasChanges(batch, currentStatesOrError);
 
         // update statuses
-        accumulateResults(results, alterConfigsResults, createPartitionsResults, checkReplicasChangesResults);
+        // add the successes to the results
+        results.recordRightResults(alterConfigsResults.ok());
+        results.recordRightResults(createPartitionsResults.ok());
+        results.recordRightResults(checkReplicasChangesResults.ok());
+
+        // add to errors (potentially overwriting some successes, e.g. if configs succeeded but partitions failed)
+        results.recordLeftResults(alterConfigsResults.errors());
+        results.recordLeftResults(createPartitionsResults.errors());
+        results.recordLeftResults(checkReplicasChangesResults.errors());
+
+        return results;
     }
 
-    private void updatedUnmanagedTopics(
-            List<ReconcilableTopic> unmanaged,
-            Results results
+    private Results updatedUnmanagedTopics(
+            List<ReconcilableTopic> unmanaged
     ) {
+        Results results = new Results();
         results.recordRightResults(addOrRemoveFinalizer(useFinalizer, unmanaged));
         metrics.reconciliationsCounter(namespace).increment(unmanaged.size());
+        return results;
     }
 
     /**
@@ -661,8 +673,7 @@ public class BatchingTopicController {
         return mayNeedUpdate;
     }
 
-    private void createMissingTopics(
-            Results results,
+    private Results createMissingTopics(
             PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError
     ) {
         var partitionedByUnknownTopic = currentStatesOrError.errors().collect(Collectors.partitioningBy(pair -> {
@@ -670,6 +681,8 @@ public class BatchingTopicController {
             return ex instanceof TopicOperatorException.KafkaError
                     && ex.getCause() instanceof UnknownTopicOrPartitionException;
         }));
+        Results results = new Results();
+
         results.recordLeftResults(partitionedByUnknownTopic.get(false).stream());
 
         if (!partitionedByUnknownTopic.get(true).isEmpty()) {
@@ -677,6 +690,8 @@ public class BatchingTopicController {
             results.recordRightResults(createResults.ok());
             results.recordLeftResults(createResults.errors());
         }
+
+        return results;
     }
 
     private void updateStatuses(Results results) {
@@ -686,21 +701,6 @@ public class BatchingTopicController {
         });
         results.forEachLeftResult(this::updateStatusForException);
         LOGGER.traceOp("Updated status of {} KafkaTopics", results.size());
-    }
-
-    private void accumulateResults(Results results,
-                                   PartitionedByError<ReconcilableTopic, Void> alterConfigsResults,
-                                   PartitionedByError<ReconcilableTopic, Void> createPartitionsResults,
-                                   PartitionedByError<ReconcilableTopic, Void> replicasChangeResults) {
-        // add the successes to the results
-        results.recordRightResults(alterConfigsResults.ok());
-        results.recordRightResults(createPartitionsResults.ok());
-        results.recordRightResults(replicasChangeResults.ok());
-
-        // add to errors (potentially overwriting some successes, e.g. if configs succeeded but partitions failed)
-        results.recordLeftResults(alterConfigsResults.errors());
-        results.recordLeftResults(createPartitionsResults.errors());
-        results.recordLeftResults(replicasChangeResults.errors());
     }
 
     private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> findConfigChanges(
@@ -717,8 +717,7 @@ public class BatchingTopicController {
 
         // add topics which don't require configs changes to the results (may be overwritten later)
         results.recordRightResults(alterConfigs.get(true).stream());
-        var someAlterConfigs = alterConfigs.get(false);
-        return someAlterConfigs;
+        return alterConfigs.get(false);
     }
 
     private List<Pair<ReconcilableTopic, NewPartitions>> findPartitionChanges(

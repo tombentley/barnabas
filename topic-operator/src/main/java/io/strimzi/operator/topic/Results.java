@@ -66,4 +66,10 @@ public class Results {
             }
         });
     }
+
+    public void addAll(Results results) {
+        for (var entry : results.results.entrySet()) {
+            this.recordResult(entry.getKey(), entry.getValue());
+        }
+    }
 }
