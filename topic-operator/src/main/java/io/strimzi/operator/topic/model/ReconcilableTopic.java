@@ -13,9 +13,9 @@ import java.util.Objects;
  * A topic to be reconciled.
  */
 public class ReconcilableTopic {
-    private Reconciliation reconciliation;
-    private KafkaTopic kt;
-    private String topicName;
+    private final Reconciliation reconciliation;
+    private final KafkaTopic kt;
+    private final String topicName;
 
     /**
      * @param reconciliation The reconciliation.

@@ -6,6 +6,7 @@ package io.strimzi.operator.topic;
 
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
+import io.micrometer.core.instrument.Timer;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.model.common.Condition;
 import io.strimzi.api.kafka.model.common.ConditionBuilder;
@@ -189,12 +190,15 @@ public class BatchingTopicController {
     }
 
     private List<ReconcilableTopic> addOrRemoveFinalizer(boolean useFinalizer, List<ReconcilableTopic> reconcilableTopics) {
-        List<ReconcilableTopic> collect = reconcilableTopics.stream()
+        List<ReconcilableTopic> updated = reconcilableTopics.stream()
                 .map(reconcilableTopic ->
-                        new ReconcilableTopic(reconcilableTopic.reconciliation(), useFinalizer ? addFinalizer(reconcilableTopic) : removeFinalizer(reconcilableTopic), reconcilableTopic.topicName()))
-                .collect(Collectors.toList());
+                        new ReconcilableTopic(
+                                reconcilableTopic.reconciliation(),
+                                useFinalizer ? addFinalizer(reconcilableTopic) : removeFinalizer(reconcilableTopic),
+                                reconcilableTopic.topicName()))
+                .toList();
         LOGGER.traceOp("{} {} topics", useFinalizer ? "Added finalizers to" : "Removed finalizers from", reconcilableTopics.size());
-        return collect;
+        return updated;
     }
 
     private KafkaTopic addFinalizer(ReconcilableTopic reconcilableTopic) {
@@ -419,24 +423,49 @@ public class BatchingTopicController {
         var remainingAfterDeletions = partitionedByDeletion.get(false);
         var timerSamples = remainingAfterDeletions.stream().collect(
             Collectors.toMap(identity(), rt -> startReconciliationTimer(metrics)));
-        Map<ReconcilableTopic, Either<TopicOperatorException, Object>> results = new HashMap<>();
         var partitionedByManaged = remainingAfterDeletions.stream().collect(Collectors.partitioningBy(reconcilableTopic -> TopicOperatorUtil.isManaged(reconcilableTopic.kt())));
-        
+
+        Results results = new Results();
+
         // process remaining unmanaged
-        var unmanaged = partitionedByManaged.get(false);
-        addOrRemoveFinalizer(useFinalizer, unmanaged).forEach(rt -> putResult(results, rt, Either.ofRight(null)));
-        metrics.reconciliationsCounter(namespace).increment(unmanaged.size());
+        List<ReconcilableTopic> unmanaged = partitionedByManaged.get(false);
+        updatedUnmanagedTopics(unmanaged, results);
 
         // process remaining managed, skipping paused KTs
-        var partitionedByPaused = validateManagedTopics(partitionedByManaged).stream().filter(hasTopicSpec)
-            .collect(Collectors.partitioningBy(reconcilableTopic -> isPaused(reconcilableTopic.kt())));
-        partitionedByPaused.get(true).forEach(reconcilableTopic -> putResult(results, reconcilableTopic, Either.ofRight(null)));
+        List<ReconcilableTopic> managed = partitionedByManaged.get(true);
+        updateManagedTopics(batch, managed, results, timerSamples);
 
-        var mayNeedUpdate = partitionedByPaused.get(false);
+        updateStatuses(results);
+        timerSamples.keySet().forEach(rt -> stopReconciliationTimer(metrics, timerSamples.get(rt), namespace));
+        LOGGER.traceOp("Reconciled batch of {} KafkaTopics", results.size());
+    }
+
+    private void updateManagedTopics(
+            List<ReconcilableTopic> batch,
+            List<ReconcilableTopic> managedTopics,
+            Results results,
+            Map<ReconcilableTopic, Timer.Sample> timerSamples
+    ) {
+        var partitionedByPaused = validateManagedTopics(managedTopics).stream().filter(hasTopicSpec)
+                .collect(Collectors.partitioningBy(reconcilableTopic -> isPaused(reconcilableTopic.kt())));
+
+        List<ReconcilableTopic> paused = partitionedByPaused.get(true);
+        results.recordRightResults(paused);
+
+        List<ReconcilableTopic> mayNeedUpdate = partitionedByPaused.get(false);
+        updateNonPausedTopics(batch, results, timerSamples, mayNeedUpdate);
+    }
+
+    private void updateNonPausedTopics(
+            List<ReconcilableTopic> batch,
+            Results results,
+            Map<ReconcilableTopic, Timer.Sample> timerSamples,
+            List<ReconcilableTopic> mayNeedUpdate
+    ) {
         metrics.reconciliationsCounter(namespace).increment(mayNeedUpdate.size());
         var addedFinalizer = addOrRemoveFinalizer(useFinalizer, mayNeedUpdate);
         var currentStatesOrError = describeTopic(addedFinalizer);
-        
+
         // figure out necessary updates
         createMissingTopics(results, currentStatesOrError);
         var alterConfigs = findConfigChanges(results, currentStatesOrError);
@@ -447,12 +476,17 @@ public class BatchingTopicController {
         var alterConfigsResults = alterConfigs(filteredAlterConfigs);
         var createPartitionsResults = createPartitions(someCreatePartitions);
         var checkReplicasChangesResults = handleReplicasChanges(batch, currentStatesOrError);
-        
+
         // update statuses
         accumulateResults(results, alterConfigsResults, createPartitionsResults, checkReplicasChangesResults);
-        updateStatuses(results);
-        timerSamples.keySet().forEach(rt -> stopReconciliationTimer(metrics, timerSamples.get(rt), namespace));
-        LOGGER.traceOp("Reconciled batch of {} KafkaTopics", results.size());
+    }
+
+    private void updatedUnmanagedTopics(
+            List<ReconcilableTopic> unmanaged,
+            Results results
+    ) {
+        results.recordRightResults(addOrRemoveFinalizer(useFinalizer, unmanaged));
+        metrics.reconciliationsCounter(namespace).increment(unmanaged.size());
     }
 
     /**
@@ -600,8 +634,8 @@ public class BatchingTopicController {
         return hasSpec;
     };
 
-    private List<ReconcilableTopic> validateManagedTopics(Map<Boolean, List<ReconcilableTopic>> partitionedByManaged) {
-        var mayNeedUpdate = partitionedByManaged.get(true).stream().filter(reconcilableTopic -> {
+    private List<ReconcilableTopic> validateManagedTopics(List<ReconcilableTopic> managed) {
+        var mayNeedUpdate = managed.stream().filter(reconcilableTopic -> {
             var e = validate(reconcilableTopic);
             if (e.isRightEqual(false)) {
                 // Do nothing
@@ -627,63 +661,52 @@ public class BatchingTopicController {
         return mayNeedUpdate;
     }
 
-    private static void putResult(Map<ReconcilableTopic, Either<TopicOperatorException, Object>> results, ReconcilableTopic key, Either<TopicOperatorException, Object> result) {
-        results.compute(key, (k, v) -> {
-            if (v == null) {
-                return result;
-            } else if (v.isRight()) {
-                return result;
-            } else {
-                return v;
-            }
-        });
-    }
-
-    private void createMissingTopics(Map<ReconcilableTopic, Either<TopicOperatorException, Object>> results, PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError) {
+    private void createMissingTopics(
+            Results results,
+            PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError
+    ) {
         var partitionedByUnknownTopic = currentStatesOrError.errors().collect(Collectors.partitioningBy(pair -> {
             var ex = pair.getValue();
             return ex instanceof TopicOperatorException.KafkaError
                     && ex.getCause() instanceof UnknownTopicOrPartitionException;
         }));
-        partitionedByUnknownTopic.get(false).forEach(pair -> putResult(results, pair.getKey(), Either.ofLeft(pair.getValue())));
+        results.recordLeftResults(partitionedByUnknownTopic.get(false).stream());
 
         if (!partitionedByUnknownTopic.get(true).isEmpty()) {
             var createResults = createTopics(partitionedByUnknownTopic.get(true).stream().map(Pair::getKey).toList());
-            createResults.ok().forEach(pair -> putResult(results, pair.getKey(), Either.ofRight(null)));
-            createResults.errors().forEach(pair -> putResult(results, pair.getKey(), Either.ofLeft(pair.getValue())));
+            results.recordRightResults(createResults.ok());
+            results.recordLeftResults(createResults.errors());
         }
     }
 
-    private void updateStatuses(Map<ReconcilableTopic, Either<TopicOperatorException, Object>> results) {
+    private void updateStatuses(Results results) {
         // Update statues with the overall results.
-        results.entrySet().stream().forEach(entry -> {
-            var reconcilableTopic = entry.getKey();
-            var either = entry.getValue();
-            if (either.isRight()) {
-                updateStatusForSuccess(reconcilableTopic);
-            } else {
-                updateStatusForException(reconcilableTopic, either.left());
-            }
+        results.forEachRightResult((reconcilableTopic, ignored) -> {
+            updateStatusForSuccess(reconcilableTopic);
         });
+        results.forEachLeftResult(this::updateStatusForException);
         LOGGER.traceOp("Updated status of {} KafkaTopics", results.size());
     }
 
-    private void accumulateResults(Map<ReconcilableTopic, Either<TopicOperatorException, Object>> results,
+    private void accumulateResults(Results results,
                                    PartitionedByError<ReconcilableTopic, Void> alterConfigsResults,
                                    PartitionedByError<ReconcilableTopic, Void> createPartitionsResults,
                                    PartitionedByError<ReconcilableTopic, Void> replicasChangeResults) {
         // add the successes to the results
-        alterConfigsResults.ok().forEach(pair -> putResult(results, pair.getKey(), Either.ofRight(null)));
-        createPartitionsResults.ok().forEach(pair -> putResult(results, pair.getKey(), Either.ofRight(null)));
-        replicasChangeResults.ok().forEach(pair -> putResult(results, pair.getKey(), Either.ofRight(null)));
+        results.recordRightResults(alterConfigsResults.ok());
+        results.recordRightResults(createPartitionsResults.ok());
+        results.recordRightResults(replicasChangeResults.ok());
 
         // add to errors (potentially overwriting some successes, e.g. if configs succeeded but partitions failed)
-        alterConfigsResults.errors().forEach(pair -> putResult(results, pair.getKey(), Either.ofLeft(pair.getValue())));
-        createPartitionsResults.errors().forEach(pair -> putResult(results, pair.getKey(), Either.ofLeft(pair.getValue())));
-        replicasChangeResults.errors().forEach(pair -> putResult(results, pair.getKey(), Either.ofLeft(pair.getValue())));
+        results.recordLeftResults(alterConfigsResults.errors());
+        results.recordLeftResults(createPartitionsResults.errors());
+        results.recordLeftResults(replicasChangeResults.errors());
     }
 
-    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> findConfigChanges(Map<ReconcilableTopic, Either<TopicOperatorException, Object>> results, PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError) {
+    private List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>> findConfigChanges(
+            Results results,
+            PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError
+    ) {
         // Determine config changes
         Map<Boolean, List<Pair<ReconcilableTopic, Collection<AlterConfigOp>>>> alterConfigs = currentStatesOrError.ok().map(pair -> {
             var reconcilableTopic = pair.getKey();
@@ -693,12 +716,15 @@ public class BatchingTopicController {
         }).collect(Collectors.partitioningBy(pair -> pair.getValue().isEmpty()));
 
         // add topics which don't require configs changes to the results (may be overwritten later)
-        alterConfigs.get(true).forEach(pair -> putResult(results, pair.getKey(), Either.ofRight(null)));
+        results.recordRightResults(alterConfigs.get(true).stream());
         var someAlterConfigs = alterConfigs.get(false);
         return someAlterConfigs;
     }
 
-    private List<Pair<ReconcilableTopic, NewPartitions>> findPartitionChanges(Map<ReconcilableTopic, Either<TopicOperatorException, Object>> results, PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError) {
+    private List<Pair<ReconcilableTopic, NewPartitions>> findPartitionChanges(
+            Results results,
+            PartitionedByError<ReconcilableTopic, TopicState> currentStatesOrError
+    ) {
         // Determine partition changes
         PartitionedByError<ReconcilableTopic, NewPartitions> newPartitionsOrError = partitionedByError(currentStatesOrError.ok().map(pair -> {
             var reconcilableTopic = pair.getKey();
@@ -706,12 +732,12 @@ public class BatchingTopicController {
             // determine config changes
             return new Pair<>(reconcilableTopic, buildNewPartitions(reconcilableTopic.reconciliation(), reconcilableTopic.kt(), currentState.numPartitions()));
         }));
-        newPartitionsOrError.errors().forEach(pair -> putResult(results, pair.getKey(), Either.ofLeft(pair.getValue())));
+        results.recordLeftResults(newPartitionsOrError.errors());
 
         var createPartitions = newPartitionsOrError.ok().collect(
                 Collectors.partitioningBy(pair -> pair.getValue() == null));
         // add topics which don't require partitions changes to the results (may be overwritten later)
-        createPartitions.get(true).forEach(pair -> putResult(results, pair.getKey(), Either.ofRight(null)));
+        results.recordRightResults(createPartitions.get(true).stream());
         var someCreatePartitions = createPartitions.get(false);
         return someCreatePartitions;
     }
